@@ -15,3 +15,7 @@ export * from "./lineup.ts";
 export * from "./waivers.ts";
 export * from "./trades.ts";
 export * from "./schedule.ts";
+export * from "./optimal.ts";
+export * from "./standings.ts";
+export * from "./scoring.ts";
+export * from "./carryover.ts";
