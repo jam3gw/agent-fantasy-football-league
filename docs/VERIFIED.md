@@ -64,3 +64,15 @@ Engine default updated in `packages/engine/src/settings.ts`. The M2 TS test (15.
 ## 2026-08-28 — Sleeper player statuses (§3.6)
 
 `GET https://api.sleeper.app/v1/players/nfl` (12,225 players; active fantasy subset cached at `fixtures/sleeper/players_active.json`). `injury_status` uses short forms (`IR`, `PUP`, `Sus`, `Doubtful`, `Questionable`, `NA`, `DNR`); `status` uses long forms (`Active`, `Injured Reserve`, `Inactive`, `Physically Unable to Perform`, `Practice Squad`, `Non Football Injury`). The IR-eligible default now includes the long forms so the §3.6 "injury_status or status" check works against real data.
+
+## 2026-08-28 — Next.js 16.2.4 breaking changes (AGENTS.md requirement)
+
+Read from the bundled docs at `node_modules/next/dist/docs/` before writing any `apps/web` code, per AGENTS.md. What actually differs from older Next.js and therefore governs this codebase:
+
+- **Async request APIs (breaking).** `cookies()`, `headers()`, `draftMode()`, and `params`/`searchParams` in `layout`, `page`, `route`, `default` are Promises; synchronous access was removed in 16. Every dynamic route and the commissioner auth read must `await` them.
+- **`middleware.ts` → `proxy.ts`.** The named export becomes `proxy`. The `edge` runtime is not supported in `proxy` (it is nodejs, not configurable). Config flags renamed (`skipMiddlewareUrlNormalize` → `skipProxyUrlNormalize`). Commissioner cookie checks therefore live in `proxy.ts` on the Node runtime — which suits us, since the engine needs Node.
+- **`revalidateTag(tag)` now requires a `cacheLife` profile** as a second argument; the one-argument form is a TypeScript error. `updateTag(tag)` is the new Server-Actions-only read-your-writes API.
+- **Turbopack is the default** for `next dev` and `next build`; a custom webpack config makes the build fail rather than silently fall back.
+- **`next lint` was removed** and `next build` no longer lints — CI runs ESLint directly, which this repo already does.
+- **Route handlers are not cached by default**, which is what the public JSON API and `/api/draft/state` need (§12.1 asks for `no-store` on draft state). Page-level `export const revalidate = N` still applies for the 30 s live / 5 min default rendering rule.
+- Node 20.9+ and TypeScript 5.1+ minimums; the Vercel project is Node 24.x, so this is satisfied.
