@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 import { formatEt } from "@league/shared";
 import { getSettings, sessions, teams } from "@league/engine";
 import { LEAGUE_MODELS } from "@league/agent";

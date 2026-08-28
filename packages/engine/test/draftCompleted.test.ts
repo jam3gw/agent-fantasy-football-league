@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
-import { SEASON, makeGame, makePlayer, seedLeague, seedTeams } from "./helpers/factories.ts";
+import { makeGame, makePlayer, seedLeague, seedTeams } from "./helpers/factories.ts";
 import { handleEvent } from "../src/events.ts";
 import { getSettings } from "../src/settings.ts";
 import { draft, matchups, players, scheduledJobs, sessions, teams } from "../src/db/schema.ts";
@@ -22,7 +22,7 @@ afterEach(async () => {
 });
 
 /** A drafted league on the eve of week 1. */
-async function seedDraftedLeague(clock: FixedClock) {
+async function seedDraftedLeague() {
   await seedLeague(db, { phase: "drafting", currentWeek: 1 });
   const ids = await seedTeams(db);
   await db.insert(draft).values({ id: 1, status: "complete", order: ids, currentPick: 168 });
@@ -36,7 +36,7 @@ async function seedDraftedLeague(clock: FixedClock) {
 describe("draft.completed (§9.3)", () => {
   it("starts the season: phase, start_week, free agents, waiver order, schedule, sessions", async () => {
     const clock = new FixedClock("2026-09-05T20:00:00Z"); // before week 1's kickoff
-    const ids = await seedDraftedLeague(clock);
+    const ids = await seedDraftedLeague();
     // A player left over on waivers from the pre-draft period.
     await makePlayer(db, { playerId: "leftover", waiverUntil: new Date("2026-09-20T00:00:00Z") });
 
@@ -79,7 +79,7 @@ describe("draft.completed (§9.3)", () => {
   it("a late draft starts at the first week that has not kicked off yet (§3.7)", async () => {
     // The draft finishes after week 1 and week 2 have already kicked off.
     const clock = new FixedClock("2026-09-18T12:00:00Z");
-    await seedDraftedLeague(clock);
+    await seedDraftedLeague();
 
     await handleEvent(db, clock, { type: "draft.completed" });
 
@@ -90,7 +90,7 @@ describe("draft.completed (§9.3)", () => {
 
   it("is idempotent: running it twice does not double up sessions or matchups", async () => {
     const clock = new FixedClock("2026-09-05T20:00:00Z");
-    await seedDraftedLeague(clock);
+    await seedDraftedLeague();
 
     await handleEvent(db, clock, { type: "draft.completed" });
     const firstSessions = (await db.select().from(sessions)).length;
@@ -103,7 +103,7 @@ describe("draft.completed (§9.3)", () => {
 
   it("skips a paused team when booking the post-draft reviews", async () => {
     const clock = new FixedClock("2026-09-05T20:00:00Z");
-    const ids = await seedDraftedLeague(clock);
+    const ids = await seedDraftedLeague();
     await db.update(teams).set({ paused: true }).where(eq(teams.id, ids[0]!));
 
     await handleEvent(db, clock, { type: "draft.completed" });
