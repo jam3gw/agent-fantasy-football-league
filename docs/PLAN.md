@@ -51,3 +51,4 @@ Maps each milestone (SPEC.md §16) to the packages, tables, workflows, routes, a
 - [ ] §13.2 Sleeper game-finished signal — currently 4.5 hours after kickoff plus the nflverse status; confirm in week 1.
 - [ ] §8.9 whether the Google Cloud trial credit covers Anthropic models on Vertex — commissioner console; Sonnet is left on the gateway until then.
 - [ ] App G Neon integration set `DATABASE_URL` in the Vercel project — confirm in Settings → Environment Variables.
+- [x] §12.1 cache windows reach the CDN — **done 2026-08-28**, probed on the deployed preview: only `export const revalidate` works, and a dynamic segment needs `generateStaticParams` to be cached at all. Details in VERIFIED.md.

@@ -2,6 +2,50 @@
 
 Each entry: date, the request made, what came back. Items marked **verify** in SPEC.md land here.
 
+## 2026-08-28 — §12.1 cache windows on the real CDN (Next 16 + Vercel)
+
+Established by probing the deployed preview, not by reading docs.
+
+- **A page's own `Cache-Control` beats everything else.** A page rendered per
+  request (`export const dynamic = "force-dynamic"`, or any page that reads
+  `searchParams`) answers
+  `private, no-cache, no-store, max-age=0, must-revalidate`, and that value
+  overrides both `proxy.ts` response headers and `next.config` `headers()`.
+  Two attempts at setting the §12.1 windows in those places had no effect
+  whatsoever on the live response.
+- **`export const revalidate` is the only thing that works**, and what it
+  produces is not an `s-maxage` header: Vercel holds the copy itself and sends
+  the client `public, max-age=0, must-revalidate`. The evidence that the
+  window is in force is `x-vercel-cache: HIT` / `PRERENDER`, which every ISR
+  page now returns.
+- **A dynamic segment with no `generateStaticParams` is a server-rendered
+  route**, and `revalidate` does not apply to it. `/matchups/1`, `/sessions/1`
+  and `/players/…` answered `no-store` with `x-vercel-cache: MISS` on every
+  repeat request until each declared the export — even an empty list is
+  enough to make Next treat the route as static-with-revalidation.
+- **postgres-js retries connections with exponential backoff**
+  (`(0.5 + rand/2) × min(3^retries/100, 20)` seconds) and keeps the retry
+  count *shared across the pool*, never resetting it until a connection
+  succeeds. With no database reachable, a page issuing a dozen reads therefore
+  waited minutes: `/`, `/spend` and `/standings` each blew past Next's
+  60-second per-page prerender budget and failed the build three times running.
+  `backoff: () => 0` is the fix.
+
+Live probe of the preview after the fix (`x-vercel-cache`): `/` HIT; `/about`,
+`/standings`, `/draft`, `/board`, `/report`, `/waivers`, `/trades`,
+`/benchmark`, `/spend`, `/matchups/1`, `/matchups/18` PRERENDER; `/sessions/…`,
+`/players/…`, `/spend/…` MISS then cacheable (`public`, no longer `no-store`);
+`/transactions` and `/teams/…` deliberately per-request (they read
+`searchParams`).
+
+## 2026-08-28 — Vercel deployment protection
+
+`ssoProtection` is enabled for `all_except_custom_domains`. Preview URLs and
+the `*.vercel.app` production URL therefore sit behind Vercel Authentication;
+only the custom domain will serve the public site (§2, §12.1). Cron requests
+from Vercel bypass it. Nothing to change before launch — the site simply
+becomes public when the domain is attached (§17).
+
 ## 2026-08-28 — AI Gateway model catalog (§8.1)
 
 Request: `GET https://ai-gateway.vercel.sh/v1/models` (no auth needed for the catalog). 359 models returned.
