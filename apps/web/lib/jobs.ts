@@ -1,0 +1,285 @@
+import "server-only";
+/**
+ * Job dispatch and the recurring job table (SPEC §9.1).
+ *
+ * Booking is idempotent through `scheduled_jobs.idempotency_key`, so a missed
+ * tick never loses a schedule and `book_daily_jobs` can re-book freely.
+ */
+import { eq } from "drizzle-orm";
+import type { Clock } from "@league/shared";
+import { etDay, jobKey, nextEtTime, nextEtWeekdayTime, sessionKey, zonedTimeToUtc } from "@league/shared";
+import type { EngineDb } from "@league/engine";
+import {
+  carryOverLineups,
+  createSession,
+  getSettings,
+  runWaivers,
+  scheduledJobs,
+  teams,
+} from "@league/engine";
+import {
+  fetchAllPlayers,
+  fetchSeasonStats,
+  fetchSchedule,
+  fetchTrendingAdds,
+  fetchWeekProjections,
+  fetchWeekStats,
+  parseGames,
+  upsertGames,
+  upsertPlayers,
+  upsertProjections,
+  upsertTrending,
+  upsertWeekStats,
+} from "@league/data";
+import { reporterModelId } from "@league/engine";
+import { finalizeWeek } from "./finalize";
+import { runAgentSession } from "./runSession";
+
+/** Book a job unless its idempotency key already exists. */
+export async function bookJob(
+  db: EngineDb,
+  type: string,
+  dueAt: Date,
+  payload: Record<string, unknown> = {},
+  key?: string,
+): Promise<void> {
+  await db
+    .insert(scheduledJobs)
+    .values({
+      type,
+      dueAt,
+      payload,
+      idempotencyKey: key ?? jobKey(type, dueAt.toISOString()),
+    })
+    .onConflictDoNothing({ target: scheduledJobs.idempotencyKey });
+}
+
+/**
+ * Run one job. Errors propagate so the tick marks the row failed with the
+ * message — the scheduler retries on the next booking, not silently here.
+ */
+export async function runJob(
+  db: EngineDb,
+  clock: Clock,
+  type: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const settings = await getSettings(db);
+  const season = settings.season;
+
+  switch (type) {
+    case "ingest.players": {
+      const raw = await fetchAllPlayers({ db });
+      await upsertPlayers(db, clock, raw);
+      return;
+    }
+    case "ingest.trending": {
+      await upsertTrending(db, await fetchTrendingAdds({ db }));
+      return;
+    }
+    case "ingest.schedule": {
+      const csv = await fetchSchedule({ db });
+      await upsertGames(db, parseGames(csv, season));
+      return;
+    }
+    case "ingest.stats": {
+      const week = Number(payload.week ?? settings.currentWeek);
+      const entries = await fetchWeekStats(season, week, { db });
+      await upsertWeekStats(db, { season, week, entries, markFinal: false });
+      return;
+    }
+    case "ingest.projections": {
+      const week = Number(payload.week ?? settings.currentWeek);
+      const entries = await fetchWeekProjections(season, week, { db });
+      if (entries) await upsertProjections(db, { season, week, entries });
+      return;
+    }
+    case "ingest.season_stats": {
+      const entries = await fetchSeasonStats(season - 1, { db });
+      await upsertWeekStats(db, { season: season - 1, week: 0, entries, markFinal: true });
+      return;
+    }
+    case "waivers.run": {
+      await runWaivers(db, clock, clock.now());
+      return;
+    }
+    case "stats.finalize": {
+      await finalizeWeek(db, clock, Number(payload.week ?? settings.currentWeek));
+      return;
+    }
+    case "week.plan": {
+      await planWeek(db, clock, Number(payload.week ?? settings.currentWeek));
+      return;
+    }
+    case "book_daily_jobs": {
+      await bookRecurringJobs(db, clock);
+      return;
+    }
+    case "session.run": {
+      await runAgentSession(Number(payload.sessionId));
+      return;
+    }
+    case "sessions.book": {
+      await bookSessionsForKind(db, clock, String(payload.kind), payload);
+      return;
+    }
+    case "reporter.run": {
+      await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek));
+      return;
+    }
+    case "digest.weekly": {
+      const { sendWeeklyDigest } = await import("./digest");
+      await sendWeeklyDigest(db, clock);
+      return;
+    }
+    default:
+      throw new Error(`unknown job type: ${type}`);
+  }
+}
+
+/**
+ * Recurring jobs (§9.1 table), booked for the next 48 hours. Idempotent, so
+ * `book_daily_jobs` at 12:05 AM ET simply tops the queue back up.
+ */
+export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<number> {
+  const now = clock.now();
+  const settings = await getSettings(db);
+  let booked = 0;
+  const book = async (type: string, at: Date, payload: Record<string, unknown> = {}) => {
+    if (at.getTime() < now.getTime() - 60_000) return;
+    await bookJob(db, type, at, payload);
+    booked++;
+  };
+
+  // Two calendar days ahead.
+  for (let dayOffset = 0; dayOffset <= 2; dayOffset++) {
+    const base = new Date(now.getTime() + dayOffset * 24 * 3600_000);
+    const [y, m, d] = etDay(base).split("-").map(Number);
+    const at = (hh: number, mm: number) => zonedTimeToUtc(y!, m!, d!, hh, mm);
+
+    await book("ingest.schedule", at(5, 0));
+    await book("ingest.fp_rankings", at(5, 30));
+    await book("ingest.fp_injuries", at(5, 35));
+    await book("waivers.run", at(4, 30));
+    await book("book_daily_jobs", at(0, 5));
+    await book("ingest.projections", at(6, 0));
+
+    // Players every 6 hours; hourly Friday noon → Monday midnight is handled
+    // by the extra bookings below.
+    for (const hour of [0, 6, 12, 18]) await book("ingest.players", at(hour, 0));
+    for (let hour = 0; hour < 24; hour++) await book("ingest.trending", at(hour, 5));
+  }
+
+  // Weekly fixtures relative to now.
+  const nextTue4 = nextEtWeekdayTime(now, 2, 4, 0);
+  await book("stats.finalize", nextTue4, { week: settings.currentWeek });
+  await book("sessions.book", nextEtWeekdayTime(now, 2, 9, 0), { kind: "weekly_review" });
+  await book("reporter.run", nextEtWeekdayTime(now, 2, 11, 0), { kind: "reporter_recap" });
+  await book("digest.weekly", nextEtWeekdayTime(now, 2, 11, 30));
+  await book("sessions.book", nextEtWeekdayTime(now, 3, 9, 0), { kind: "post_waivers" });
+  await book("reporter.run", nextEtWeekdayTime(now, 4, 10, 0), { kind: "reporter_preview" });
+  // Trade windows: Wednesday–Saturday at noon ET (§2: four per week).
+  for (const dow of [3, 4, 5, 6]) {
+    const at = nextEtWeekdayTime(now, dow, 12, 0);
+    if (settings.currentWeek <= settings.tradeDeadlineWeek) {
+      await book("sessions.book", at, { kind: "trade_window", date: etDay(at) });
+    }
+  }
+  return booked;
+}
+
+/** One session per active team, staggered a minute apart (§9.1). */
+async function bookSessionsForKind(
+  db: EngineDb,
+  clock: Clock,
+  kind: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const settings = await getSettings(db);
+  // Job gating (§4.3): agent sessions only in season and from start_week.
+  if (!["regular", "playoffs"].includes(settings.phase)) return;
+  if (settings.currentWeek < settings.startWeek) return;
+
+  const allTeams = await db.select().from(teams);
+  const active = allTeams.filter((t) => !t.paused && !t.eliminated);
+  const now = clock.now();
+  const suffix = String(payload.date ?? payload.window ?? settings.currentWeek);
+
+  let i = 0;
+  for (const team of active) {
+    await createSession(db, settings, {
+      teamId: team.id,
+      kind: kind as never,
+      trigger: `job:${kind}`,
+      idempotencyKey: sessionKey(team.id, kind, settings.season, settings.currentWeek, suffix),
+      modelId: team.modelId,
+      dueAt: new Date(now.getTime() + i * 60_000),
+      now,
+      context: { week: settings.currentWeek },
+    });
+    i++;
+  }
+}
+
+async function bookReporterSession(
+  db: EngineDb,
+  clock: Clock,
+  kind: string,
+  week: number,
+): Promise<void> {
+  const settings = await getSettings(db);
+  await createSession(db, settings, {
+    teamId: null,
+    kind: kind as never,
+    trigger: `job:${kind}`,
+    idempotencyKey: sessionKey("reporter", kind, settings.season, week, week),
+    modelId: reporterModelId(settings),
+    dueAt: clock.now(),
+    now: clock.now(),
+    context: { week },
+  });
+}
+
+/**
+ * weekPlanWorkflow (§9.2): refresh the schedule, carry lineups over, group
+ * kickoffs into windows and book a lineup check 90 minutes before each, book
+ * the week's session jobs, and seed or advance the playoffs.
+ */
+export async function planWeek(db: EngineDb, clock: Clock, week: number): Promise<void> {
+  const settings = await getSettings(db);
+
+  // (1) schedule refresh
+  try {
+    const csv = await fetchSchedule({ db });
+    await upsertGames(db, parseGames(csv, settings.season));
+  } catch {
+    // A stale schedule must not stop the week from being planned; the health
+    // page shows the failed fetch.
+  }
+
+  // (2) carry lineups over from the previous week
+  if (week > 1) await carryOverLineups(db, clock, week - 1);
+
+  // (3) lineup-check windows + (4) session jobs + (5) playoffs
+  const { bookLineupChecks, seedOrAdvancePlayoffs } = await import("./weekPlan");
+  await bookLineupChecks(db, clock, week);
+  await bookRecurringJobs(db, clock);
+  await seedOrAdvancePlayoffs(db, clock, week);
+}
+
+/** Convenience for the admin "run now" button. */
+export async function bookJobNow(db: EngineDb, clock: Clock, type: string, payload: Record<string, unknown> = {}): Promise<void> {
+  const at = clock.now();
+  await bookJob(db, type, at, payload, `${jobKey(type, at.toISOString())}:manual`);
+}
+
+/** Next daily waiver run instant, for display. */
+export function nextWaiverRun(settings: { waiverRunTimeEt: string }, now: Date): Date {
+  const [hh, mm] = settings.waiverRunTimeEt.split(":").map(Number);
+  return nextEtTime(now, hh ?? 4, mm ?? 30, { strict: true });
+}
+
+/** Look up a job by key (admin page). */
+export async function findJob(db: EngineDb, key: string) {
+  return (await db.select().from(scheduledJobs).where(eq(scheduledJobs.idempotencyKey, key)))[0];
+}
