@@ -35,16 +35,19 @@ Maps each milestone (SPEC.md §16) to the packages, tables, workflows, routes, a
 ## M8 — Hardening → M9 — Go-live
 - Retry/degradation paths, `/admin/health`, provider-outage detection, `docs/RUNBOOK.md`, load/timing (§15.4), security review (§15.5), §17 checklist.
 
-## Verify checklist (record results in docs/VERIFIED.md)
-- [x] §8.1 Gateway model IDs — **done 2026-08-28**: 10/12 exact; `google/gemini-3.1-pro-preview` (not `-pro`), `spacexai/grok-4.6` (xAI → `spacexai/` prefix). Prices + context captured for `model_prices`.
-- [ ] §3.2/App A `scoring_settings` fit reproduces `pts_ppr` (2025 W1–3 fixtures)
-- [ ] §5.3 Sleeper weekly stats shape (2025 now; re-verify 2026 Week 1)
-- [ ] §5.5 nflverse schedules URL (reachable 2026-08-28; confirm columns)
-- [ ] §5.6 nflverse player-stats release/file naming
-- [ ] §5.7/5.8 FP free-tier daily cap + truncation counts (needs `FANTASYPROS_API_KEY`)
-- [ ] §5.8 consensus-rankings default `type` behavior (needs key)
-- [ ] §8.7 gateway cost field in provider metadata (needs gateway key, M3)
-- [ ] §8.1 any provider requiring a max-output field (M3, per model)
-- [ ] §13.2 Sleeper game-finished signal
-- [ ] §8.9 Google trial credit applies to Anthropic on Vertex (commissioner console)
-- [ ] App G Neon integration set `DATABASE_URL` in Vercel env
+## Verify checklist (results recorded in docs/VERIFIED.md)
+- [x] §8.1 Gateway model IDs — **done 2026-08-28**: 10/12 exact; `google/gemini-3.1-pro-preview` and `spacexai/grok-4.6` corrected. Prices captured for `model_prices`.
+- [x] §3.2/App A `scoring_settings` fit — **done**: fitted against all 18 weeks of 2025 (6,053/6,057 exact). Two corrections to Appendix A.
+- [x] §5.3 Sleeper weekly stats shape — **done** for 2025; re-verify against 2026 Week 1 in season.
+- [x] §5.5 nflverse schedules URL and columns — **done**; the 2026 opener matches §3.7 exactly.
+- [x] §3.6 Sleeper status vocabularies — **done**; IR-eligible defaults extended with the long forms Sleeper uses in `status`.
+- [x] Next.js 16 breaking changes (AGENTS.md) — **done**; async request APIs, `middleware`→`proxy`, `revalidateTag` arity, Turbopack default, `next lint` removed.
+- [x] §8.9 gateway BYOK option shape — **done**; `byok` and `only` confirmed against the installed gateway provider's types.
+- [ ] §5.6 nflverse player-stats release naming — both known names are tried at runtime; confirm which responds for 2026.
+- [ ] §5.7/5.8 FantasyPros free-tier daily cap and truncation counts — needs `FANTASYPROS_API_KEY`.
+- [ ] §5.8 consensus-rankings default `type` behaviour — needs the key.
+- [ ] §8.7 gateway cost field in provider metadata — needs a real gateway call; the code prefers it and falls back to the price table.
+- [ ] §8.1 any provider that requires a max-output field — needs one real call per model.
+- [ ] §13.2 Sleeper game-finished signal — currently 4.5 hours after kickoff plus the nflverse status; confirm in week 1.
+- [ ] §8.9 whether the Google Cloud trial credit covers Anthropic models on Vertex — commissioner console; Sonnet is left on the gateway until then.
+- [ ] App G Neon integration set `DATABASE_URL` in the Vercel project — confirm in Settings → Environment Variables.
