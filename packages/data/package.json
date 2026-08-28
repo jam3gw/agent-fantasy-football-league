@@ -20,6 +20,9 @@
     "eslint": "^9.39.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "@electric-sql/pglite": "^0.3.5",
+    "drizzle-kit": "^0.31.4",
+    "@types/node": "^22"
   }
 }
