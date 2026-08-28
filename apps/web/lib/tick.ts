@@ -29,7 +29,9 @@ import { runJob } from "./jobs";
 export interface TickSummary {
   claimed: number;
   jobsRun: number;
+  jobsStarted: number;
   jobsFailed: number;
+  jobsReleased: number;
   gamesStarted: number;
   livePolled: boolean;
   offersExpired: number;
@@ -42,6 +44,22 @@ export interface TickSummary {
 
 /** Jobs claimed per tick. Generous: the queue is small and each job is quick to start. */
 const MAX_JOBS_PER_TICK = 20;
+/**
+ * Jobs cheap enough to finish inside the tick: they only book rows or start
+ * another workflow of their own. Everything else is handed to `jobWorkflow`.
+ */
+const INLINE_JOB_TYPES = new Set([
+  "book_daily_jobs",
+  "sessions.book",
+  "reporter.run",
+  "session.run",
+  "draft.run",
+  "stats.finalize",
+]);
+
+/** How long a claimed job may sit before the queue takes it back. */
+const CLAIM_STALE_MS = 15 * 60_000;
+
 /** Queued sessions examined per tick. More than the cap, so expiries are seen too. */
 const MAX_QUEUED_SESSIONS_PER_TICK = 40;
 const LIVE_POLL_MIN_INTERVAL_MS = 55_000;
@@ -55,7 +73,9 @@ export async function runTick(): Promise<TickSummary> {
   const summary: TickSummary = {
     claimed: 0,
     jobsRun: 0,
+    jobsStarted: 0,
     jobsFailed: 0,
+    jobsReleased: 0,
     gamesStarted: 0,
     livePolled: false,
     offersExpired: 0,
@@ -86,6 +106,27 @@ export async function runTick(): Promise<TickSummary> {
     const id = Number(row.id);
     const type = String(row.type);
     const payload = (row.payload ?? {}) as Record<string, unknown>;
+
+    // §9.1: heavy jobs are *started*, not run here. The tick has one minute
+    // and 800 seconds for everything below as well — a player ingest or a
+    // waiver run inside it would starve the live score poll.
+    if (!INLINE_JOB_TYPES.has(type)) {
+      try {
+        const { start } = await import("workflow/api");
+        const { jobWorkflow } = await import("../workflows/job");
+        await start(jobWorkflow, [id, type, payload]);
+        // The row stays `claimed` until the workflow reports its outcome.
+        summary.jobsStarted++;
+      } catch (err) {
+        await database
+          .update(scheduledJobs)
+          .set({ status: "failed", doneAt: clock.now(), error: `could not start: ${String(err)}` })
+          .where(eq(scheduledJobs.id, id));
+        summary.jobsFailed++;
+      }
+      continue;
+    }
+
     try {
       await runJob(database, clock, type, payload);
       await database
@@ -101,6 +142,10 @@ export async function runTick(): Promise<TickSummary> {
       summary.jobsFailed++;
     }
   }
+
+  // A job claimed by a tick whose workflow never started would sit `claimed`
+  // for good. Put anything stale back in the queue.
+  summary.jobsReleased = await releaseStaleClaims(database, clock);
 
   // 1b. Sessions still waiting for one of the six slots (§9.2's wait-for-slot).
   // A session whose job already ran but that lost the concurrency race is left
@@ -133,6 +178,17 @@ export async function runTick(): Promise<TickSummary> {
     .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: clock.now() } });
 
   return summary;
+}
+
+/** Return jobs whose claiming tick died before their workflow started. */
+async function releaseStaleClaims(database: EngineDb, clock: Clock): Promise<number> {
+  const cutoff = new Date(clock.now().getTime() - CLAIM_STALE_MS);
+  const rows = await database
+    .update(scheduledJobs)
+    .set({ status: "due", claimedAt: null })
+    .where(and(eq(scheduledJobs.status, "claimed"), lte(scheduledJobs.claimedAt, cutoff)))
+    .returning({ id: scheduledJobs.id });
+  return rows.length;
 }
 
 /**

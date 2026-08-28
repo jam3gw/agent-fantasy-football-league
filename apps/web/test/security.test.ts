@@ -226,6 +226,27 @@ describe("§15.5 — public surface", () => {
     expect(nextConfig).toContain("/admin/:path*");
   });
 
+  it("every commissioner server action re-checks auth itself", () => {
+    // The proxy guards /admin/* and /api/admin/*, but a server action is its
+    // own POST endpoint: it is reachable by its action id from any page, so
+    // the proxy must never be the only gate (§15.5, defence in depth).
+    const source = readFileSync(fileURLToPath(new URL("../lib/adminActions.ts", import.meta.url)), "utf8");
+
+    // Every exported action must go through `ctx()`, which calls `guard()`,
+    // or call the guard itself.
+    const actions = [...source.matchAll(/export async function (\w+Action)\s*\(([\s\S]*?)\n\}/g)];
+    expect(actions.length, "no server actions found — the regex is wrong").toBeGreaterThan(10);
+    const unguarded = actions
+      .filter(([, , body]) => !/await ctx\(\)|await guard\(\)/.test(body ?? ""))
+      .map(([, name]) => name);
+    expect(unguarded).toEqual([]);
+
+    // And the guard itself is the cookie check, not a comment about one.
+    expect(source).toMatch(/async function guard\(\)/);
+    const guardBody = source.slice(source.indexOf("async function guard()"));
+    expect(guardBody.slice(0, 400)).toContain("isCommissioner()");
+  });
+
   it("the cron route requires CRON_SECRET", () => {
     const source = readFileSync(
       fileURLToPath(new URL("../app/api/cron/tick/route.ts", import.meta.url)),
