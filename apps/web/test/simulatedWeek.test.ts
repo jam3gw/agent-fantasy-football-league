@@ -257,7 +257,7 @@ describe("simulated week (§15.3)", () => {
     }
 
     // --- Live scoring -------------------------------------------------------
-    const live = await scoreWeek(db, 1);
+    const live = await scoreWeek(db, clock, 1);
     expect(live).toHaveLength(6);
     expect(live.every((m) => m.homePoints > 0 && m.awayPoints > 0)).toBe(true);
     expect((await db.select().from(matchups))[0]!.final).toBe(false);

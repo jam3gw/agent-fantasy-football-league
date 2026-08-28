@@ -1,4 +1,5 @@
 /** Sleeper weekly stats ingest (SPEC §5.3, §3.2): upsert player_week_stats with engine_pts and discrepancy logging. */
+import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import { getSettings, playerWeekProj, playerWeekStats, scoringDiscrepancies } from "@league/engine";
 import type { SleeperStatsEntry } from "../sleeper.ts";
@@ -14,6 +15,7 @@ export function computeEnginePts(scoring: Record<string, number>, stats: Record<
 
 export async function upsertWeekStats(
   db: EngineDb,
+  clock: Clock,
   input: {
     season: number;
     week: number;
@@ -40,7 +42,7 @@ export async function upsertWeekStats(
         enginePts,
         source: input.source ?? ("sleeper" as const),
         final: input.markFinal,
-        updatedAt: new Date(),
+        updatedAt: clock.now(),
       };
       await tx
         .insert(playerWeekStats)

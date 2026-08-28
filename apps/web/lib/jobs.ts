@@ -34,6 +34,15 @@ import {
 import { reporterModelId } from "@league/engine";
 import { env } from "./env";
 
+/**
+ * §4.3 job gating: `waivers.run`, every `sessions.*` job, the `reporter.*`
+ * jobs and lineup-check booking run only once the season is under way. Ingest
+ * jobs and `stats.finalize` always run.
+ */
+function inSeason(settings: { phase: string; currentWeek: number; startWeek: number }): boolean {
+  return ["regular", "playoffs"].includes(settings.phase) && settings.currentWeek >= settings.startWeek;
+}
+
 /** Book a job unless its idempotency key already exists. */
 export async function bookJob(
   db: EngineDb,
@@ -84,7 +93,7 @@ export async function runJob(
     case "ingest.stats": {
       const week = Number(payload.week ?? settings.currentWeek);
       const entries = await fetchWeekStats(season, week, { db });
-      await upsertWeekStats(db, { season, week, entries, markFinal: false });
+      await upsertWeekStats(db, clock, { season, week, entries, markFinal: false });
       return;
     }
     case "ingest.projections": {
@@ -95,10 +104,11 @@ export async function runJob(
     }
     case "ingest.season_stats": {
       const entries = await fetchSeasonStats(season - 1, { db });
-      await upsertWeekStats(db, { season: season - 1, week: 0, entries, markFinal: true });
+      await upsertWeekStats(db, clock, { season: season - 1, week: 0, entries, markFinal: true });
       return;
     }
     case "waivers.run": {
+      if (!inSeason(settings)) return; // §4.3 job gating
       await runWaivers(db, clock, clock.now());
       return;
     }
@@ -129,6 +139,7 @@ export async function runJob(
       return;
     }
     case "reporter.run": {
+      if (!inSeason(settings)) return; // §4.3 job gating
       await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek));
       return;
     }
@@ -204,10 +215,33 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
     await book("book_daily_jobs", at(0, 5));
     await book("ingest.projections", at(6, 0));
 
-    // Players every 6 hours; hourly Friday noon → Monday midnight is handled
-    // by the extra bookings below.
+    // Day of the week in ET for this calendar day: 0 = Sunday.
+    const dow = new Date(zonedTimeToUtc(y!, m!, d!, 12, 0)).getUTCDay();
+    const gameDay = dow === 0 || dow >= 4; // Thursday–Monday (§9.1)
+
+    // §9.1: players every 6 hours, and hourly across the game-day stretch
+    // (Friday noon → Monday midnight) because that is when the status changes
+    // that drive `injury.changed` land (§5.1).
     for (const hour of [0, 6, 12, 18]) await book("ingest.players", at(hour, 0));
+    const hourlyFrom = dow === 5 ? 12 : dow === 6 || dow === 0 || dow === 1 ? 0 : null;
+    if (hourlyFrom !== null) {
+      for (let hour = hourlyFrom; hour < 24; hour++) await book("ingest.players", at(hour, 0));
+    }
+
     for (let hour = 0; hour < 24; hour++) await book("ingest.trending", at(hour, 5));
+
+    // §9.1: stats every 30 minutes on game days. The tick polls per minute
+    // while a game is live, so these fill the gaps between games — a game that
+    // finished at 4 PM is final long before the next kickoff.
+    if (gameDay) {
+      for (let hour = 0; hour < 24; hour++) {
+        await book("ingest.stats", at(hour, 15), { week: settings.currentWeek });
+        await book("ingest.stats", at(hour, 45), { week: settings.currentWeek });
+      }
+    }
+
+    // §9.1: the optional Sunday injuries pull for the site.
+    if (dow === 0) await book("ingest.fp_injuries", at(11, 0));
   }
 
   // Weekly fixtures relative to now.
@@ -236,9 +270,7 @@ async function bookSessionsForKind(
   payload: Record<string, unknown>,
 ): Promise<void> {
   const settings = await getSettings(db);
-  // Job gating (§4.3): agent sessions only in season and from start_week.
-  if (!["regular", "playoffs"].includes(settings.phase)) return;
-  if (settings.currentWeek < settings.startWeek) return;
+  if (!inSeason(settings)) return; // §4.3 job gating
 
   const allTeams = await db.select().from(teams);
   const active = allTeams.filter((t) => !t.paused && !t.eliminated);

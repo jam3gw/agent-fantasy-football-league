@@ -72,6 +72,7 @@ export async function teamWeekPoints(
  */
 export async function scoreWeek(
   db: EngineDb,
+  clock: Clock,
   week: number,
 ): Promise<Array<{ matchupId: number; homePoints: number; awayPoints: number }>> {
   const settings = await getSettings(db);
@@ -82,7 +83,7 @@ export async function scoreWeek(
     const awayPoints = await teamWeekPoints(db, settings.season, m.awayTeamId, week);
     await db
       .update(matchups)
-      .set({ homePoints, awayPoints, updatedAt: new Date() })
+      .set({ homePoints, awayPoints, updatedAt: clock.now() })
       .where(eq(matchups.id, m.id));
     out.push({ matchupId: m.id, homePoints, awayPoints });
   }
@@ -132,7 +133,7 @@ export async function finalizeWeekCore(
 
       await tx
         .update(matchups)
-        .set({ homePoints, awayPoints, final: true, winnerTeamId, updatedAt: new Date() })
+        .set({ homePoints, awayPoints, final: true, winnerTeamId, updatedAt: clock.now() })
         .where(eq(matchups.id, m.id));
 
       for (const [teamId, actual] of [

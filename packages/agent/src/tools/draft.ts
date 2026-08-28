@@ -574,7 +574,10 @@ export const makePickTool = defineTool({
 
     return ctx.db.transaction(async (tx): Promise<ToolResult> => {
       const settings = await getSettings(tx);
-      const row = (await tx.select().from(draft).where(eq(draft.id, 1)))[0];
+      // Locked for the pick: an auto-pick firing on the same clock expiry
+      // would otherwise collide on the draft_picks primary key and throw,
+      // instead of one of the two simply finding the pick already made.
+      const row = (await tx.select().from(draft).where(eq(draft.id, 1)).for("update"))[0];
       if (!row) return toolFailure("draft_not_running", "the draft has not been set up yet");
       if (row.status !== "running") {
         return toolFailure("draft_not_running", `the draft is '${row.status}', not running`, "wait for the draft to resume");

@@ -46,7 +46,7 @@ export default async function AdminSettingsPage({
   const extra = settings.extra as Record<string, unknown>;
   const structureLocked = settings.phase !== "pre_draft";
   const guards = { ...DEFAULT_SESSION_GUARDS, ...((extra.sessionGuards as Record<string, unknown>) ?? {}) };
-  const pauseAt = extra.pauseAgentAtUsd;
+  const pauseAt = extra.pause_agent_at_usd;
 
   return (
     <>

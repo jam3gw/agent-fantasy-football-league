@@ -9,15 +9,16 @@
  * temperature. Provider defaults. The only guards are the tool-call ceiling
  * and the deadline (§8.3).
  */
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
-import { getSettings, sessionGuard, sessionEvents, sessions, teams } from "@league/engine";
+import { getSettings, modelPrices, sessionGuard, sessionEvents, sessions, teams } from "@league/engine";
 import { writeDecisionLog } from "@league/engine";
 import type { LeagueTool, ToolContext, ToolResult } from "./tools/types.ts";
 import { toolFailure } from "./tools/types.ts";
 import type { BilledTo } from "./models.ts";
-import { computeStepCost, evaluateAlarms, recordSpend, toolCallCost, updateRollups } from "./spend.ts";
+import { MODEL_PRICE_SEED } from "./models.ts";
+import { applyOptionalPause, computeStepCost, evaluateAlarms, recordSpend, toolCallCost, updateRollups } from "./spend.ts";
 import type { UsageTokens } from "./spend.ts";
 
 /** The ending tool per session kind (§8.2 step 4). */
@@ -71,12 +72,19 @@ export interface RunSessionDeps {
   toolConfig: ToolContext["config"];
   /** Optional hook so the draft workflow can stop the loop when the pick is gone. */
   shouldContinue?: () => Promise<boolean>;
+  /**
+   * Wall-clock budget for this invocation (§4.1: a workflow step is capped at
+   * 800 seconds). When it runs out mid-session the loop stops between model
+   * calls and returns `interrupted`; the workflow starts another step, which
+   * resumes from the transcript. Omit for no budget (tests, inline runs).
+   */
+  stepBudgetMs?: number;
   /** Notification sink for fired cost alarms; alarms never stop a session. */
   onAlarms?: (alarms: Awaited<ReturnType<typeof evaluateAlarms>>) => Promise<void>;
 }
 
 export interface RunSessionResult {
-  status: "succeeded" | "failed" | "timed_out" | "skipped";
+  status: "succeeded" | "failed" | "timed_out" | "skipped" | "queued" | "interrupted";
   endedBy: "ending_tool" | "ceiling" | "deadline" | null;
   toolCalls: number;
   invalidToolCalls: number;
@@ -104,6 +112,168 @@ async function recordEvent(
   });
 }
 
+
+/**
+ * The model's context window: the gateway's own figure, kept in `model_prices`
+ * by the catalog sync, with the seed table as a fallback. A model we have no
+ * figure for is left alone rather than guessed at.
+ */
+async function contextWindowFor(db: EngineDb, modelId: string): Promise<number | null> {
+  const rows = await db.select({ contextWindow: modelPrices.contextWindow }).from(modelPrices).where(eq(modelPrices.modelId, modelId));
+  const stored = rows[0]?.contextWindow;
+  if (typeof stored === "number" && stored > 0) return stored;
+  return MODEL_PRICE_SEED[modelId]?.contextWindow ?? null;
+}
+
+/**
+ * §8.1 context management. Do nothing until the history approaches the model's
+ * context window, then replace the OLDEST tool results with one-line stubs.
+ * The model's own messages are never touched — an agent that cannot see what it
+ * said stops making sense — and the most recent results stay whole, because
+ * those are the ones the next step is reasoning about.
+ */
+const CONTEXT_KEEP_RECENT_TOOL_MESSAGES = 3;
+
+/** Reserve for the next prompt's growth: a tenth of the window, never under 8k. */
+export function contextSafetyMargin(contextWindow: number): number {
+  return Math.max(Math.round(contextWindow * 0.1), 8_000);
+}
+
+/**
+ * Stub the oldest tool results in place. Returns how many were stubbed, so a
+ * caller can record it in the transcript and skip the work when it is zero.
+ */
+export function stubOldestToolResults(messages: ModelMessage[], keepRecent = CONTEXT_KEEP_RECENT_TOOL_MESSAGES): number {
+  const toolMessageIndexes = messages.flatMap((m, i) => (m.role === "tool" ? [i] : []));
+  const stubbable = toolMessageIndexes.slice(0, Math.max(0, toolMessageIndexes.length - keepRecent));
+  let stubbed = 0;
+  for (const index of stubbable) {
+    const message = messages[index]!;
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content as Array<Record<string, unknown>>) {
+      if (part.type !== "tool-result") continue;
+      const already = (part.output as { context_trimmed?: boolean } | undefined)?.context_trimmed;
+      if (already) continue;
+      part.output = {
+        context_trimmed: true,
+        note: `Result of ${String(part.toolName)} removed to stay inside the context window. Call it again if you still need it.`,
+      };
+      stubbed++;
+    }
+  }
+  return stubbed;
+}
+
+
+/**
+ * §4.1/§9.2: one model call is one durable step, and a step is capped at 800
+ * seconds. A session that reaches its budget stops cleanly and its workflow
+ * calls another step, which resumes here — the transcript in `session_events`
+ * is the durable state, so nothing is held in memory between steps.
+ *
+ * Everything the loop needs comes back out of the transcript: the exact
+ * messages the model saw, the sequence number to write next, and the counters
+ * the loop guards depend on.
+ */
+export interface RestoredSession {
+  messages: ModelMessage[];
+  seq: number;
+  steps: number;
+  toolCalls: number;
+  invalidToolCalls: number;
+  ceilingNudged: boolean;
+  invalidNudged: boolean;
+  endingToolSucceeded: boolean;
+}
+
+export async function restoreSession(
+  db: EngineDb,
+  sessionId: number,
+  endingTool: string,
+): Promise<RestoredSession | null> {
+  const rows = await db
+    .select()
+    .from(sessionEvents)
+    .where(eq(sessionEvents.sessionId, sessionId))
+    .orderBy(asc(sessionEvents.seq));
+  if (rows.length === 0) return null;
+
+  const messages: ModelMessage[] = [];
+  const restored: RestoredSession = {
+    messages,
+    seq: (rows[rows.length - 1]!.seq ?? 0) + 1,
+    steps: 0,
+    toolCalls: 0,
+    invalidToolCalls: 0,
+    ceilingNudged: false,
+    invalidNudged: false,
+    endingToolSucceeded: false,
+  };
+
+  // Tool results are grouped into one message per assistant turn, keyed by the
+  // ids the assistant message itself carries.
+  let pendingToolResults: Array<{ toolCallId: string; toolName: string; output: unknown }> = [];
+  const flushToolResults = () => {
+    if (pendingToolResults.length === 0) return;
+    messages.push({
+      role: "tool",
+      content: pendingToolResults.map((r) => ({
+        type: "tool-result",
+        toolCallId: r.toolCallId,
+        toolName: r.toolName,
+        output: r.output,
+      })),
+    } as ModelMessage);
+    pendingToolResults = [];
+  };
+
+  for (const row of rows) {
+    const content = row.content as Record<string, unknown>;
+    switch (row.type) {
+      case "system":
+        messages.push({ role: "system", content: String(content.prompt ?? "") });
+        break;
+      case "user": {
+        flushToolResults();
+        const text =
+          typeof content.text === "string"
+            ? content.text
+            : `${String(content.brief ?? "")}\n\n${JSON.stringify(content.snapshot ?? {})}`;
+        messages.push({ role: "user", content: text });
+        if (content.nudge === "ceiling") restored.ceilingNudged = true;
+        if (content.nudge === "invalid_calls") restored.invalidNudged = true;
+        break;
+      }
+      case "assistant": {
+        flushToolResults();
+        if (content.closing_step) break; // the closing step is never resumed
+        restored.steps++;
+        if (content.raw) messages.push(content.raw as unknown as ModelMessage);
+        break;
+      }
+      case "tool_result": {
+        const result = content.result as { ok?: boolean; error?: string } | undefined;
+        const name = String(content.name ?? "");
+        if (result?.error === "invalid_args") restored.invalidToolCalls++;
+        else restored.toolCalls++;
+        if (name === endingTool && result?.ok !== false) restored.endingToolSucceeded = true;
+        const id = content.tool_call_id;
+        if (typeof id === "string") {
+          pendingToolResults.push({ toolCallId: id, toolName: name, output: result });
+        }
+        break;
+      }
+      default:
+        break; // tool_call, error and info rows are transcript-only
+    }
+  }
+  flushToolResults();
+
+  // Without a system message there is nothing coherent to resume from.
+  if (messages.length === 0 || messages[0]!.role !== "system") return null;
+  return restored;
+}
+
 export async function runSession(sessionId: number, deps: RunSessionDeps): Promise<RunSessionResult> {
   const { db, clock } = deps;
   const settings = await getSettings(db);
@@ -127,9 +297,12 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
     return { status: "skipped", endedBy: "deadline", toolCalls: 0, invalidToolCalls: 0, steps: 0 };
   }
 
+  // The caller may already have claimed a slot and marked the row running
+  // (apps/web `claimSlot`); this is a no-op then, and the start for a direct
+  // caller that has no concurrency to manage.
   await db
     .update(sessions)
-    .set({ status: "running", startedAt: clock.now(), updatedAt: clock.now() })
+    .set({ status: "running", startedAt: session.startedAt ?? clock.now(), updatedAt: clock.now() })
     .where(eq(sessions.id, sessionId));
 
   const ctx: ToolContext = {
@@ -144,25 +317,39 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
   };
 
   const toolsByName = new Map(deps.tools.map((t) => [t.name, t]));
-  const systemPrompt = await deps.buildSystemPrompt(ctx);
-  const { brief, snapshot } = await deps.buildContext(ctx);
 
-  const messages: ModelMessage[] = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: `${brief}\n\n${JSON.stringify(snapshot)}` },
-  ];
+  // A session interrupted by the step cap picks up exactly where it stopped;
+  // a fresh one builds its prompt and context snapshot (§8.2 steps 1 and 3).
+  const restored = await restoreSession(db, sessionId, endingTool);
+  let messages: ModelMessage[];
+  let seq: number;
+  if (restored) {
+    messages = restored.messages;
+    seq = restored.seq;
+    await recordEvent(db, clock, sessionId, seq++, "info", { resumed: true, steps_so_far: restored.steps });
+  } else {
+    const systemPrompt = await deps.buildSystemPrompt(ctx);
+    const { brief, snapshot } = await deps.buildContext(ctx);
+    messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: `${brief}\n\n${JSON.stringify(snapshot)}` },
+    ];
+    seq = 0;
+    await recordEvent(db, clock, sessionId, seq++, "system", { prompt: systemPrompt });
+    await recordEvent(db, clock, sessionId, seq++, "user", { brief, snapshot });
+  }
 
-  let seq = 0;
-  await recordEvent(db, clock, sessionId, seq++, "system", { prompt: systemPrompt });
-  await recordEvent(db, clock, sessionId, seq++, "user", { brief, snapshot });
-
-  let toolCalls = 0;
-  let invalidToolCalls = 0;
-  let steps = 0;
+  let toolCalls = restored?.toolCalls ?? 0;
+  let invalidToolCalls = restored?.invalidToolCalls ?? 0;
+  let steps = restored?.steps ?? 0;
   let endedBy: RunSessionResult["endedBy"] = null;
-  let endingToolSucceeded = false;
-  let ceilingNudged = false;
-  let invalidNudged = false;
+  let endingToolSucceeded = restored?.endingToolSucceeded ?? false;
+  let ceilingNudged = restored?.ceilingNudged ?? false;
+  let invalidNudged = restored?.invalidNudged ?? false;
+  let lastInputTokens = 0;
+  const contextWindow = await contextWindowFor(db, session.modelId);
+  const budgetEndsAt =
+    deps.stepBudgetMs === undefined ? null : new Date(clock.now().getTime() + deps.stepBudgetMs);
 
   try {
     // Step 4 of §8.2.
@@ -172,12 +359,33 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
         break;
       }
       if (deps.shouldContinue && !(await deps.shouldContinue())) break;
+      if (budgetEndsAt !== null && clock.now() >= budgetEndsAt) {
+        // Out of step budget between model calls, which is the only safe place
+        // to stop: every call and result so far is already in the transcript.
+        await recordEvent(db, clock, sessionId, seq++, "info", { interrupted: "step_budget", steps });
+        return { status: "interrupted", endedBy: null, toolCalls, invalidToolCalls, steps };
+      }
+
+      // §8.1: the previous step's input tokens are the real measure of how big
+      // this prompt has grown, so compaction happens only once it actually
+      // nears the window — never pre-emptively.
+      if (contextWindow !== null && lastInputTokens > contextWindow - contextSafetyMargin(contextWindow)) {
+        const stubbed = stubOldestToolResults(messages);
+        if (stubbed > 0) {
+          await recordEvent(db, clock, sessionId, seq++, "info", {
+            context_trimmed: stubbed,
+            input_tokens: lastInputTokens,
+            context_window: contextWindow,
+          });
+        }
+      }
 
       const result = await deps.modelStep(
         { modelId: session.modelId, messages, tools: deps.tools },
         steps,
       );
       steps++;
+      lastInputTokens = result.usage.inputTokens + result.usage.cachedInputTokens;
 
       const { costUsd, source } = await computeStepCost(
         db,
@@ -200,13 +408,21 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       const alarms = await evaluateAlarms(db, clock, { sessionId, teamId: session.teamId });
       // Alarms notify; they never stop a session (§8.1).
       if (alarms.length > 0 && deps.onAlarms) await deps.onAlarms(alarms);
+      // The one exception, off by default (§8.7): a commissioner-set season
+      // limit pauses the agent. It takes effect from the next session — this
+      // one still finishes, because a session cut off mid-way leaves the
+      // league without the decision it was booked to make.
+      if (session.teamId !== null) await applyOptionalPause(db, clock, session.teamId);
 
       await recordEvent(db, clock, sessionId, seq++, "assistant", {
         text: result.text,
-        tool_calls: result.toolCalls.map((c) => ({ name: c.toolName, args: c.args })),
+        tool_calls: result.toolCalls.map((c) => ({ name: c.toolName, args: c.args, id: c.toolCallId })),
         usage: result.usage,
         cost_usd: costUsd,
         billed_to: result.billedTo,
+        // Kept verbatim so a session interrupted by the 800-second step cap can
+        // be replayed exactly as the model saw it (§4.1, §9.2).
+        raw: result.assistantMessage as unknown as Record<string, unknown>,
       });
       messages.push(result.assistantMessage);
 
@@ -261,8 +477,16 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
             if (tool.ending && out.ok !== false) endingToolSucceeded = true;
           }
         }
-        await recordEvent(db, clock, sessionId, seq++, "tool_call", { name: call.toolName, args: call.args });
-        await recordEvent(db, clock, sessionId, seq++, "tool_result", { name: call.toolName, result: out });
+        await recordEvent(db, clock, sessionId, seq++, "tool_call", {
+          name: call.toolName,
+          args: call.args,
+          tool_call_id: call.toolCallId,
+        });
+        await recordEvent(db, clock, sessionId, seq++, "tool_result", {
+          name: call.toolName,
+          result: out,
+          tool_call_id: call.toolCallId,
+        });
         toolResults.push({ toolCallId: call.toolCallId, toolName: call.toolName, result: out });
       }
 
@@ -284,11 +508,9 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       // §8.8: nudge after five invalid tool calls.
       if (invalidToolCalls >= INVALID_CALL_NUDGE_AT && !invalidNudged) {
         invalidNudged = true;
-        messages.push({
-          role: "user",
-          content:
-            "Five invalid tool calls. Read the tool schemas and try once more, or write your decision log.",
-        });
+        const text = "Five invalid tool calls. Read the tool schemas and try once more, or write your decision log.";
+        messages.push({ role: "user", content: text });
+        await recordEvent(db, clock, sessionId, seq++, "user", { text, nudge: "invalid_calls" });
       }
 
       // §8.3: at the ceiling, one final message and one more model step.
@@ -298,11 +520,9 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
           break;
         }
         ceilingNudged = true;
-        messages.push({
-          role: "user",
-          content: `Tool-call ceiling reached. Call ${endingTool} now.`,
-        });
-        await recordEvent(db, clock, sessionId, seq++, "info", { ceiling_reached: ceiling });
+        const text = `Tool-call ceiling reached. Call ${endingTool} now.`;
+        messages.push({ role: "user", content: text });
+        await recordEvent(db, clock, sessionId, seq++, "user", { text, nudge: "ceiling", ceiling_reached: ceiling });
       }
     }
 

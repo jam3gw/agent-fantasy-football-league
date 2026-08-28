@@ -165,7 +165,8 @@ export const submitWaiverClaimsTool = defineTool({
   description:
     "Replace your pending waiver claim list. Each claim adds one player on waivers and may drop one of " +
     "yours; priority orders your own claims (1 first). Calling it again replaces the whole list, so send " +
-    "every claim you still want. Free agents are not claimable — use add_free_agent.",
+    "every claim you still want. Free agents are not claimable — use add_free_agent. Invalid claims are " +
+    "rejected one by one and come back in `rejected`; the valid ones are still saved.",
   schema: submitWaiverClaimsSchema,
   execute: async (args, ctx) => {
     const teamId = requireTeam(ctx);
@@ -181,14 +182,23 @@ export const submitWaiverClaimsTool = defineTool({
       })),
     );
     if (!result.ok) return fromEngineFailure(result);
+    // §7.2: claims are rejected per claim. The valid ones are the team's new
+    // pending list; the invalid ones come back with a reason so the agent can
+    // fix and resubmit them without losing the rest.
     return {
       ok: true,
-      claims: result.value.map((c) => ({
+      claims: result.value.accepted.map((c) => ({
         claim_id: c.id,
         add_player_id: c.addPlayerId,
         drop_player_id: c.dropPlayerId,
         priority: c.priority,
         status: c.status,
+      })),
+      rejected: result.value.rejected.map((f) => ({
+        add_player_id: f.addPlayerId,
+        error: f.error,
+        message: f.message,
+        ...(f.hint ? { hint: f.hint } : {}),
       })),
     };
   },
@@ -266,8 +276,11 @@ export const dropPlayerTool = defineTool({
 
 const proposeTradeSchema = z.object({
   to_team_id: z.number().int(),
-  give_player_ids: z.array(z.string().min(1)).min(1).max(15),
-  get_player_ids: z.array(z.string().min(1)).min(1).max(15),
+  // The engine's rule is one player somewhere in the offer, not one on each
+  // side (§7.5) — a straight give-away is a legal trade, and a schema that
+  // refused it made the tool stricter than the league.
+  give_player_ids: z.array(z.string().min(1)).max(15),
+  get_player_ids: z.array(z.string().min(1)).max(15),
   message: z.string().max(MAX_TRADE_MESSAGE_CHARS).optional(),
 });
 

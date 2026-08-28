@@ -474,7 +474,11 @@ export async function voteOnTrade(
     if (reason.length > MAX_VOTE_REASON_CHARS) {
       return fail("too_long", `vote reason must be at most ${MAX_VOTE_REASON_CHARS} characters`);
     }
-    const tradeRows = await tx.select().from(trades).where(eq(trades.id, tradeId));
+    // Lock the trade row for the whole vote. Two votes arriving together would
+    // otherwise both read three allows, both insert, and both try to execute —
+    // the second finding the players already moved and failing a trade that
+    // had in fact succeeded.
+    const tradeRows = await tx.select().from(trades).where(eq(trades.id, tradeId)).for("update");
     const trade = tradeRows[0];
     if (!trade) return fail("not_found", `trade ${tradeId} not found`);
     if (trade.status !== "accepted") {

@@ -226,9 +226,15 @@ export async function handleEvent(db: EngineDb, clock: Clock, event: EngineEvent
       return;
     }
 
-    // Handled by the trade engine itself; nothing extra here (§9.3).
+    // Handled by the trade engine itself; nothing extra here (§9.3). These
+    // must stay separate from draft.completed below: they fire on every vote
+    // of every trade, and the season setup is emphatically not idempotent
+    // against a mid-season league (it rewinds current_week to start_week and
+    // clears every waiver window).
     case "trade.vote_cast":
     case "trade.failed":
+      return;
+
     case "draft.completed": {
       await handleDraftCompleted(db, clock, settings);
       return;
@@ -321,6 +327,18 @@ async function handleDraftCompleted(db: EngineDb, clock: Clock, settings: League
     now,
     context: { week: startWeek },
   });
+
+  // §12.3: the commissioner digest also goes out once after the draft, not
+  // only on Tuesdays — the draft is the biggest thing that happens all season.
+  await db
+    .insert(scheduledJobs)
+    .values({
+      type: "digest.weekly",
+      dueAt: new Date(now.getTime() + 30 * 60_000),
+      payload: { week: startWeek, reason: "draft" },
+      idempotencyKey: `job:digest.weekly:${fresh.season}:draft`,
+    })
+    .onConflictDoNothing({ target: scheduledJobs.idempotencyKey });
 
   // Finally, plan the first week (the job runner starts weekPlanWorkflow).
   await db

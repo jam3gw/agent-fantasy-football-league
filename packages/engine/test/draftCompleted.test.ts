@@ -9,7 +9,7 @@ import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { makeGame, makePlayer, seedLeague, seedTeams } from "./helpers/factories.ts";
 import { handleEvent } from "../src/events.ts";
 import { getSettings } from "../src/settings.ts";
-import { draft, matchups, players, scheduledJobs, sessions, teams } from "../src/db/schema.ts";
+import { draft, leagueSettings, matchups, players, scheduledJobs, sessions, teams } from "../src/db/schema.ts";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -111,4 +111,36 @@ describe("draft.completed (§9.3)", () => {
     expect(reviews).toHaveLength(11);
     expect(reviews.some((r) => r.teamId === ids[0]!)).toBe(false);
   });
+});
+
+describe("trade events never run the season setup (§9.3)", () => {
+  // `trade.vote_cast` fires on every vote of every trade. Sharing a case with
+  // `draft.completed` rewound the league to its first week, cleared every
+  // waiver window and reset the rolling waiver order — mid-season, ten times
+  // per trade.
+  it.each(["trade.vote_cast", "trade.failed"] as const)(
+    "%s leaves settings, waiver windows and waiver order alone",
+    async (type) => {
+      const clock = new FixedClock("2026-10-20T15:00:00Z");
+      await seedDraftedLeague();
+      await db.update(leagueSettings).set({ phase: "regular", startWeek: 1, currentWeek: 7 }).where(eq(leagueSettings.id, 1));
+      const teamRows = await db.select().from(teams);
+      // A rolling waiver order that has already moved away from reverse draft.
+      await db.update(teams).set({ waiverPriority: 1 }).where(eq(teams.id, teamRows[3]!.id));
+      const until = new Date("2026-10-22T09:00:00Z");
+      await makePlayer(db, { playerId: "on-waivers", waiverUntil: until });
+      const sessionsBefore = (await db.select().from(sessions)).length;
+
+      await handleEvent(db, clock, { type, tradeId: 1 } as never);
+
+      const settings = await getSettings(db);
+      expect(settings.currentWeek).toBe(7);
+      expect(settings.phase).toBe("regular");
+      const player = (await db.select().from(players).where(eq(players.playerId, "on-waivers")))[0]!;
+      expect(player.waiverUntil?.toISOString()).toBe(until.toISOString());
+      const after = await db.select().from(teams);
+      expect(after.find((t) => t.id === teamRows[3]!.id)!.waiverPriority).toBe(1);
+      expect((await db.select().from(sessions)).length).toBe(sessionsBefore);
+    },
+  );
 });

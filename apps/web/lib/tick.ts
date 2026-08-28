@@ -7,7 +7,7 @@ import "server-only";
  *  4. injury changes (handled inside the players ingest)
  *  5. expire stale offers and resolve trades whose review window ended
  */
-import { and, eq, lte, sql } from "drizzle-orm";
+import { and, asc, eq, lte, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import {
@@ -19,6 +19,7 @@ import {
   resolveEndedReviews,
   scheduledJobs,
   scoreWeek,
+  sessions,
 } from "@league/engine";
 import { db, leagueClock } from "./db";
 import { detectModelOutages, requeueFailedSessions, teamsForModels } from "./retry";
@@ -34,11 +35,15 @@ export interface TickSummary {
   offersExpired: number;
   tradesResolved: number;
   sessionsRequeued: number;
+  sessionsStarted: number;
+  sessionsExpired: number;
   outages: number;
 }
 
 /** Jobs claimed per tick. Generous: the queue is small and each job is quick to start. */
 const MAX_JOBS_PER_TICK = 20;
+/** Queued sessions examined per tick. More than the cap, so expiries are seen too. */
+const MAX_QUEUED_SESSIONS_PER_TICK = 40;
 const LIVE_POLL_MIN_INTERVAL_MS = 55_000;
 const GAME_LENGTH_MS = 4.5 * 3600_000;
 
@@ -56,6 +61,8 @@ export async function runTick(): Promise<TickSummary> {
     offersExpired: 0,
     tradesResolved: 0,
     sessionsRequeued: 0,
+    sessionsStarted: 0,
+    sessionsExpired: 0,
     outages: 0,
   };
 
@@ -95,6 +102,14 @@ export async function runTick(): Promise<TickSummary> {
     }
   }
 
+  // 1b. Sessions still waiting for one of the six slots (§9.2's wait-for-slot).
+  // A session whose job already ran but that lost the concurrency race is left
+  // `queued`; without this it would wait forever, because the job row is
+  // already `done`.
+  const swept = await startQueuedSessions(database, clock);
+  summary.sessionsStarted = swept.started;
+  summary.sessionsExpired = swept.expired;
+
   // 2. Games that kicked off since the last tick.
   summary.gamesStarted = await startKickedOffGames(database, clock);
 
@@ -120,20 +135,86 @@ export async function runTick(): Promise<TickSummary> {
   return summary;
 }
 
+/**
+ * Start queued sessions whose turn has come, oldest first, and expire the ones
+ * whose deadline passed while they waited (§8.3, §9.2).
+ *
+ * The slot claim itself is atomic, so this can stop as soon as one session
+ * fails to get a slot: the league is at its cap and the rest wait a minute.
+ * A session that has no team never blocks on the per-team rule, so it is only
+ * the cap that can stop us — hence the plain loop rather than a per-team scan.
+ */
+async function startQueuedSessions(
+  database: EngineDb,
+  clock: Clock,
+): Promise<{ started: number; expired: number }> {
+  const now = clock.now();
+  const queued = await database
+    .select({ id: sessions.id, teamId: sessions.teamId, context: sessions.context })
+    .from(sessions)
+    .where(eq(sessions.status, "queued"))
+    .orderBy(asc(sessions.createdAt))
+    .limit(MAX_QUEUED_SESSIONS_PER_TICK);
+
+  let started = 0;
+  let expired = 0;
+  for (const session of queued) {
+    const raw = session.context.deadline_at;
+    const deadlineAt = typeof raw === "string" ? new Date(raw) : null;
+    if (deadlineAt && !Number.isNaN(deadlineAt.getTime()) && now >= deadlineAt) {
+      // §8.3: a session that never got a slot before its deadline is skipped,
+      // not run late — a lineup check after kickoff cannot change anything.
+      const rows = await database
+        .update(sessions)
+        .set({ status: "skipped", endedBy: "deadline", endedAt: now, updatedAt: now })
+        .where(and(eq(sessions.id, session.id), eq(sessions.status, "queued")))
+        .returning({ id: sessions.id });
+      if (rows.length > 0) expired++;
+      continue;
+    }
+
+    const { claimSlot } = await import("./runSession");
+    if (!(await claimSlot(database, session.id, session.teamId))) break; // at the cap
+
+    // The slot is taken; hand the session to its durable run. Release the slot
+    // again if the workflow cannot even be started, so one bad start does not
+    // hold a slot until the deadline.
+    try {
+      const { start } = await import("workflow/api");
+      const { agentSessionWorkflow } = await import("../workflows/agentSession");
+      await start(agentSessionWorkflow, [session.id]);
+      started++;
+    } catch {
+      await database
+        .update(sessions)
+        .set({ status: "queued", startedAt: null, updatedAt: clock.now() })
+        .where(and(eq(sessions.id, session.id), eq(sessions.status, "running")));
+      break;
+    }
+  }
+  return { started, expired };
+}
+
 /** Mark newly kicked-off games live and put their unrostered players on waivers (§7.3). */
 async function startKickedOffGames(database: EngineDb, clock: Clock): Promise<number> {
   const settings = await getSettings(database);
   const now = clock.now();
-  const started = await database
-    .select()
-    .from(nflGames)
-    .where(
-      and(
-        eq(nflGames.season, settings.season),
-        eq(nflGames.status, "scheduled"),
-        lte(nflGames.kickoffAt, now),
-      ),
-    );
+  // Only the current week and the one before it. §7.3's waiver window runs to
+  // the next Wednesday, so replaying a game from four weeks ago would push
+  // every unrostered player on those rosters onto waivers now — which is what
+  // an outage long enough to leave whole weeks unmarked would otherwise do.
+  const started = (
+    await database
+      .select()
+      .from(nflGames)
+      .where(
+        and(
+          eq(nflGames.season, settings.season),
+          eq(nflGames.status, "scheduled"),
+          lte(nflGames.kickoffAt, now),
+        ),
+      )
+  ).filter((g) => g.week >= settings.currentWeek - 1);
   for (const game of started) {
     await database.update(nflGames).set({ status: "live", updatedAt: now }).where(eq(nflGames.gameId, game.gameId));
     await gameStartWaivers(database, clock, game.gameId);
@@ -170,7 +251,7 @@ async function maybePollLiveScores(database: EngineDb, clock: Clock): Promise<bo
   if (now.getTime() - lastAt < LIVE_POLL_MIN_INTERVAL_MS) return false;
 
   await runJob(database, clock, "ingest.stats", { live: true });
-  await scoreWeek(database, settings.currentWeek);
+  await scoreWeek(database, clock, settings.currentWeek);
   await database
     .insert(health)
     .values({ key: "live.poll", lastSuccessAt: now })

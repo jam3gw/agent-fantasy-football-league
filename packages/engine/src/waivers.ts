@@ -129,18 +129,19 @@ async function simulatedActiveAfterAdd(
 }
 
 /**
- * Replace the team's pending waiver-claim list (§7.2). Validates every claim;
- * any invalid claim rejects the whole call with the per-claim failures in
- * `details`. Valid claims for players whose `waiver_until` is in the future
- * are accepted — they wait for a later run. No public transaction is recorded;
- * claims become public when processed.
+ * Replace the team's pending waiver-claim list (§7.2). Claims are **rejected
+ * per claim**: the valid ones become the team's pending list and the invalid
+ * ones come back in `rejected`, so one bad player id does not throw away the
+ * rest of an agent's week. Valid claims for players whose `waiver_until` is in
+ * the future are accepted — they wait for a later run. No public transaction is
+ * recorded; claims become public when processed.
  */
 export async function submitWaiverClaims(
   db: EngineDb,
   clock: Clock,
   teamId: number,
   claims: WaiverClaimInput[],
-): Promise<EngineResult<StoredWaiverClaim[]>> {
+): Promise<EngineResult<{ accepted: StoredWaiverClaim[]; rejected: ClaimFailure[] }>> {
   return db.transaction(async (tx) => {
     const settings = await getSettings(tx);
     const week = settings.currentWeek;
@@ -217,24 +218,19 @@ export async function submitWaiverClaims(
         }
       }
     }
-    if (failures.length > 0) {
-      const first = failures[0]!;
-      return fail(first.error, `${failures.length} of ${claims.length} claim(s) invalid: ${first.message}`, {
-        ...(first.hint ? { hint: first.hint } : {}),
-        details: failures,
-      });
-    }
+    const rejectedIndexes = new Set(failures.map((f) => f.index));
+    const accepted = claims.filter((_, index) => !rejectedIndexes.has(index));
 
-    // Replace the pending list: cancel everything pending, insert the new set.
+    // Replace the pending list: cancel everything pending, insert the valid set.
     await tx
       .update(waiverClaims)
       .set({ status: "cancelled" })
       .where(and(eq(waiverClaims.teamId, teamId), eq(waiverClaims.status, "pending")));
-    if (claims.length === 0) return ok([]);
+    if (accepted.length === 0) return ok({ accepted: [], rejected: failures });
     const rows = await tx
       .insert(waiverClaims)
       .values(
-        claims.map((c) => ({
+        accepted.map((c) => ({
           teamId,
           addPlayerId: c.addPlayerId,
           dropPlayerId: c.dropPlayerId ?? null,
@@ -243,7 +239,7 @@ export async function submitWaiverClaims(
         })),
       )
       .returning();
-    return ok(rows);
+    return ok({ accepted: rows, rejected: failures });
   });
 }
 

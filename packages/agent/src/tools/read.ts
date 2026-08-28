@@ -1251,6 +1251,15 @@ export const getTradeTool = readTool(
     if (!trade) return toolFailure("not_found", `trade ${args.trade_id} does not exist`);
     const idx = await teamIndex(db);
     const parties = [trade.proposerTeamId, trade.counterpartyTeamId];
+    // An offer still in `proposed` is a private negotiation between two teams:
+    // it carries a message meant for the counterparty, and trade ids are
+    // sequential, so without this any agent could walk every open negotiation
+    // in the league. It becomes league business the moment it enters review —
+    // that is what the site shows, and what §11 forbids the reporter to
+    // pre-empt. Same rule for the reporter, which has no team of its own.
+    if (trade.status === "proposed" && (ctx.teamId === null || !parties.includes(ctx.teamId))) {
+      return toolFailure("not_visible", `trade ${args.trade_id} is a pending offer between two other teams`);
+    }
     const week = settings.currentWeek;
 
     const allIds = [...trade.givePlayerIds, ...trade.getPlayerIds];
@@ -1529,6 +1538,22 @@ export const defaultWebSearchFetcher: WebSearchFetcher = async ({ provider, apiK
       url: str(r.url),
       snippet: str(r.description),
       published: str(r.age) || undefined,
+    }));
+  }
+  if (provider === "exa") {
+    const res = await fetch("https://api.exa.ai/search", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": apiKey },
+      body: JSON.stringify({ query, numResults: 10, contents: { text: { maxCharacters: 1200 } } }),
+      signal: AbortSignal.timeout(20_000),
+    });
+    if (!res.ok) throw new Error(`web search HTTP ${res.status}`);
+    const body = (await res.json()) as { results?: Array<Record<string, unknown>> };
+    return (body.results ?? []).map((r) => ({
+      title: str(r.title),
+      url: str(r.url),
+      snippet: str(r.text) || str(r.snippet),
+      published: str(r.publishedDate) || undefined,
     }));
   }
   throw new Error(`unsupported web search provider '${provider}'`);
