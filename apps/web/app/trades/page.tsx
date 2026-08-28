@@ -136,7 +136,10 @@ export default async function TradesPage() {
                     <span className="text-xs text-muted">
                       trade #{t.id} · accepted {when(t.respondedAt)} ET
                     </span>
-                    <Badge tone="warn">{remaining(t.reviewEndsAt, now)}</Badge>
+                    <span className="flex items-baseline gap-2">
+                      <Badge tone="warn">{remaining(t.reviewEndsAt, now)}</Badge>
+                      <span className="text-xs text-muted">review ends {when(t.reviewEndsAt)} ET</span>
+                    </span>
                   </div>
                   <div className="mt-2 flex flex-col gap-3 sm:flex-row">
                     <Side
