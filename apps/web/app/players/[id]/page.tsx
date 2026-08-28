@@ -175,7 +175,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         )}
       </Card>
 
-      <Card title="Transactions">
+      <Card title="Transactions and ownership history">
         {mine.length === 0 ? (
           <Empty>No transaction has involved this player.</Empty>
         ) : (
