@@ -17,22 +17,21 @@ import {
 import { formatEt } from "@league/shared";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, money, points } from "@/components/ui";
 import { db } from "@/lib/db";
-import { settings, standings, teamBench, teamBySlug, teamLineup, type LineupPlayer } from "@/lib/queries";
+import {
+  safeRead as safe,
+  settings,
+  standings,
+  teamBench,
+  teamBySlug,
+  teamLineup,
+  type LineupPlayer,
+} from "@/lib/queries";
 
-// Live league state: rendered per request, cached at the edge for
-// 300s by the Cache-Control header set in proxy.ts (§12.1).
-export const dynamic = "force-dynamic";
-export const CACHE_SECONDS = 300;
+// §12.1: 300s freshness. Rendered ahead and refreshed in the
+// background, so the CDN serves a copy at most 300s stale.
+export const revalidate = 300;
 
 const MAX_WEEK = 18;
-
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
-  }
-}
 
 function PlayerRow({ player, slotLabel }: { player: LineupPlayer | undefined; slotLabel: string }) {
   return (

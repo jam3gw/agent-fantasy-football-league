@@ -5,10 +5,9 @@ import { computeStandings, costAlarms, getSettings, sessions, spendLedger, spend
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, money } from "../../components/ui";
 import { db, leagueClock } from "../../lib/db";
 
-// Live league state: rendered per request, cached at the edge for
-// 300s by the Cache-Control header set in proxy.ts (§12.1).
-export const dynamic = "force-dynamic";
-export const CACHE_SECONDS = 300;
+// §12.1: 300s freshness. Rendered ahead and refreshed in the
+// background, so the CDN serves a copy at most 300s stale.
+export const revalidate = 300;
 
 export const metadata = {
   title: "Spend",

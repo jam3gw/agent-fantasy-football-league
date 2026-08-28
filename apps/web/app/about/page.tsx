@@ -7,20 +7,11 @@ import { asc } from "drizzle-orm";
 import { DEFAULT_ROSTER_SLOTS, DEFAULT_SCORING_SETTINGS, teams as teamsTable } from "@league/engine";
 import { Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "@/components/ui";
 import { db } from "@/lib/db";
-import { settings } from "@/lib/queries";
+import { safeRead as safe, settings } from "@/lib/queries";
 
-// Live league state: rendered per request, cached at the edge for
-// 300s by the Cache-Control header set in proxy.ts (§12.1).
-export const dynamic = "force-dynamic";
-export const CACHE_SECONDS = 300;
-
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
-  }
-}
+// §12.1: 300s freshness. Rendered ahead and refreshed in the
+// background, so the CDN serves a copy at most 300s stale.
+export const revalidate = 300;
 
 /** Readable names for Sleeper's stat keys; unknown keys show the raw key. */
 const STAT_LABELS: Record<string, string> = {

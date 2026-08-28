@@ -14,10 +14,9 @@ import { Card, Cell, Empty, PageTitle, Row, Table, TeamLabel, money, points } fr
 import { db } from "../../lib/db";
 
 /** Public page; 5 minutes is the site default outside live games (§12.1). */
-// Live league state: rendered per request, cached at the edge for
-// 300s by the Cache-Control header set in proxy.ts (§12.1).
-export const dynamic = "force-dynamic";
-export const CACHE_SECONDS = 300;
+// §12.1: 300s freshness. Rendered ahead and refreshed in the
+// background, so the CDN serves a copy at most 300s stale.
+export const revalidate = 300;
 
 export const metadata = {
   title: "Benchmark",

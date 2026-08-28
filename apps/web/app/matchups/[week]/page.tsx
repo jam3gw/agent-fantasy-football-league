@@ -11,22 +11,20 @@ import { STARTING_SLOTS, lockedPlayerIds, playerWeekProj } from "@league/engine"
 import type { StartingSlot } from "@league/engine";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel, points } from "@/components/ui";
 import { db, leagueClock } from "@/lib/db";
-import { allTeams, settings, teamLineup, weekMatchups, type LineupPlayer } from "@/lib/queries";
+import {
+  allTeams,
+  safeRead as safe,
+  settings,
+  teamLineup,
+  type LineupPlayer,
+  weekMatchups,
+} from "@/lib/queries";
 
-// Live league state: rendered per request, cached at the edge for
-// 30s by the Cache-Control header set in proxy.ts (§12.1).
-export const dynamic = "force-dynamic";
-export const CACHE_SECONDS = 30;
+// §12.1: 30s freshness. Rendered ahead and refreshed in the
+// background, so the CDN serves a copy at most 30s stale.
+export const revalidate = 30;
 
 const MAX_WEEK = 18;
-
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
-  }
-}
 
 const SOURCE_LABEL: Record<string, string> = {
   fantasypros: "scored by FantasyPros PPR",

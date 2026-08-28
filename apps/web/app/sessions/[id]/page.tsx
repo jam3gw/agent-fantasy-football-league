@@ -11,19 +11,11 @@ import { sessionEvents, sessions, teams } from "@league/engine";
 import { formatEt } from "@league/shared";
 import { Badge, Card, Empty, PageTitle, money } from "@/components/ui";
 import { db } from "@/lib/db";
+import { safeRead as safe } from "@/lib/queries";
 
-// Live league state: rendered per request, cached at the edge for
-// 300s by the Cache-Control header set in proxy.ts (§12.1).
-export const dynamic = "force-dynamic";
-export const CACHE_SECONDS = 300;
-
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
-  }
-}
+// §12.1: 300s freshness. Rendered ahead and refreshed in the
+// background, so the CDN serves a copy at most 300s stale.
+export const revalidate = 300;
 
 function Json({ value }: { value: unknown }) {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
