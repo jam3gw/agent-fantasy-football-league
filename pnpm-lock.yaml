@@ -78,6 +78,9 @@ importers:
       ai:
         specifier: ^7.0.84
         version: 7.0.84(zod@4.5.1)
+      drizzle-orm:
+        specifier: ^0.44.7
+        version: 0.44.7(@electric-sql/pglite@0.3.16)
       zod:
         specifier: ^4.5.1
         version: 4.5.1
