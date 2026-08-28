@@ -26,6 +26,17 @@ export const revalidate = 30;
 
 const MAX_WEEK = 18;
 
+/**
+ * §12.1's freshness window only reaches the CDN for a route Next treats as
+ * static: a dynamic segment with no `generateStaticParams` is server-rendered
+ * per request and answers `no-store`, whatever `revalidate` says. Verified on
+ * the deploy, not assumed. The season has exactly eighteen weeks and the list
+ * needs no database, so all eighteen are prerendered and then revalidated.
+ */
+export function generateStaticParams() {
+  return Array.from({ length: MAX_WEEK }, (_, i) => ({ week: String(i + 1) }));
+}
+
 const SOURCE_LABEL: Record<string, string> = {
   fantasypros: "scored by FantasyPros PPR",
   nflverse: "scored by nflverse stats",

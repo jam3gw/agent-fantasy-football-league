@@ -22,6 +22,16 @@ import { allTeams, safeRead as safe, settings } from "@/lib/queries";
 // background, so the CDN serves a copy at most 300s stale.
 export const revalidate = 300;
 
+/**
+ * Player pages are unbounded and only exist once the database has them, so none is
+ * prerendered. Declaring the list anyway is what makes Next treat the route as
+ * static-with-revalidation: without it the segment is server-rendered per
+ * request and answers `no-store`, so §12.1's window never reaches the CDN.
+ */
+export function generateStaticParams() {
+  return [];
+}
+
 /** Does this transaction payload name the player anywhere? */
 function mentionsPlayer(value: unknown, playerId: string): boolean {
   if (typeof value === "string") return value === playerId;
