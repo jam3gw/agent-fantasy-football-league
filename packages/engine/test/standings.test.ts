@@ -471,3 +471,40 @@ describe("advancePlayoffs (§3.7)", () => {
     expect(row(after, ids[2]!).losses).toBe(0);
   });
 });
+
+describe("standings tiebreak determinism (review finding)", () => {
+  it("orders a partially connected tied group by points for, not by sort implementation", async () => {
+    await seedLeague(db);
+    const ids = await seedTeams(db);
+    const [a, b, c] = ids;
+    // A beat B; C played neither of them (it played D). All three finish 1-1.
+    const d = ids[3]!;
+    const games: Array<[number, number, number, number, number]> = [
+      // week, home, away, homePts, awayPts
+      [1, a!, b!, 100, 90], // A beats B
+      [2, a!, d, 80, 95], // A loses
+      [3, b!, d, 105, 80], // B beats D
+      [4, c!, d, 70, 99], // C loses to D
+      [5, c!, ids[4]!, 120, 60], // C beats another team
+    ];
+    for (const [week, home, away, hp, ap] of games) {
+      await db.insert(matchups).values({
+        week,
+        homeTeamId: home,
+        awayTeamId: away,
+        homePoints: hp,
+        awayPoints: ap,
+        final: true,
+        winnerTeamId: hp > ap ? home : away,
+      });
+    }
+    const first = await computeStandings(db);
+    const second = await computeStandings(db);
+    expect(first.map((r) => r.teamId)).toEqual(second.map((r) => r.teamId));
+    // A, B and C are all 1-1: with the group not fully connected the order is
+    // points for, descending — a well-defined result rather than sort-dependent.
+    const tied = first.filter((r) => [a!, b!, c!].includes(r.teamId));
+    const byPoints = [...tied].sort((x, y) => y.pointsFor - x.pointsFor);
+    expect(tied.map((r) => r.teamId)).toEqual(byPoints.map((r) => r.teamId));
+  });
+});
