@@ -32,7 +32,7 @@ import {
 } from "@league/engine";
 import type { LineupSlotsInput } from "@league/engine";
 import type { LeagueTool, ToolContext, ToolResult } from "./types.ts";
-import { fromEngineFailure, toolFailure } from "./types.ts";
+import { defineTool, fromEngineFailure, toolFailure } from "./types.ts";
 
 /* -------------------------------------------------------------------------- */
 /* Shared helpers                                                             */
@@ -46,46 +46,6 @@ export const MAX_BOARD_POST_CHARS = 1000;
 export const MAX_VOTE_REASON_CHARS = 200;
 export const MAX_SCRATCHPAD_CHARS = 20_000;
 export const MAX_DECISION_LOG_CHARS = 800;
-
-function formatZodIssues(error: z.ZodError): string {
-  return error.issues
-    .map((issue) => {
-      const path = issue.path.join(".");
-      return path ? `${path}: ${issue.message}` : issue.message;
-    })
-    .join("; ");
-}
-
-/**
- * Build a tool that re-validates its own arguments. The runner parses the
- * schema before calling `execute`, but parsing here too means a tool can never
- * be reached with arguments the schema forbids (§8.8: `invalid_args`).
- */
-export function defineTool<S extends z.ZodType>(spec: {
-  name: string;
-  description: string;
-  schema: S;
-  ending?: boolean;
-  execute: (args: z.output<S>, ctx: ToolContext) => Promise<ToolResult>;
-}): LeagueTool<S> {
-  return {
-    name: spec.name,
-    description: spec.description,
-    schema: spec.schema,
-    ...(spec.ending ? { ending: true } : {}),
-    execute: async (raw, ctx) => {
-      const parsed = spec.schema.safeParse(raw);
-      if (!parsed.success) {
-        return toolFailure(
-          "invalid_args",
-          formatZodIssues(parsed.error),
-          "read the tool schema and call it again with valid arguments",
-        );
-      }
-      return spec.execute(parsed.data as z.output<S>, ctx);
-    },
-  };
-}
 
 /**
  * Team write tools need a team. `ctx.teamId` is null only for the reporter
