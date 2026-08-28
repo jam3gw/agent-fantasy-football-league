@@ -9,6 +9,71 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET`, `CRON_SECRET`, and BYOK keys are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-28 — Independent review before merge: findings and fixes
+
+A reviewer with a fresh context read the whole branch against SPEC.md. It found
+one state-corrupting bug and a set of real contradictions; all are fixed, each
+with a test that fails without the fix. What it found, and what changed:
+
+**Critical.** `trade.vote_cast` and `trade.failed` shared a switch case with
+`draft.completed`, so every vote on every trade ran the season setup: it rewound
+`current_week` to `start_week`, cleared every player's `waiver_until`, and reset
+the rolling waiver order to reverse draft order. Ten times per trade,
+mid-season. The trade tests passed throughout because none of them looked at
+settings or waivers afterwards — which is exactly why the regression test now
+does.
+
+**A session that lost the concurrency race waited forever.** Twelve lineup
+checks were booked for the same instant; six lost the race for one of the six
+slots, were left `queued`, and their jobs were marked `done`. Nothing ever ran
+them, and the comment claiming the next tick would retry described code that did
+not exist. The tick now sweeps queued sessions every minute — that is §9.2's
+wait-for-slot — expiring the ones whose deadline passed, and the bookings are
+staggered a minute apart. The slot check itself took no lock, so twelve starts
+could all read "0 running": it is now one advisory-locked transaction that
+counts and claims together. §15.4's criterion is now a test: twelve sessions
+drain in two waves inside 45 minutes, never more than six at once, none left
+behind.
+
+**The `agent_week` alarm could never fire.** There was no `agent/week` rollup at
+all, and the `league/week` row held the season total, so `/spend`'s per-agent
+week column read $0.00 forever. Both periods now come from one pass over the
+ledger, with a step's week taken from the session it belongs to rather than the
+calendar. §15.1.12 had no test at all; it has twelve now.
+
+**Other spec contradictions fixed**: the nflverse audit (§5.6, §13.3) did not
+exist; `ingest.stats`, the game-day hourly `ingest.players` and the Sunday
+`ingest.fp_injuries` were never booked; `waivers.run` and `reporter.*` ignored
+§4.3's gating; waiver claims rejected the whole list on one bad claim instead of
+per claim; `applyOptionalPause` was dead code reading a settings key the admin
+form never wrote; `propose_trade` was stricter than the engine; the `exa` search
+provider §14 allows threw; §8.1 context management was unimplemented.
+
+**Security.** `get_trade` checked nothing, and trade ids are sequential, so any
+agent could walk every open negotiation in the league and read its private
+message. Offers in `proposed` are now visible only to the two teams in them.
+Everything else the reviewer checked came back clean: no secret is committed,
+logged, or returned; admin auth is layered (proxy, plus every server action
+re-checking for itself — now asserted as a test); the cookie resists forgery.
+
+**The 800-second step cap.** A session and the whole draft each ran inside a
+single workflow step, against a 90-minute session deadline and a 1.5–4 hour
+draft. Both would have been killed. Each draft pick is now its own step, and a
+session stops cleanly between model calls when its budget runs out and resumes
+from its transcript — which meant recording the assistant message and tool call
+ids verbatim, so a resumed step replays exactly what the model saw. The tick
+also stopped running heavy jobs inline: a 5 MB player ingest inside the
+per-minute cron would starve the live score poll behind it.
+
+**Known and accepted**, recorded rather than fixed:
+- The commissioner cookie signs only its own expiry, so changing
+  `COMMISSIONER_PASSWORD` does not invalidate outstanding cookies — rotating
+  `SESSION_SECRET` does. Acceptable for a single-operator admin area.
+- The public API's rate limit is per warm instance, so §12.1's 60/minute is a
+  courtesy limit rather than a control. Vercel's own limits are the real one.
+
+Test suite: **353 tests green**, up from 293.
+
 ## 2026-08-28 — §12.1 cache windows: the third attempt is the one that works
 
 Probing the live preview showed every public page answering
