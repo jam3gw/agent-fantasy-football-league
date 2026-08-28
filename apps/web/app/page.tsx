@@ -18,7 +18,10 @@ import {
   weekMatchups,
 } from "@/lib/queries";
 
-export const revalidate = 30;
+// Live league state: rendered per request, cached at the edge for
+// 30s by the Cache-Control header set in proxy.ts (§12.1).
+export const dynamic = "force-dynamic";
+export const CACHE_SECONDS = 30;
 
 /** Every read is guarded: an empty database is the normal pre-season state. */
 async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {

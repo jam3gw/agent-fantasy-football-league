@@ -20,6 +20,7 @@ const BOOKABLE_JOBS = [
   "ingest.fp_injuries",
   "waivers.run",
   "stats.finalize",
+  "draft.run",
   "week.plan",
   "book_daily_jobs",
   "digest.weekly",

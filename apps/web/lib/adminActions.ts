@@ -14,7 +14,6 @@
  */
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { after } from "next/server";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import { etDay, sessionKey } from "@league/shared";
@@ -58,7 +57,6 @@ import {
   getDraft,
   pauseDraft,
   resumeDraft,
-  runDraft,
 } from "./draft";
 
 /** Job types the commissioner may book by hand from /admin/jobs. */
@@ -73,6 +71,7 @@ const BOOKABLE_JOBS = [
   "ingest.fp_injuries",
   "waivers.run",
   "stats.finalize",
+  "draft.run",
   "week.plan",
   "book_daily_jobs",
   "digest.weekly",
@@ -120,6 +119,15 @@ function num(form: FormData, key: string): number | null {
   if (v === "") return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+/** JSON from a textarea, with a message a person can act on. */
+function parseJson(raw: string, field: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new Error(`${field} is not valid JSON — nothing was saved`);
+  }
 }
 
 function requireReason(form: FormData): string {
@@ -625,16 +633,16 @@ export async function saveSettingsAction(form: FormData): Promise<void> {
   const structureLocked = current.phase !== "pre_draft";
   if (!structureLocked) {
     const rosterSlots = str(form, "rosterSlots");
-    if (rosterSlots) patch.rosterSlots = JSON.parse(rosterSlots);
+    if (rosterSlots) patch.rosterSlots = parseJson(rosterSlots, "roster_slots");
     const scoringSettings = str(form, "scoringSettings");
-    if (scoringSettings) patch.scoringSettings = JSON.parse(scoringSettings);
+    if (scoringSettings) patch.scoringSettings = parseJson(scoringSettings, "scoring_settings");
   }
 
   // Loop guards live in extra.sessionGuards (§8.3); they stay editable.
   const guards = str(form, "sessionGuards");
   if (guards) {
     const extra = { ...(current.extra as Record<string, unknown>) };
-    extra.sessionGuards = JSON.parse(guards);
+    extra.sessionGuards = parseJson(guards, "sessionGuards");
     patch.extra = extra;
   }
 
@@ -813,13 +821,11 @@ export async function startDraftAction(): Promise<void> {
 
   await logAction(c, "draft_started", { from: state.currentPick ?? 1 });
   await publicTransaction(c, "draft_started", state.order, { from: state.currentPick ?? 1 });
-  // The draft loop runs long; start it after the response so the button
-  // returns straight away. It resumes from draft.current_pick, so pressing
-  // Start again picks up exactly where a stopped run left off (§10.2).
-  after(async () => {
-    await runDraft();
-  });
-  finish("/admin/draft", "Draft started. It resumes from the current pick if the run is interrupted — press Start again.");
+  // 168 picks at up to three minutes each is far past a function's limit, so
+  // the draft is a durable workflow. Booking `draft.run` lets the next tick
+  // start it (§4.1, §9.2, §10.2).
+  await bookJobNow(c.database, c.clock, "draft.run");
+  finish("/admin/draft", "Draft booked. The next tick starts the durable draft workflow, which resumes from the current pick.");
 }
 
 export async function pauseDraftAction(): Promise<void> {
@@ -835,10 +841,9 @@ export async function resumeDraftAction(): Promise<void> {
   await resumeDraft(c.database, c.clock);
   await logAction(c, "draft_resumed", {});
   await publicTransaction(c, "draft_resumed", [], {});
-  after(async () => {
-    await runDraft();
-  });
-  finish("/admin/draft", "Draft resumed.");
+  // A paused run returns early, so a resume needs a fresh durable run.
+  await bookJobNow(c.database, c.clock, "draft.run");
+  finish("/admin/draft", "Draft resumed; the next tick starts a fresh run from the stored clock.");
 }
 
 export async function emergencyAutoPickAction(): Promise<void> {

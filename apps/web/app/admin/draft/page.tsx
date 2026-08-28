@@ -143,9 +143,10 @@ export default async function AdminDraftPage({
             </form>
           </div>
           <p className="mt-3 text-xs text-muted">
-            The loop runs 168 picks inline and resumes from <span className="font-mono">draft.current_pick</span>, so if a run is cut
-            short press Start again — recorded picks are skipped, nothing is duplicated. A pause stores the remaining clock and the
-            resumed pick gets that many seconds back (§10.2).
+            Start books the <span className="font-mono">draft.run</span> job; the next tick begins the durable draft workflow, which is
+            far longer-lived than a single function (§4.1, §9.2). It resumes from <span className="font-mono">draft.current_pick</span>{" "}
+            and skips picks already recorded, so nothing is ever duplicated. A pause stores the remaining clock and the resumed pick gets
+            those seconds back (§10.2).
           </p>
           {state?.clockRemainingSeconds ? (
             <p className="mt-2 text-xs text-warn">Paused with {state.clockRemainingSeconds}s stored on pick {state.currentPick}.</p>

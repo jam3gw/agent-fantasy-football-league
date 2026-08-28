@@ -13,7 +13,10 @@ import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel, points } fr
 import { db, leagueClock } from "@/lib/db";
 import { allTeams, settings, teamLineup, weekMatchups, type LineupPlayer } from "@/lib/queries";
 
-export const revalidate = 30;
+// Live league state: rendered per request, cached at the edge for
+// 30s by the Cache-Control header set in proxy.ts (§12.1).
+export const dynamic = "force-dynamic";
+export const CACHE_SECONDS = 30;
 
 const MAX_WEEK = 18;
 

@@ -9,7 +9,10 @@ import { Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "@/component
 import { db } from "@/lib/db";
 import { settings } from "@/lib/queries";
 
-export const revalidate = 300;
+// Live league state: rendered per request, cached at the edge for
+// 300s by the Cache-Control header set in proxy.ts (§12.1).
+export const dynamic = "force-dynamic";
+export const CACHE_SECONDS = 300;
 
 async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {

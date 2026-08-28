@@ -12,7 +12,10 @@ import { leagueSettings, players, teams, tradeVotes, trades } from "@league/engi
 import { db, leagueClock } from "../../lib/db";
 import { Badge, Card, Empty, PageTitle, TeamLabel } from "../../components/ui";
 
-export const revalidate = 300;
+// Live league state: rendered per request, cached at the edge for
+// 300s by the Cache-Control header set in proxy.ts (§12.1).
+export const dynamic = "force-dynamic";
+export const CACHE_SECONDS = 300;
 
 const RESOLVED_LIMIT = 40;
 
@@ -67,7 +70,7 @@ function Side({
   );
 }
 
-export default async function TradesPage() {
+async function TradesPageInner() {
   const clock = await leagueClock();
   const now = clock.now();
   const settings = (await db().select().from(leagueSettings).where(eq(leagueSettings.id, 1)))[0];
@@ -238,4 +241,26 @@ export default async function TradesPage() {
       </p>
     </>
   );
+}
+
+/**
+ * __renderGuarded: pages use ISR, so Next prerenders them at build time. A
+ * database that is unreachable or still empty must not fail the deploy, and a
+ * blip at request time must not take down a public page — trades simply
+ * renders empty instead.
+ */
+export default async function TradesPage() {
+  try {
+    return await TradesPageInner();
+  } catch (error) {
+    console.error("[trades] render failed", error instanceof Error ? error.message : error);
+    return (
+      <>
+        <PageTitle title="Trades" />
+        <Card>
+          <Empty>This page could not load its data. It will refresh on its own.</Empty>
+        </Card>
+      </>
+    );
+  }
 }
