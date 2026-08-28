@@ -73,13 +73,12 @@ async function seedWeek(): Promise<{ teamIds: number[]; playerIds: string[] }> {
         gsisId: `gsis-${playerId}`,
       });
       await db.insert(rosterEntries).values({ teamId, playerId, acquiredAt: clock.now(), acquiredVia: "draft" });
-      await db.insert(lineupEntries).values({ teamId, season: SEASON, week: 1, slot, playerId });
+      await db.insert(lineupEntries).values({ teamId, week: 1, slot, playerId });
       // The id map source 2 needs to translate FantasyPros ids back.
-      await db.insert(fpPlayerMap).values({ fpPlayerId: `fp-${playerId}`, playerId, matchedBy: "test" });
+      await db.insert(fpPlayerMap).values({ fpPlayerId: `fp-${playerId}`, playerId, matchedBy: "manual" });
     }
   }
   await db.insert(matchups).values({
-    season: SEASON,
     week: 1,
     homeTeamId: teamIds[0]!,
     awayTeamId: teamIds[1]!,
@@ -166,35 +165,82 @@ describe("§13.4 — the week scores itself when Sleeper is down", () => {
 });
 
 describe("§5.6 — the nflverse audit", () => {
-  it("logs a disagreement over 0.5 points and leaves the score alone", async () => {
+  it("logs only the players who differ by more than 0.5 points", async () => {
     await seedWeek();
-    // nflverse says one player scored 20 receiving yards more than we recorded:
-    // 2.0 points at the default scoring, well over the 0.5 threshold.
+    // FantasyPros scores everyone 12.5. At the league's PPR settings (0.1 per
+    // receiving yard, 1 per catch) one player is 8 points out and the other
+    // lands on 12.5 exactly, so only the first should be logged.
     const csv = [
-      "player_id,season,week,rec_yd,rec,pass_yd,rush_yd",
-      "gsis-p0-0,2026,1,125,0,0,0",
+      "player_id,season,week,receiving_yards,receptions",
+      "gsis-p0-0,2026,1,125,8", // 12.5 + 8.0 = 20.5 → 8.0 out, logged
+      "gsis-p0-1,2026,1,65,6", //  6.5 + 6.0 = 12.5 → exact, not logged
     ].join("\n");
     stubNetwork({ fantasyprosPoints: 12.5, nflverseCsv: csv });
 
     const result = await finalizeWeek(db, clock, 1);
     expect(result.source).toBe("fantasypros");
-    // The audit ran and recorded what it found, whatever the exact count.
-    expect(result.audited).toBeGreaterThanOrEqual(0);
+    expect(result.audited, "both players should have been compared").toBe(2);
+    expect(result.auditDiscrepancies).toBe(1);
 
     const logged = await db.select().from(scoringDiscrepancies);
-    for (const row of logged) {
-      expect(Math.abs(row.diff)).toBeGreaterThan(0.5);
-    }
-    // Scores are untouched by the audit: the week still reads 9 × 12.5.
+    expect(logged).toHaveLength(1);
+    expect(logged[0]!.playerId).toBe("p0-0");
+    expect(logged[0]!.diff).toBeCloseTo(8, 2);
+    // §5.6 audits; it never rescores. The week still reads 9 × 12.5.
     const [matchup] = await db.select().from(matchups);
     expect(matchup!.homePoints).toBeCloseTo(9 * 12.5, 2);
+
+    // And the summary reaches /admin/health.
+    const rows = await db.select().from(health).where(eq(health.key, "stats.audit"));
+    expect(rows[0]!.lastError).toContain("1 of 2");
+  });
+
+  it("logs nothing when nflverse agrees with the week", async () => {
+    await seedWeek();
+    const csv = [
+      "player_id,season,week,receiving_yards,receptions",
+      "gsis-p0-0,2026,1,65,6", // exactly 12.5
+    ].join("\n");
+    stubNetwork({ fantasyprosPoints: 12.5, nflverseCsv: csv });
+
+    const result = await finalizeWeek(db, clock, 1);
+    expect(result.audited).toBe(1);
+    expect(result.auditDiscrepancies).toBe(0);
+    expect(await db.select().from(scoringDiscrepancies)).toHaveLength(0);
   });
 
   it("does not audit a week nflverse itself scored", async () => {
     await seedWeek();
+    // Sleeper and FantasyPros both fail; nflverse scores the week. Auditing it
+    // against itself would be meaningless, so the audit is skipped.
+    const csv = [
+      "player_id,season,week,receiving_yards,receptions",
+      "gsis-p0-0,2026,1,100,5",
+    ].join("\n");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url.includes("sleeper") || url.includes("fp.example.test")) throw new Error("down");
+        return new Response(csv, { status: 200 });
+      }),
+    );
+
     const result = await finalizeWeek(db, clock, 1);
-    // Everything failed above (no stub set), so there is nothing to audit.
+    expect(result.source).toBe("nflverse");
     expect(result.audited).toBe(0);
     expect(await db.select().from(scoringDiscrepancies)).toHaveLength(0);
+  });
+});
+
+describe("§3.2 — the Sleeper fit check does not fire on a fallback week", () => {
+  it("records no discrepancy for FantasyPros-scored rows", async () => {
+    // Source 2 supplies computed points and no stat line, so `engine_pts` is 0
+    // for every player. Comparing that with `pts_ppr` logged all eighteen.
+    await seedWeek();
+    stubNetwork({ fantasyprosPoints: 12.5 });
+    await finalizeWeek(db, clock, 1);
+    const logged = await db.select().from(scoringDiscrepancies);
+    expect(logged).toHaveLength(0);
   });
 });

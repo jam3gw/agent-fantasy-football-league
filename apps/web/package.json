@@ -4,11 +4,12 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "pnpm --filter @league/engine migrate && next build",
+    "build": "pnpm --filter @league/engine migrate && tsx scripts/seed.mts && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "seed": "tsx scripts/seed.mts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.16",
@@ -35,6 +36,7 @@
     "eslint-config-next": "16.2.4",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "tsx": "^4.23.12"
   }
 }

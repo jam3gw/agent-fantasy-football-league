@@ -213,7 +213,26 @@ export async function restoreSession(
   // Tool results are grouped into one message per assistant turn, keyed by the
   // ids the assistant message itself carries.
   let pendingToolResults: Array<{ toolCallId: string; toolName: string; output: unknown }> = [];
+  let expectedToolCalls: Array<{ toolCallId: string; toolName: string }> = [];
   const flushToolResults = () => {
+    // An invocation killed mid-batch leaves an assistant turn asking for tools
+    // whose results were never written. Every provider rejects a tool call
+    // without a matching result, so the gap is filled rather than replayed —
+    // the tools genuinely did not run, and saying so is both true and the only
+    // thing that lets the session continue.
+    for (const call of expectedToolCalls) {
+      if (pendingToolResults.some((r) => r.toolCallId === call.toolCallId)) continue;
+      pendingToolResults.push({
+        toolCallId: call.toolCallId,
+        toolName: call.toolName,
+        output: {
+          ok: false,
+          error: "not_executed",
+          message: "This call was interrupted before it ran. Call it again if you still need it.",
+        },
+      });
+    }
+    expectedToolCalls = [];
     if (pendingToolResults.length === 0) return;
     messages.push({
       role: "tool",
@@ -249,12 +268,19 @@ export async function restoreSession(
         if (content.closing_step) break; // the closing step is never resumed
         restored.steps++;
         if (content.raw) messages.push(content.raw as unknown as ModelMessage);
+        // Remember what this turn asked for, so the next flush can tell which
+        // calls never got a result.
+        expectedToolCalls = Array.isArray(content.tool_calls)
+          ? (content.tool_calls as Array<{ id?: unknown; name?: unknown }>).flatMap((c) =>
+              typeof c.id === "string" ? [{ toolCallId: c.id, toolName: String(c.name ?? "") }] : [],
+            )
+          : [];
         break;
       }
       case "tool_result": {
         const result = content.result as { ok?: boolean; error?: string } | undefined;
         const name = String(content.name ?? "");
-        if (result?.error === "invalid_args") restored.invalidToolCalls++;
+        if (content.invalid === true) restored.invalidToolCalls++;
         else restored.toolCalls++;
         if (name === endingTool && result?.ok !== false) restored.endingToolSucceeded = true;
         const id = content.tool_call_id;
@@ -352,8 +378,13 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
     deps.stepBudgetMs === undefined ? null : new Date(clock.now().getTime() + deps.stepBudgetMs);
 
   try {
+    // The interrupted invocation got as far as a successful ending tool: the
+    // session is done, and another model step would publish a second report or
+    // write a second decision log, and charge for it.
+    if (endingToolSucceeded) endedBy = "ending_tool";
+
     // Step 4 of §8.2.
-    for (;;) {
+    while (!endingToolSucceeded) {
       if (clock.now() > deadlineAt) {
         endedBy = "deadline";
         break;
@@ -431,6 +462,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       const toolResults: Array<{ toolCallId: string; toolName: string; result: ToolResult }> = [];
       for (const call of result.toolCalls) {
         const tool = toolsByName.get(call.toolName);
+        const invalidBefore = invalidToolCalls;
         let out: ToolResult;
         if (!tool) {
           invalidToolCalls++;
@@ -486,6 +518,10 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
           name: call.toolName,
           result: out,
           tool_call_id: call.toolCallId,
+          // Whether this counted against the invalid-call guard (§8.8). A tool
+          // may return `invalid_args` from its own body after a clean schema
+          // parse, so the code alone cannot tell the two apart on a resume.
+          invalid: invalidBefore !== invalidToolCalls,
         });
         toolResults.push({ toolCallId: call.toolCallId, toolName: call.toolName, result: out });
       }

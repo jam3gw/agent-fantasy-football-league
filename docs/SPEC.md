@@ -803,6 +803,13 @@ Optional hard stop (**default off**): setting `pause_agent_at_usd` per season. W
 
 ### 8.9 Provider credits and BYOK
 
+> **Superseded by the commissioner, 2026-08-28: the league bills the AI Gateway
+> for every model call.** BYOK routing is not implemented. One billing path
+> means one price list, one balance on `/spend`, and no provider credential
+> that can expire mid-season and silently reroute a model. `spend_ledger.billed_to`
+> keeps the column §6 defines and always reads `gateway`. The rest of this
+> section is kept as the record of what was specified.
+
 Some providers give free API credits (Appendix F lists the current programs). AI Gateway supports Bring Your Own Key with no markup, and its docs say BYOK is "useful for using credits provided by the AI provider". Requests that use a BYOK credential bill the provider account; if the credential fails, the gateway falls back to its own credentials and bills the gateway balance.
 
 - Configuration: a per-model map in settings, `byok_routes`: gateway model id → provider credential name (`openai`, `xai`, `vertex`, `anthropic`). Initial routes: `xai/grok-4.6` → `xai`; `openai/gpt-5.6-sol` and `openai/gpt-5.6-terra` → `openai`; `google/gemini-3.1-pro-preview` → `vertex`; `anthropic/claude-sonnet-5` → `vertex` only if the build confirms the Google Cloud trial credit applies to Anthropic models on Vertex (otherwise gateway). Everything else bills the gateway balance. The runner passes the matching credential through `providerOptions.gateway.byok` on every call for that model (request-scoped BYOK), and `only: [<provider>]` so the request cannot silently route to another provider at a different price. Credentials come from the `BYOK_*` environment variables (Section 14).
@@ -1073,10 +1080,9 @@ CRON_SECRET
 SITE_DOMAIN                 e.g. league.example.com (blocked in agent web tools)
 LEAGUE_SEASON               2026
 LEAGUE_TZ                   America/New_York
-BYOK_OPENAI_API_KEY         optional; provider keys for AI Gateway BYOK (Section 8.9)
-BYOK_XAI_API_KEY            optional
-BYOK_VERTEX_PROJECT / BYOK_VERTEX_LOCATION / BYOK_VERTEX_CLIENT_EMAIL / BYOK_VERTEX_PRIVATE_KEY   optional
-BYOK_ANTHROPIC_API_KEY      optional
+BYOK_*                      REMOVED 2026-08-28 — the league bills the AI Gateway for
+                            every call (see Section 8.9). The app reads no BYOK
+                            variable; .env.example is the current list.
 ALERT_EMAIL_TO              cost alarms and health alerts go here
 RESEND_API_KEY              email sending for alarms
 ALERT_WEBHOOK_URL           optional; alarms are POSTed as JSON

@@ -176,10 +176,13 @@ export async function auditAgainstNflverse(
       p.position,
     ]),
   );
+  // The points that scored the week, which is what §5.6 audits — not
+  // `engine_pts`, which is 0 on a week scored by FantasyPros, because source 2
+  // supplies computed points rather than a stat line.
   const scored = new Map(
     (await db.select().from(playerWeekStats))
       .filter((r) => r.season === season && r.week === week)
-      .map((r) => [r.playerId, r.enginePts]),
+      .map((r) => [r.playerId, r.ptsPpr ?? r.enginePts]),
   );
 
   let checked = 0;

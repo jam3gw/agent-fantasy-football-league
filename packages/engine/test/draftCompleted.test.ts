@@ -7,7 +7,7 @@ import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { makeGame, makePlayer, seedLeague, seedTeams } from "./helpers/factories.ts";
-import { handleEvent } from "../src/events.ts";
+import { createSession, handleEvent } from "../src/events.ts";
 import { getSettings } from "../src/settings.ts";
 import { draft, leagueSettings, matchups, players, scheduledJobs, sessions, teams } from "../src/db/schema.ts";
 
@@ -143,4 +143,72 @@ describe("trade events never run the season setup (§9.3)", () => {
       expect((await db.select().from(sessions)).length).toBe(sessionsBefore);
     },
   );
+});
+
+describe("createSession stamps what the scheduler and the ledger need", () => {
+  it("carries the fantasy week even when the caller does not pass one", async () => {
+    // The spend rollups attribute a step to a week through this (§8.7). The
+    // event-driven kinds — trade_response, trade_vote, injury_response,
+    // board_reply, reporter_trade_note — pass no week, and dropped out of the
+    // week's totals entirely until it was defaulted here.
+    const clock = new FixedClock("2026-10-20T15:00:00Z");
+    await seedLeague(db, { phase: "regular", currentWeek: 7 });
+    const ids = await seedTeams(db);
+    const settings = await getSettings(db);
+
+    const sessionId = await createSession(db, settings, {
+      teamId: ids[0]!,
+      kind: "board_reply",
+      trigger: "board.posted",
+      idempotencyKey: "no-week",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { thread_post_id: 4 },
+    });
+
+    const row = (await db.select().from(sessions).where(eq(sessions.id, sessionId!)))[0]!;
+    expect(row.context.week).toBe(7);
+    expect(row.context.thread_post_id).toBe(4);
+    expect(typeof row.context.due_at).toBe("string");
+    expect(typeof row.context.deadline_at).toBe("string");
+  });
+
+  it("does not override a week the caller passed", async () => {
+    const clock = new FixedClock("2026-10-20T15:00:00Z");
+    await seedLeague(db, { phase: "regular", currentWeek: 7 });
+    const ids = await seedTeams(db);
+    const settings = await getSettings(db);
+    const sessionId = await createSession(db, settings, {
+      teamId: ids[0]!,
+      kind: "lineup_check",
+      trigger: "week.plan",
+      idempotencyKey: "next-week",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { week: 8 },
+    });
+    const row = (await db.select().from(sessions).where(eq(sessions.id, sessionId!)))[0]!;
+    expect(row.context.week).toBe(8);
+  });
+
+  it("books no second starter: the queued session row is the queue", async () => {
+    const clock = new FixedClock("2026-10-20T15:00:00Z");
+    await seedLeague(db, { phase: "regular", currentWeek: 7 });
+    const ids = await seedTeams(db);
+    const settings = await getSettings(db);
+    await createSession(db, settings, {
+      teamId: ids[0]!,
+      kind: "weekly_review",
+      trigger: "job:weekly_review",
+      idempotencyKey: "solo",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { week: 7 },
+    });
+    const jobs = await db.select().from(scheduledJobs);
+    expect(jobs.filter((j) => j.type === "session.run")).toEqual([]);
+  });
 });

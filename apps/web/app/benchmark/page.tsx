@@ -365,8 +365,8 @@ export default async function BenchmarkPage() {
             ))}
           </Table>
           <p className="mt-3 text-xs text-muted">
-            List cost prices every model step from the catalog so the comparison holds across agents; paid cost is only what the gateway
-            billed (BYOK steps bill a provider account instead, §8.9).
+            List cost prices every model step from the catalog so the comparison holds across agents; paid cost is what the gateway
+            actually billed, which is every step — the league runs entirely on the AI Gateway.
           </p>
         </Card>
       </div>

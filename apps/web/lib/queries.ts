@@ -144,14 +144,16 @@ export async function teamBench(teamId: number, week: number, season: number): P
 const BREAKER_MS = 5_000;
 let unreachableUntil = 0;
 
+/**
+ * Codes that mean the database could not be reached at all. Deliberately not
+ * here: `ECONNRESET` and `CONNECTION_CLOSED`, which are how a pooler drops an
+ * idle connection — a single one of those must not blank a page, least of all
+ * a page whose empty render the CDN would then cache for five minutes.
+ */
 const CONNECTION_CODES = new Set([
   "CONNECT_TIMEOUT",
-  "CONNECTION_CLOSED",
-  "CONNECTION_ENDED",
-  "CONNECTION_DESTROYED",
   "CONNECTION_REFUSED",
   "ECONNREFUSED",
-  "ECONNRESET",
   "EHOSTUNREACH",
   "ENETUNREACH",
   "ENOTFOUND",

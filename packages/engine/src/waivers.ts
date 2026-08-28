@@ -221,6 +221,15 @@ export async function submitWaiverClaims(
     const rejectedIndexes = new Set(failures.map((f) => f.index));
     const accepted = claims.filter((_, index) => !rejectedIndexes.has(index));
 
+    // Nothing valid and something rejected: keep the list the team already had.
+    // "Valid claims replace the pending list" (§7.2) — no valid claims, no
+    // replacement. Otherwise a resubmission where every player has since been
+    // rostered would silently leave the team with no claims at all on the
+    // morning of the run. An explicit empty list still clears it.
+    if (accepted.length === 0 && failures.length > 0) {
+      return ok({ accepted: [], rejected: failures });
+    }
+
     // Replace the pending list: cancel everything pending, insert the valid set.
     await tx
       .update(waiverClaims)

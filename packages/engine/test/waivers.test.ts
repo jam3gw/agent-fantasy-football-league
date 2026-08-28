@@ -159,6 +159,35 @@ describe("submitWaiverClaims (§7.2)", () => {
     expect(await pendingClaims(t1!)).toHaveLength(0);
   });
 
+  it("keeps the previous list when a resubmission has nothing valid in it", async () => {
+    await seedLeague(db);
+    const [t1, t2] = await seedTeams(db);
+    const clock = new FixedClock("2026-09-15T12:00:00Z");
+    const good = await makePlayer(db, { playerId: "good", waiverUntil: PAST_WU });
+    await submitWaiverClaims(db, clock, t1!, [{ addPlayerId: good, priority: 1 }]);
+
+    // Both players have since been rostered by someone else.
+    const gone = await makePlayer(db, { playerId: "gone", waiverUntil: PAST_WU });
+    await rosterPlayer(db, t2!, gone);
+    const r = await submitWaiverClaims(db, clock, t1!, [{ addPlayerId: gone, priority: 1 }]);
+
+    expect(r.ok && r.value.accepted).toEqual([]);
+    expect(r.ok && r.value.rejected[0]!.error).toBe("already_rostered");
+    // The good claim from before survives: nothing valid means no replacement.
+    expect((await pendingClaims(t1!)).map((c) => c.addPlayerId)).toEqual([good]);
+  });
+
+  it("an explicit empty list still clears the pending claims", async () => {
+    await seedLeague(db);
+    const [t1] = await seedTeams(db);
+    const clock = new FixedClock("2026-09-15T12:00:00Z");
+    const w1 = await makePlayer(db, { playerId: "w1", waiverUntil: PAST_WU });
+    await submitWaiverClaims(db, clock, t1!, [{ addPlayerId: w1, priority: 1 }]);
+    const r = await submitWaiverClaims(db, clock, t1!, []);
+    expect(r.ok && r.value.rejected).toEqual([]);
+    expect(await pendingClaims(t1!)).toHaveLength(0);
+  });
+
   it("rejects invalid_drop when the drop player is not owned, frozen, or locked", async () => {
     await seedLeague(db);
     const [t1, t2] = await seedTeams(db);

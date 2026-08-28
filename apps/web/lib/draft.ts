@@ -27,12 +27,10 @@ import {
 import {
   autoPickCandidate,
   buildContextSnapshot,
-  byokCredentialsFromEnv,
   buildSystemPrompt,
   createModelStep,
   runSession,
   toolsForKind,
-  DEFAULT_BYOK_ROUTES,
 } from "@league/agent";
 import { formatEt } from "@league/shared";
 import { db, leagueClock } from "./db";
@@ -211,11 +209,7 @@ async function runDraftPick(
     });
 
     if (sessionId !== null) {
-      const modelStep = createModelStep(database, {
-        byokRoutes:
-          (settings.extra as { byokRoutes?: typeof DEFAULT_BYOK_ROUTES }).byokRoutes ?? DEFAULT_BYOK_ROUTES,
-        byokCredentials: byokCredentialsFromEnv(),
-      });
+      const modelStep = createModelStep(database);
       await runSession(sessionId, {
         db: database,
         clock,

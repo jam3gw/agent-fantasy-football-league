@@ -81,7 +81,12 @@ async function spend(sessionId: number, teamId: number | null, costUsd: number, 
   });
 }
 
-async function rollup(scope: string, scopeKey: string, period: string, periodStart: string) {
+async function rollup(
+  scope: "agent" | "league",
+  scopeKey: string,
+  period: "day" | "week" | "season",
+  periodStart: string,
+) {
   const rows = await db
     .select()
     .from(spendRollups)
@@ -278,5 +283,18 @@ describe("the ledger itself", () => {
     const session = (await db.select().from(sessions).where(eq(sessions.id, s)))[0]!;
     expect(session.costUsd).toBeCloseTo(3.75, 6);
     expect(session.inputTokens).toBe(2000);
+  });
+});
+
+describe("every step bills the AI Gateway", () => {
+  it("the ledger records `gateway` and nothing else", async () => {
+    // The commissioner's decision on 2026-08-28: one billing path, so one
+    // price list and one balance. Nothing in the runner can route a call to a
+    // provider account any more, and this is what would catch it coming back.
+    const a = await makeTeam("a");
+    const s = await makeSession(a, "s-a", 7);
+    await spend(s, a, 1);
+    const rows = await db.select().from(spendLedger);
+    expect(rows.every((r) => r.billedTo === "gateway")).toBe(true);
   });
 });

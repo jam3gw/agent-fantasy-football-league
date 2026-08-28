@@ -230,8 +230,8 @@ export default async function SpendPage() {
           </Table>
         )}
         <p className="mt-3 text-xs text-muted">
-          List cost prices every step from the model catalog, so agents stay comparable. Paid cost is the part the gateway billed; steps
-          routed through a provider credential (BYOK) bill that provider instead (§8.9).
+          List cost prices every step from the model catalog, so agents stay comparable. Every call bills the AI Gateway, so paid cost
+          tracks list cost; the two columns stay separate because the gateway&rsquo;s own reported cost is preferred when it sends one.
         </p>
       </Card>
 
