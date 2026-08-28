@@ -21,6 +21,8 @@ import {
   scoreWeek,
 } from "@league/engine";
 import { db, leagueClock } from "./db";
+import { detectModelOutages, requeueFailedSessions, teamsForModels } from "./retry";
+import { sendEmail } from "./alarms";
 import { runJob } from "./jobs";
 
 export interface TickSummary {
@@ -31,6 +33,8 @@ export interface TickSummary {
   livePolled: boolean;
   offersExpired: number;
   tradesResolved: number;
+  sessionsRequeued: number;
+  outages: number;
 }
 
 /** Jobs claimed per tick. Generous: the queue is small and each job is quick to start. */
@@ -51,6 +55,8 @@ export async function runTick(): Promise<TickSummary> {
     livePolled: false,
     offersExpired: 0,
     tradesResolved: 0,
+    sessionsRequeued: 0,
+    outages: 0,
   };
 
   // 1. Claim due jobs. SKIP LOCKED means two overlapping ticks never double-run one.
@@ -94,6 +100,11 @@ export async function runTick(): Promise<TickSummary> {
 
   // 3. Live score poll while any game is live.
   summary.livePolled = await maybePollLiveScores(database, clock);
+
+  // 4b. Re-queue sessions that failed, and notice a provider outage (§8.8).
+  const retries = await requeueFailedSessions(database, clock);
+  summary.sessionsRequeued = retries.requeued;
+  summary.outages = await notifyOutages(database, clock);
 
   // 5. Offer expiry and trade review resolution.
   const expired = await expireOffers(database, clock);
@@ -165,4 +176,36 @@ async function maybePollLiveScores(database: EngineDb, clock: Clock): Promise<bo
     .values({ key: "live.poll", lastSuccessAt: now })
     .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: now } });
   return true;
+}
+
+/**
+ * §8.8: three failures in a row for one model means the provider is likely
+ * down. Show it on the health page (the sessions themselves are the record)
+ * and email the commissioner once per model per day.
+ */
+async function notifyOutages(database: EngineDb, clock: Clock): Promise<number> {
+  const outages = await detectModelOutages(database, clock);
+  if (outages.length === 0) return 0;
+  const names = await teamsForModels(
+    database,
+    outages.map((o) => o.modelId),
+  );
+  const today = clock.now().toISOString().slice(0, 10);
+  for (const outage of outages) {
+    const key = `outage:${outage.modelId}:${today}`;
+    const already = await database.select().from(health).where(eq(health.key, key));
+    if (already.length > 0) continue; // one email per model per day
+    await database.insert(health).values({
+      key,
+      lastError: `${outage.consecutiveFailures} sessions in a row failed for ${outage.modelId}`,
+      lastErrorAt: clock.now(),
+    });
+    await sendEmail(
+      `[League] ${outage.modelId} looks down`,
+      `<p><strong>${outage.consecutiveFailures}</strong> sessions in a row have failed for <code>${outage.modelId}</code>` +
+        ` (${(names.get(outage.modelId) ?? []).join(", ") || "no team"}).</p>` +
+        `<p>Check the provider, then swap the model on /admin/teams if it stays down. Nothing is paused automatically.</p>`,
+    );
+  }
+  return outages.length;
 }
