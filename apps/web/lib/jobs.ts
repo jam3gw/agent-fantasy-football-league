@@ -104,7 +104,9 @@ export async function runJob(
       return;
     }
     case "stats.finalize": {
-      await finalizeWeek(db, clock, Number(payload.week ?? settings.currentWeek));
+      const { start } = await import("workflow/api");
+      const { finalizeWeekWorkflow } = await import("../workflows/finalizeWeek");
+      await start(finalizeWeekWorkflow, [Number(payload.week ?? settings.currentWeek)]);
       return;
     }
     case "week.plan": {
@@ -116,7 +118,11 @@ export async function runJob(
       return;
     }
     case "session.run": {
-      await runAgentSession(Number(payload.sessionId));
+      // A session can run for many minutes; give it its own durable run so a
+      // function timeout never loses a transcript mid-way (§9.2).
+      const { start } = await import("workflow/api");
+      const { agentSessionWorkflow } = await import("../workflows/agentSession");
+      await start(agentSessionWorkflow, [Number(payload.sessionId)]);
       return;
     }
     case "sessions.book": {
@@ -163,8 +169,11 @@ export async function runJob(
       return;
     }
     case "draft.run": {
-      const { runDraft } = await import("./draft");
-      await runDraft();
+      // The draft runs 1.5–4 hours, far past a function's 800 s limit, so it
+      // is started as a durable workflow rather than run inline (§4.1, §10.2).
+      const { start } = await import("workflow/api");
+      const { draftWorkflow } = await import("../workflows/draft");
+      await start(draftWorkflow, []);
       return;
     }
     case "digest.weekly": {

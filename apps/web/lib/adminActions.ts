@@ -27,6 +27,7 @@ import {
   draftPicks,
   finalizeWeekCore,
   fpPlayerMap,
+  fpUsage,
   getSettings,
   lineupEntries,
   players,
@@ -770,12 +771,22 @@ async function draftGate(database: EngineDb): Promise<{ ranked: number; unmatche
     .from(rankings)
     .where(and(eq(rankings.set, "draft"), sql`${rankings.rank} is not null`));
   const ranked = rankedRows[0]?.n ?? 0;
-  const unmatchedRows = await database
-    .select({ n: sql<number>`count(*)::int` })
+  // The unmatched rows keep the raw FantasyPros payload; `rank_ecr` there is
+  // whatever the API sent, so the top-200 test happens in JS rather than as a
+  // SQL cast that would blow up on a non-numeric value.
+  const unresolved = await database
+    .select()
     .from(rankingsUnmatched)
-    .where(and(isNull(rankingsUnmatched.resolvedPlayerId), sql`(${rankingsUnmatched.raw} ->> 'rank_ecr')::float <= 200`));
-  const unmatchedTop200 = unmatchedRows[0]?.n ?? 0;
+    .where(isNull(rankingsUnmatched.resolvedPlayerId));
+  const unmatchedTop200 = unresolved.filter((r) => unmatchedRank(r.raw) !== null && unmatchedRank(r.raw)! <= 200).length;
   return { ranked, unmatchedTop200, ok: ranked >= 200 && unmatchedTop200 === 0 };
+}
+
+/** The FantasyPros ECR carried on an unmatched row, when it parses as a number. */
+function unmatchedRank(raw: Record<string, unknown> | null): number | null {
+  const v = raw?.rank_ecr ?? raw?.rank;
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : null;
 }
 
 export async function drawDraftOrderAction(): Promise<void> {
@@ -862,7 +873,6 @@ export async function fpUsageToday(): Promise<{ day: string; total: number; byTe
   await guard();
   const clock = await leagueClock();
   const day = etDay(clock.now());
-  const { fpUsage } = await import("@league/engine");
   const rows = await db()
     .select({ teamId: fpUsage.teamId, n: sql<number>`count(*)::int` })
     .from(fpUsage)
