@@ -3,7 +3,7 @@
   "private": true,
   "packageManager": "pnpm@10.33.0",
   "engines": {
-    "node": ">=22.12"
+    "node": "24.x"
   },
   "scripts": {
     "lint": "pnpm -r --no-bail lint",
@@ -25,5 +25,8 @@
       "@tailwindcss/oxide",
       "unrs-resolver"
     ]
+  },
+  "dependencies": {
+    "next": "16.2.4"
   }
 }
