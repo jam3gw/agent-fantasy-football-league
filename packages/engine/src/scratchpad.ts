@@ -18,7 +18,7 @@ export async function readScratchpad(db: EngineDb, teamId: number): Promise<stri
 
 export async function writeScratchpad(
   db: EngineDb,
-  _clock: Clock,
+  clock: Clock,
   teamId: number,
   mode: "append" | "replace",
   content: string,
@@ -36,9 +36,11 @@ export async function writeScratchpad(
     }
     await tx
       .insert(scratchpads)
-      .values({ teamId, content: next, updatedAt: new Date() })
-      .onConflictDoUpdate({ target: scratchpads.teamId, set: { content: next, updatedAt: new Date() } });
-    await tx.insert(scratchpadVersions).values({ teamId, content: next, sessionId: sessionId ?? null });
+      .values({ teamId, content: next, updatedAt: clock.now() })
+      .onConflictDoUpdate({ target: scratchpads.teamId, set: { content: next, updatedAt: clock.now() } });
+    await tx
+      .insert(scratchpadVersions)
+      .values({ teamId, content: next, sessionId: sessionId ?? null, createdAt: clock.now() });
     return ok({ length: next.length });
   });
 }

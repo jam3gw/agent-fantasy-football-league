@@ -511,7 +511,7 @@ export async function refinalizeWeekAction(form: FormData): Promise<void> {
   } else if (source === "sleeper" || source === "fantasypros" || source === "nflverse") {
     const entries = await statsFromSource(c, settings.season, week, source);
     if (entries.length === 0) throw new Error(`${source} returned no rows for week ${week}`);
-    const res = await upsertWeekStats(c.database, {
+    const res = await upsertWeekStats(c.database, c.clock, {
       season: settings.season,
       week,
       entries,
@@ -585,7 +585,7 @@ export async function correctPlayerPointsAction(form: FormData): Promise<void> {
 
   // Re-score the week so matchups, winners and team_week_results follow the
   // correction; the league clock is preserved for an already-past week.
-  await scoreWeek(c.database, week);
+  await scoreWeek(c.database, c.clock, week);
   await refinalizePreservingClock(c, week);
 
   const payload = { week, playerId, before, after: points };
@@ -662,14 +662,14 @@ export async function savePauseAgentAtAction(form: FormData): Promise<void> {
   const current = await getSettings(c.database);
   const raw = str(form, "pauseAgentAtUsd");
   const extra = { ...(current.extra as Record<string, unknown>) };
-  if (raw === "") delete extra.pauseAgentAtUsd;
+  if (raw === "") delete extra.pause_agent_at_usd;
   else {
     const v = Number(raw);
     if (!Number.isFinite(v) || v <= 0) throw new Error("pause_agent_at_usd must be a positive number or blank");
-    extra.pauseAgentAtUsd = v;
+    extra.pause_agent_at_usd = v;
   }
   await updateSettings(c.database, { extra });
-  await logAction(c, "pause_agent_at_set", { pauseAgentAtUsd: extra.pauseAgentAtUsd ?? null });
+  await logAction(c, "pause_agent_at_set", { pause_agent_at_usd: extra.pause_agent_at_usd ?? null });
   finish(
     "/admin/settings",
     raw === "" ? "Hard stop off — no dollar amount ever stops an agent." : `Hard stop set at $${Number(raw).toFixed(2)} per season.`,

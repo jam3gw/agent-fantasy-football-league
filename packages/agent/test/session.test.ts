@@ -182,9 +182,12 @@ describe("runSession (§8.2)", () => {
     expect(result.endedBy).toBe("ceiling");
     const s = (await db.select().from(sessions).where(eq(sessions.id, id)))[0]!;
     expect(s.endedBy).toBe("ceiling");
-    // the nudge is recorded so the site can show why the session ended
+    // The nudge is recorded as the user message it is, so the site can show
+    // why the session ended and a resumed step replays it verbatim.
     const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
-    expect(events.some((e) => e.type === "info" && "ceiling_reached" in (e.content as object))).toBe(true);
+    expect(
+      events.some((e) => e.type === "user" && (e.content as Record<string, unknown>).nudge === "ceiling"),
+    ).toBe(true);
   });
 
   it("skips a session whose deadline has already passed", async () => {
@@ -321,5 +324,88 @@ describe("endingToolFor (§8.2)", () => {
     expect(endingToolFor("reporter_recap")).toBe("publish_report");
     expect(endingToolFor("weekly_review")).toBe("write_decision_log");
     expect(endingToolFor("smoke")).toBe("write_decision_log");
+  });
+});
+
+describe("§4.1 — a session survives the 800-second step cap", () => {
+  it("stops between model calls when the budget runs out, then resumes from the transcript", async () => {
+    toolRuns = [];
+    const sessionId = await makeSession("weekly_review");
+
+    // First step: one tool call, then the budget is gone. A FixedClock does not
+    // advance on its own, so the budget is zero — the loop must stop after the
+    // model call it already started, not before recording it.
+    const firstStep = step({
+      text: "looking",
+      toolCalls: [{ toolCallId: "c1", toolName: "get_league_state", args: {} }],
+      assistantMessage: {
+        role: "assistant",
+        content: [{ type: "tool-call", toolCallId: "c1", toolName: "get_league_state", input: {} }],
+      } as never,
+    });
+    const first = await runSession(sessionId, {
+      ...deps([firstStep]),
+      stepBudgetMs: 60_000,
+      // The call itself takes two minutes of league time, so the budget is gone
+      // by the time the loop comes round again.
+      modelStep: async () => {
+        clock.advance(120_000);
+        return firstStep;
+      },
+    });
+    expect(first.status).toBe("interrupted");
+    expect(first.steps).toBe(1);
+    expect(toolRuns).toEqual(["get_league_state"]);
+
+    // The session is still running, not finished, and nothing terminal was set.
+    const mid = (await db.select().from(sessions).where(eq(sessions.id, sessionId)))[0]!;
+    expect(mid.status).toBe("running");
+    expect(mid.endedAt).toBeNull();
+
+    // Second step: resumes and finishes. The model sees the history it had.
+    let seenMessages: unknown[] = [];
+    const second = await runSession(sessionId, {
+      ...deps([
+        step({
+          text: "done",
+          toolCalls: [{ toolCallId: "c2", toolName: "write_decision_log", args: { summary: "ok" } }],
+          assistantMessage: {
+            role: "assistant",
+            content: [
+              { type: "tool-call", toolCallId: "c2", toolName: "write_decision_log", input: { summary: "ok" } },
+            ],
+          } as never,
+        }),
+      ]),
+      modelStep: async (req) => {
+        seenMessages = req.messages;
+        return step({
+          text: "done",
+          toolCalls: [{ toolCallId: "c2", toolName: "write_decision_log", args: { summary: "ok" } }],
+          assistantMessage: {
+            role: "assistant",
+            content: [
+              { type: "tool-call", toolCallId: "c2", toolName: "write_decision_log", input: { summary: "ok" } },
+            ],
+          } as never,
+        });
+      },
+    });
+    expect(second.status).toBe("succeeded");
+    expect(second.endedBy).toBe("ending_tool");
+
+    // The resumed prompt is the original one: system, brief, the assistant turn
+    // that already happened, and its tool result.
+    const roles = (seenMessages as Array<{ role: string }>).map((m) => m.role);
+    expect(roles.slice(0, 4)).toEqual(["system", "user", "assistant", "tool"]);
+    expect(String(JSON.stringify(seenMessages))).toContain("get_league_state");
+
+    // The context snapshot was built once, and the tool ran once per call —
+    // a resume must never repeat work that is already in the transcript.
+    expect(toolRuns).toEqual(["get_league_state", "write_decision_log"]);
+    const brief = (await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, sessionId))).filter(
+      (e) => e.type === "user" && "brief" in (e.content as Record<string, unknown>),
+    );
+    expect(brief).toHaveLength(1);
   });
 });

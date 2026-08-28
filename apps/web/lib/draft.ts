@@ -85,24 +85,28 @@ export interface DraftRunResult {
 }
 
 /**
- * Run the draft from wherever it stands (§10.2). Safe to call again after a
- * pause or a crash: it resumes at `draft.current_pick`.
+ * Make **one** pick and return (§10.2). The draft runs 1.5–4 hours across 168
+ * picks, far past the 800-second cap on a single workflow step (§4.1), so the
+ * workflow calls this once per pick and each pick is its own durable step.
+ *
+ * Safe to call again after a pause or a crash: it resumes at
+ * `draft.current_pick` and skips a pick already recorded.
  */
-export async function runDraft(): Promise<DraftRunResult> {
+export async function runDraftPickStep(): Promise<DraftRunResult> {
   const database = db();
   const clock = await leagueClock();
   const settings = await getSettings(database);
   const state = await getDraft(database);
   if (!state?.order || state.order.length === 0) throw new Error("draft order has not been drawn");
   if (state.status === "complete") return { picksMade: 0, autoPicks: 0, completed: true, pausedAt: null };
+  if (state.status === "paused") {
+    return { picksMade: 0, autoPicks: 0, completed: false, pausedAt: state.currentPick ?? null };
+  }
 
   const order = state.order;
   const teamCount = order.length;
   const totalPicks = settings.draftRounds * teamCount;
   const clockSeconds = settings.draftClockSeconds;
-
-  let picksMade = 0;
-  let autoPicks = 0;
 
   if (state.status === "not_started") {
     await database
@@ -112,43 +116,62 @@ export async function runDraft(): Promise<DraftRunResult> {
     await updateSettings(database, { phase: "drafting" });
   }
 
-  for (let pickNo = (await getDraft(database))?.currentPick ?? 1; pickNo <= totalPicks; pickNo++) {
-    const current = await getDraft(database);
-    if (!current || current.status === "paused") {
-      return { picksMade, autoPicks, completed: false, pausedAt: pickNo };
-    }
-    // A pick already recorded (resume after a crash) is simply skipped.
+  // Walk past anything already recorded, so a resumed run picks up cleanly.
+  let pickNo = (await getDraft(database))?.currentPick ?? 1;
+  while (pickNo <= totalPicks) {
     const existing = await database.select().from(draftPicks).where(eq(draftPicks.pickNo, pickNo));
-    if (existing.length > 0) continue;
+    if (existing.length === 0) break;
+    pickNo++;
+  }
+  if (pickNo > totalPicks) return finishDraft(database, clock);
 
-    const { round, slotInRound, orderIndex } = snakeSlot(pickNo, teamCount);
-    const teamId = order[orderIndex]!;
-    const clockEndsAt = new Date(
-      clock.now().getTime() + (current.clockRemainingSeconds ?? clockSeconds) * 1000,
-    );
-    await database
-      .update(draftTable)
-      .set({
-        currentPick: pickNo,
-        clockEndsAt,
-        clockRemainingSeconds: null,
-        autopickFlag: false,
-        updatedAt: clock.now(),
-      })
-      .where(eq(draftTable.id, 1));
-
-    const made = await runDraftPick(database, clock, { pickNo, round, slotInRound, teamId, clockEndsAt });
-    if (made === "paused") return { picksMade, autoPicks, completed: false, pausedAt: pickNo };
-    picksMade++;
-    if (made === "autopick") autoPicks++;
+  const current = await getDraft(database);
+  if (!current || current.status === "paused") {
+    return { picksMade: 0, autoPicks: 0, completed: false, pausedAt: pickNo };
   }
 
+  const { round, slotInRound, orderIndex } = snakeSlot(pickNo, teamCount);
+  const teamId = order[orderIndex]!;
+  const clockEndsAt = new Date(
+    clock.now().getTime() + (current.clockRemainingSeconds ?? clockSeconds) * 1000,
+  );
+  await database
+    .update(draftTable)
+    .set({
+      currentPick: pickNo,
+      clockEndsAt,
+      clockRemainingSeconds: null,
+      autopickFlag: false,
+      updatedAt: clock.now(),
+    })
+    .where(eq(draftTable.id, 1));
+
+  const made = await runDraftPick(database, clock, { pickNo, round, slotInRound, teamId, clockEndsAt });
+  if (made === "paused") return { picksMade: 0, autoPicks: 0, completed: false, pausedAt: pickNo };
+
+  const result: DraftRunResult = {
+    picksMade: 1,
+    autoPicks: made === "autopick" ? 1 : 0,
+    completed: false,
+    pausedAt: null,
+  };
+  if (pickNo >= totalPicks) {
+    const done = await finishDraft(database, clock);
+    return { ...result, completed: done.completed };
+  }
+  // Point the board at the next pick so the draft room and a resumed run agree.
+  await database.update(draftTable).set({ currentPick: pickNo + 1, updatedAt: clock.now() }).where(eq(draftTable.id, 1));
+  return result;
+}
+
+/** Close the draft and fire `draft.completed`, which starts the season (§9.3). */
+async function finishDraft(database: EngineDb, clock: Clock): Promise<DraftRunResult> {
   await database
     .update(draftTable)
     .set({ status: "complete", endedAt: clock.now(), updatedAt: clock.now() })
     .where(eq(draftTable.id, 1));
   await handleEvent(database, clock, { type: "draft.completed" });
-  return { picksMade, autoPicks, completed: true, pausedAt: null };
+  return { picksMade: 0, autoPicks: 0, completed: true, pausedAt: null };
 }
 
 type PickOutcome = "agent" | "autopick" | "paused";

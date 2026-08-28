@@ -28,6 +28,9 @@ export interface FinalizeResult {
   matchupsFinalized: number;
   currentWeek: number;
   degraded: boolean;
+  /** §5.6: players compared against nflverse, and how many differed by > 0.5. */
+  audited: number;
+  auditDiscrepancies: number;
 }
 
 /**
@@ -44,7 +47,7 @@ export async function finalizeWeek(db: EngineDb, clock: Clock, week: number): Pr
   try {
     const entries = await fetchWeekStats(season, week, { db });
     if (entries.length > 0) {
-      const res = await upsertWeekStats(db, { season, week, entries, markFinal: true, source: "sleeper" });
+      const res = await upsertWeekStats(db, clock, { season, week, entries, markFinal: true, source: "sleeper" });
       playersScored = res.count;
       source = "sleeper";
     }
@@ -57,7 +60,7 @@ export async function finalizeWeek(db: EngineDb, clock: Clock, week: number): Pr
     try {
       const entries = await fetchFantasyProsPoints(db, clock, season, week);
       if (entries.length > 0) {
-        const res = await upsertWeekStats(db, {
+        const res = await upsertWeekStats(db, clock, {
           season,
           week,
           entries,
@@ -78,7 +81,7 @@ export async function finalizeWeek(db: EngineDb, clock: Clock, week: number): Pr
     try {
       const entries = await fetchNflverseWeek(db, season, week);
       if (entries.length > 0) {
-        const res = await upsertWeekStats(db, {
+        const res = await upsertWeekStats(db, clock, {
           season,
           week,
           entries,
@@ -115,6 +118,10 @@ export async function finalizeWeek(db: EngineDb, clock: Clock, week: number): Pr
       set: { lastSuccessAt: clock.now() },
     });
 
+  // §13.3 step: audit the week against nflverse. It never changes a score —
+  // the week is already final — it only records where the two disagree.
+  const audit = await auditAgainstNflverse(db, clock, season, week, source);
+
   return {
     week,
     source,
@@ -122,7 +129,106 @@ export async function finalizeWeek(db: EngineDb, clock: Clock, week: number): Pr
     matchupsFinalized: core.value.matchupsFinalized,
     currentWeek: core.value.currentWeek,
     degraded: source !== "sleeper",
+    audited: audit.checked,
+    auditDiscrepancies: audit.discrepancies,
   };
+}
+
+/** §5.6: what an audit found. A failed fetch is not a failed finalization. */
+export interface AuditResult {
+  checked: number;
+  discrepancies: number;
+}
+
+/**
+ * §5.6 — audit the week's offense and kicker points against nflverse and log
+ * every disagreement over 0.5 points. nflverse carries no team defence, so
+ * D/ST is out of scope; and a week nflverse itself scored has nothing to audit
+ * against, so that is skipped rather than compared with itself.
+ *
+ * Rows go to `scoring_discrepancies`, the same log the Sleeper `pts_ppr` check
+ * writes to (§3.2) — it is the one discrepancy table §6 defines. The summary
+ * goes to `health` under `stats.audit` so `/admin/health` shows it.
+ */
+export async function auditAgainstNflverse(
+  db: EngineDb,
+  clock: Clock,
+  season: number,
+  week: number,
+  source: ScoringSource | "none",
+): Promise<AuditResult> {
+  if (source === "nflverse" || source === "none") return { checked: 0, discrepancies: 0 };
+
+  let reference: SleeperStatsEntry[];
+  try {
+    reference = await fetchNflverseWeek(db, season, week);
+  } catch (err) {
+    // The audit is advisory. A dead feed is recorded and the week stays final.
+    await recordHealth(db, clock, "stats.audit", { error: `week ${week}: ${String(err)}` });
+    return { checked: 0, discrepancies: 0 };
+  }
+  if (reference.length === 0) return { checked: 0, discrepancies: 0 };
+
+  const { players, scoringDiscrepancies } = await import("@league/engine");
+  const position = new Map(
+    (await db.select({ playerId: players.playerId, position: players.position }).from(players)).map((p) => [
+      p.playerId,
+      p.position,
+    ]),
+  );
+  const scored = new Map(
+    (await db.select().from(playerWeekStats))
+      .filter((r) => r.season === season && r.week === week)
+      .map((r) => [r.playerId, r.enginePts]),
+  );
+
+  let checked = 0;
+  let discrepancies = 0;
+  for (const entry of reference) {
+    const pos = position.get(entry.player_id);
+    if (!pos || pos === "DEF") continue; // §5.6: not used for D/ST
+    const ours = scored.get(entry.player_id);
+    if (ours === undefined || ours === null) continue;
+    checked++;
+    const theirs = Number(entry.stats.pts_ppr ?? 0);
+    const diff = Math.round((theirs - ours) * 100) / 100;
+    if (Math.abs(diff) <= 0.5) continue; // §5.6 threshold
+    discrepancies++;
+    await db.insert(scoringDiscrepancies).values({
+      playerId: entry.player_id,
+      season,
+      week,
+      ptsPpr: theirs,
+      enginePts: ours,
+      diff,
+      createdAt: clock.now(),
+    });
+  }
+
+  await recordHealth(db, clock, "stats.audit", {
+    error: discrepancies > 0 ? `week ${week}: ${discrepancies} of ${checked} players differ from nflverse by more than 0.5` : null,
+  });
+  return { checked, discrepancies };
+}
+
+async function recordHealth(
+  db: EngineDb,
+  clock: Clock,
+  key: string,
+  input: { error?: string | null },
+): Promise<void> {
+  const now = clock.now();
+  await db
+    .insert(health)
+    .values({
+      key,
+      lastSuccessAt: now,
+      ...(input.error ? { lastError: input.error, lastErrorAt: now } : {}),
+    })
+    .onConflictDoUpdate({
+      target: health.key,
+      set: input.error ? { lastSuccessAt: now, lastError: input.error, lastErrorAt: now } : { lastSuccessAt: now },
+    });
 }
 
 /** Source 2: FantasyPros PPR player-points for one week (§13.4). */

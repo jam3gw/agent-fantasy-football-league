@@ -91,7 +91,7 @@ describe("submitWaiverClaims (§7.2)", () => {
 
     const r1 = await submitWaiverClaims(db, clock, t1!, [{ addPlayerId: w1, priority: 1 }]);
     expect(r1.ok).toBe(true);
-    if (r1.ok) expect(r1.value.map((c) => c.addPlayerId)).toEqual([w1]);
+    if (r1.ok) expect(r1.value.accepted.map((c) => c.addPlayerId)).toEqual([w1]);
 
     const r2 = await submitWaiverClaims(db, clock, t1!, [
       { addPlayerId: w2, priority: 1 },
@@ -109,11 +109,11 @@ describe("submitWaiverClaims (§7.2)", () => {
 
     // an empty list clears everything
     const r3 = await submitWaiverClaims(db, clock, t1!, []);
-    expect(r3.ok && r3.value).toEqual([]);
+    expect(r3.ok && r3.value.accepted).toEqual([]);
     expect(await pendingClaims(t1!)).toHaveLength(0);
   });
 
-  it("rejects a claim for a free agent with not_on_waivers and keeps the old list", async () => {
+  it("rejects a free-agent claim per claim and keeps the valid one (§7.2)", async () => {
     await seedLeague(db);
     const [t1] = await seedTeams(db);
     const clock = new FixedClock("2026-09-15T12:00:00Z");
@@ -125,18 +125,21 @@ describe("submitWaiverClaims (§7.2)", () => {
       { addPlayerId: fa, priority: 1 },
       { addPlayerId: w1, priority: 2 },
     ]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.error).toBe("not_on_waivers");
-      expect(r.hint).toBe("use add_free_agent");
-      expect(r.details).toHaveLength(1);
+    // §7.2 rejects per claim: the free agent is refused with a reason, the
+    // valid claim is still saved rather than thrown away with it.
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.accepted.map((c) => c.addPlayerId)).toEqual([w1]);
+      expect(r.value.rejected).toHaveLength(1);
+      expect(r.value.rejected[0]!.error).toBe("not_on_waivers");
+      expect(r.value.rejected[0]!.addPlayerId).toBe(fa);
+      expect(r.value.rejected[0]!.hint).toBe("use add_free_agent");
     }
-    // the whole call was rejected: previous list untouched
     const pending = await pendingClaims(t1!);
     expect(pending.map((c) => c.addPlayerId)).toEqual([w1]);
   });
 
-  it("rejects already_rostered adds and lists every per-claim failure in details", async () => {
+  it("reports every per-claim failure when nothing in the list is valid", async () => {
     await seedLeague(db);
     const [t1, t2] = await seedTeams(db);
     const clock = new FixedClock("2026-09-15T12:00:00Z");
@@ -148,12 +151,12 @@ describe("submitWaiverClaims (§7.2)", () => {
       { addPlayerId: owned, priority: 1 },
       { addPlayerId: fa, priority: 2 },
     ]);
-    expect(r.ok).toBe(false);
-    if (!r.ok) {
-      expect(r.error).toBe("already_rostered");
-      const details = r.details as Array<{ addPlayerId: string; error: string }>;
-      expect(details.map((d) => d.error).sort()).toEqual(["already_rostered", "not_on_waivers"]);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.accepted).toEqual([]);
+      expect(r.value.rejected.map((d) => d.error).sort()).toEqual(["already_rostered", "not_on_waivers"]);
     }
+    expect(await pendingClaims(t1!)).toHaveLength(0);
   });
 
   it("rejects invalid_drop when the drop player is not owned, frozen, or locked", async () => {
@@ -168,7 +171,7 @@ describe("submitWaiverClaims (§7.2)", () => {
     const rNotOwned = await submitWaiverClaims(db, clock, t1!, [
       { addPlayerId: w1, dropPlayerId: someoneElses, priority: 1 },
     ]);
-    expect(!rNotOwned.ok && rNotOwned.error).toBe("invalid_drop");
+    expect(rNotOwned.ok && rNotOwned.value.rejected[0]!.error).toBe("invalid_drop");
 
     // frozen (give side of the team's own proposed trade)
     const frozenP = await makePlayer(db, { playerId: "frozen1" });
@@ -184,7 +187,7 @@ describe("submitWaiverClaims (§7.2)", () => {
     const rFrozen = await submitWaiverClaims(db, clock, t1!, [
       { addPlayerId: w1, dropPlayerId: frozenP, priority: 1 },
     ]);
-    expect(!rFrozen.ok && rFrozen.error).toBe("invalid_drop");
+    expect(rFrozen.ok && rFrozen.value.rejected[0]!.error).toBe("invalid_drop");
 
     // locked (game kicked off)
     const lockedP = await makePlayer(db, { playerId: "locked1", nflTeam: "PHI" });
@@ -193,7 +196,7 @@ describe("submitWaiverClaims (§7.2)", () => {
     const rLocked = await submitWaiverClaims(db, clock, t1!, [
       { addPlayerId: w1, dropPlayerId: lockedP, priority: 1 },
     ]);
-    expect(!rLocked.ok && rLocked.error).toBe("invalid_drop");
+    expect(rLocked.ok && rLocked.value.rejected[0]!.error).toBe("invalid_drop");
   });
 
   it("accepts claims for players whose waiver_until is in the future (they wait)", async () => {

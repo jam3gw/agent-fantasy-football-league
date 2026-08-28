@@ -101,7 +101,7 @@ describe("scoreWeek / teamWeekPoints (§7.4)", () => {
     await stat(b, 1, 14);
     await db.insert(matchups).values({ week: 1, homeTeamId: t1!, awayTeamId: t2! });
 
-    const res = await scoreWeek(db, 1);
+    const res = await scoreWeek(db, clock, 1);
     expect(res).toHaveLength(1);
     expect(res[0]!.homePoints).toBe(20);
     const m = (await db.select().from(matchups))[0]!;

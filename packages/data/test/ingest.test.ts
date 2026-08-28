@@ -127,9 +127,9 @@ describe("stats ingest (§5.3, §3.2)", () => {
       { player_id: "a", season: 2026, week: 1, stats: { rec: 4, rec_yd: 50, pts_ppr: 9.0 } },
       { player_id: "b", season: 2026, week: 1, stats: { rec: 2, rec_yd: 10, pts_ppr: 99.0 } }, // discrepancy
     ];
-    const live = await upsertWeekStats(db, { season: 2026, week: 1, entries, markFinal: false });
+    const live = await upsertWeekStats(db, clock, { season: 2026, week: 1, entries, markFinal: false });
     expect(live.discrepancies).toBe(0);
-    const final = await upsertWeekStats(db, { season: 2026, week: 1, entries, markFinal: true });
+    const final = await upsertWeekStats(db, clock, { season: 2026, week: 1, entries, markFinal: true });
     expect(final.discrepancies).toBe(1);
     const rows = await db.select().from(playerWeekStats);
     const a = rows.find((r) => r.playerId === "a")!;

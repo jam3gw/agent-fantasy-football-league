@@ -3,7 +3,7 @@
  * Alarms notify; they never stop a session (§8.1). The optional
  * `pause_agent_at_usd` setting is the single exception and is off by default.
  */
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import { etDay, zonedTimeToUtc } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
@@ -127,7 +127,17 @@ export function periodStartKey(period: RollupPeriod, now: Date, week: number, se
   return String(season);
 }
 
-/** Recompute rollups for the periods a ledger row touches (§8.7). */
+/**
+ * Recompute the rollups a ledger row touches (§8.7): per agent and for the
+ * league, for today, this fantasy week, and the season.
+ *
+ * All three periods come from one pass over the ledger. The week a step
+ * belongs to is the week its session was booked for (`sessions.context.week`)
+ * rather than the calendar — a Tuesday review and the Sunday lineup check it
+ * leads to are the same fantasy week. Steps from sessions with no week (the
+ * draft, onboarding) belong to no week; §8.7 counts those under "plus the
+ * draft" in the projection, not under a week.
+ */
 export async function updateRollups(db: EngineDb, clock: Clock): Promise<void> {
   const settings = await getSettings(db);
   const now = clock.now();
@@ -136,48 +146,53 @@ export async function updateRollups(db: EngineDb, clock: Clock): Promise<void> {
   const seasonKey = String(settings.season);
   const dayStart = etDayStartUtc(now);
 
+  const sessionWeek = sql<number>`(${sessions.context} ->> 'week')::int`;
+  const inDay = sql`${spendLedger.createdAt} >= ${dayStart}`;
+  const inWeek = sql`${sessionWeek} = ${settings.currentWeek}`;
+
+  const rows = await db
+    .select({
+      teamId: spendLedger.teamId,
+      seasonCost: sql<number>`coalesce(sum(${spendLedger.costUsd}), 0)::float8`,
+      seasonInput: sql<number>`coalesce(sum(${spendLedger.inputTokens}), 0)::int`,
+      seasonOutput: sql<number>`coalesce(sum(${spendLedger.outputTokens}), 0)::int`,
+      seasonReasoning: sql<number>`coalesce(sum(${spendLedger.reasoningTokens}), 0)::int`,
+      seasonSessions: sql<number>`count(distinct ${spendLedger.sessionId})::int`,
+      dayCost: sql<number>`coalesce(sum(${spendLedger.costUsd}) filter (where ${inDay}), 0)::float8`,
+      dayInput: sql<number>`coalesce(sum(${spendLedger.inputTokens}) filter (where ${inDay}), 0)::int`,
+      dayOutput: sql<number>`coalesce(sum(${spendLedger.outputTokens}) filter (where ${inDay}), 0)::int`,
+      dayReasoning: sql<number>`coalesce(sum(${spendLedger.reasoningTokens}) filter (where ${inDay}), 0)::int`,
+      daySessions: sql<number>`count(distinct ${spendLedger.sessionId}) filter (where ${inDay})::int`,
+      weekCost: sql<number>`coalesce(sum(${spendLedger.costUsd}) filter (where ${inWeek}), 0)::float8`,
+      weekInput: sql<number>`coalesce(sum(${spendLedger.inputTokens}) filter (where ${inWeek}), 0)::int`,
+      weekOutput: sql<number>`coalesce(sum(${spendLedger.outputTokens}) filter (where ${inWeek}), 0)::int`,
+      weekReasoning: sql<number>`coalesce(sum(${spendLedger.reasoningTokens}) filter (where ${inWeek}), 0)::int`,
+      weekSessions: sql<number>`count(distinct ${spendLedger.sessionId}) filter (where ${inWeek})::int`,
+    })
+    .from(spendLedger)
+    .innerJoin(sessions, eq(sessions.id, spendLedger.sessionId))
+    .groupBy(spendLedger.teamId);
+
+  const pick = (r: (typeof rows)[number], p: "season" | "day" | "week"): RollupNumbers => ({
+    cost: r[`${p}Cost`],
+    input: r[`${p}Input`],
+    output: r[`${p}Output`],
+    reasoning: r[`${p}Reasoning`],
+    sessionCount: r[`${p}Sessions`],
+  });
+
   const scopeKeyOf = (teamId: number | null) => (teamId === null ? "reporter" : String(teamId));
 
-  // per-agent day
-  const dayRows = await db
-    .select({
-      teamId: spendLedger.teamId,
-      cost: sql<number>`coalesce(sum(${spendLedger.costUsd}), 0)::float8`,
-      input: sql<number>`coalesce(sum(${spendLedger.inputTokens}), 0)::int`,
-      output: sql<number>`coalesce(sum(${spendLedger.outputTokens}), 0)::int`,
-      reasoning: sql<number>`coalesce(sum(${spendLedger.reasoningTokens}), 0)::int`,
-      sessionCount: sql<number>`count(distinct ${spendLedger.sessionId})::int`,
-    })
-    .from(spendLedger)
-    .where(gte(spendLedger.createdAt, dayStart))
-    .groupBy(spendLedger.teamId);
-
-  for (const r of dayRows) {
-    await upsertRollup(db, clock, "agent", scopeKeyOf(r.teamId), "day", dayKey, r);
+  for (const r of rows) {
+    const key = scopeKeyOf(r.teamId);
+    await upsertRollup(db, clock, "agent", key, "day", dayKey, pick(r, "day"));
+    await upsertRollup(db, clock, "agent", key, "week", weekKey, pick(r, "week"));
+    await upsertRollup(db, clock, "agent", key, "season", seasonKey, pick(r, "season"));
   }
 
-  // per-agent season and week (the whole ledger is one season)
-  const allRows = await db
-    .select({
-      teamId: spendLedger.teamId,
-      cost: sql<number>`coalesce(sum(${spendLedger.costUsd}), 0)::float8`,
-      input: sql<number>`coalesce(sum(${spendLedger.inputTokens}), 0)::int`,
-      output: sql<number>`coalesce(sum(${spendLedger.outputTokens}), 0)::int`,
-      reasoning: sql<number>`coalesce(sum(${spendLedger.reasoningTokens}), 0)::int`,
-      sessionCount: sql<number>`count(distinct ${spendLedger.sessionId})::int`,
-    })
-    .from(spendLedger)
-    .groupBy(spendLedger.teamId);
-  for (const r of allRows) {
-    await upsertRollup(db, clock, "agent", scopeKeyOf(r.teamId), "season", seasonKey, r);
-  }
-
-  // league totals
-  const leagueDay = sumRows(dayRows);
-  const leagueSeason = sumRows(allRows);
-  await upsertRollup(db, clock, "league", "league", "day", dayKey, leagueDay);
-  await upsertRollup(db, clock, "league", "league", "season", seasonKey, leagueSeason);
-  await upsertRollup(db, clock, "league", "league", "week", weekKey, leagueSeason);
+  await upsertRollup(db, clock, "league", "league", "day", dayKey, sumRows(rows.map((r) => pick(r, "day"))));
+  await upsertRollup(db, clock, "league", "league", "week", weekKey, sumRows(rows.map((r) => pick(r, "week"))));
+  await upsertRollup(db, clock, "league", "league", "season", seasonKey, sumRows(rows.map((r) => pick(r, "season"))));
 }
 
 interface RollupNumbers {

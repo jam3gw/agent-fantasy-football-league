@@ -79,6 +79,11 @@ export async function bookLineupChecks(db: EngineDb, clock: Clock, week: number)
     const dueAt = new Date(window.key.getTime() - LINEUP_CHECK_LEAD_MS);
     if (dueAt.getTime() <= now.getTime()) continue; // window already upon us
     const windowTeams = new Set(window.nflTeams);
+    // Staggered a minute apart, like the other per-team bookings (§9.1). Only
+    // six sessions run at once (§9.2), so booking all twelve for the same
+    // instant just means six of them spend their first minutes waiting for a
+    // slot — and the lead time is 90 minutes, so a stagger costs nothing.
+    let offset = 0;
     for (const team of allTeams) {
       const mine = nflTeamsByTeam.get(team.id);
       if (!mine || ![...mine].some((t) => windowTeams.has(t))) continue;
@@ -94,12 +99,13 @@ export async function bookLineupChecks(db: EngineDb, clock: Clock, week: number)
           window.key.toISOString(),
         ),
         modelId: team.modelId,
-        dueAt,
+        dueAt: new Date(dueAt.getTime() + offset * 60_000),
         now,
         // The deadline is the real event: this window's kickoff (§8.3).
         deadlineAt: window.key,
         context: { week, window_kickoff_et: window.key.toISOString() },
       });
+      offset++;
       if (created !== null) booked++;
     }
   }
