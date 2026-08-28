@@ -1,0 +1,12 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "installCommand": "pnpm install --frozen-lockfile",
+  "buildCommand": "pnpm --filter @league/web build",
+  "outputDirectory": "apps/web/.next",
+  "crons": [{ "path": "/api/cron/tick", "schedule": "* * * * *" }],
+  "functions": {
+    "apps/web/app/api/cron/tick/route.ts": { "maxDuration": 800 },
+    "apps/web/app/api/workflows/**/*.ts": { "maxDuration": 800 }
+  }
+}
