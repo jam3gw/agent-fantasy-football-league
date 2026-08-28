@@ -10,6 +10,7 @@ import { matchups, teams } from "./db/schema.ts";
 import type { EngineResult } from "./errors.ts";
 import { fail, ok } from "./errors.ts";
 import { getSettings, updateSettings } from "./settings.ts";
+import { recordTransaction } from "./transactions.ts";
 
 export interface StandingsRow {
   teamId: number;
@@ -104,36 +105,58 @@ export async function computeStandings(db: EngineDb): Promise<StandingsRow[]> {
   }
 
   const rows = [...rec.values()];
-  // Group by win percentage, break ties inside each group.
-  const sorted = rows.sort((a, b) => {
-    const pctDiff = winPctOf(b) - winPctOf(a);
-    if (Math.abs(pctDiff) > 1e-9) return pctDiff;
 
-    // Head-to-head within the full set of teams tied on win pct.
-    const tiedGroup = rows.filter((r) => Math.abs(winPctOf(r) - winPctOf(a)) < 1e-9);
-    if (tiedGroup.length > 1) {
-      const h2h = (r: Record_) => {
-        let wins = 0;
-        let ties = 0;
-        let games = 0;
-        for (const other of tiedGroup) {
-          if (other.teamId === r.teamId) continue;
-          const v = r.vs.get(other.teamId);
-          if (!v) continue;
-          wins += v.wins;
-          ties += v.ties;
-          games += v.games;
-        }
-        return games === 0 ? null : (wins + 0.5 * ties) / games;
-      };
-      const ha = h2h(a);
-      const hb = h2h(b);
-      if (ha !== null && hb !== null && Math.abs(ha - hb) > 1e-9) return hb - ha;
+  /**
+   * Sort in two stages so the ordering is always well defined. Comparing
+   * head-to-head inside a single comparator is non-transitive when a tied
+   * group is not fully connected (A beat B, neither played C), and the result
+   * would then depend on the sort implementation. Instead: group by win
+   * percentage first, then order each group on its own.
+   */
+  const groups = new Map<string, Record_[]>();
+  for (const r of rows) {
+    const key = winPctOf(r).toFixed(9);
+    const g = groups.get(key);
+    if (g) g.push(r);
+    else groups.set(key, [r]);
+  }
+
+  const sorted: Record_[] = [];
+  for (const key of [...groups.keys()].sort((a, b) => Number(b) - Number(a))) {
+    const group = groups.get(key)!;
+    if (group.length === 1) {
+      sorted.push(group[0]!);
+      continue;
     }
-
-    if (Math.abs(b.pointsFor - a.pointsFor) > 1e-9) return b.pointsFor - a.pointsFor;
-    return b.tiebreakRand - a.tiebreakRand;
-  });
+    // Head-to-head record within this group; null when a team played none of
+    // the others, which makes the tiebreak inapplicable for the whole group.
+    const h2h = (r: Record_): number | null => {
+      let wins = 0;
+      let ties = 0;
+      let games = 0;
+      for (const other of group) {
+        if (other.teamId === r.teamId) continue;
+        const v = r.vs.get(other.teamId);
+        if (!v) continue;
+        wins += v.wins;
+        ties += v.ties;
+        games += v.games;
+      }
+      return games === 0 ? null : (wins + 0.5 * ties) / games;
+    };
+    const scores = new Map(group.map((r) => [r.teamId, h2h(r)]));
+    const everyoneConnected = group.every((r) => scores.get(r.teamId) !== null);
+    group.sort((a, b) => {
+      if (everyoneConnected) {
+        const ha = scores.get(a.teamId)!;
+        const hb = scores.get(b.teamId)!;
+        if (Math.abs(ha - hb) > 1e-9) return hb - ha;
+      }
+      if (Math.abs(b.pointsFor - a.pointsFor) > 1e-9) return b.pointsFor - a.pointsFor;
+      return b.tiebreakRand - a.tiebreakRand;
+    });
+    sorted.push(...group);
+  }
 
   return sorted.map((r, i) => ({
     teamId: r.teamId,
@@ -207,7 +230,17 @@ export async function seedPlayoffs(db: EngineDb, clock: Clock): Promise<EngineRe
       }
     }
     await updateSettings(tx, { extra: { ...(settings.extra as object), playoffSeeds: seeds } });
-    void clock;
+    await recordTransaction(tx, {
+      type: "commissioner",
+      week: startWeek,
+      teamIds: qualifiers.map((q) => q.teamId),
+      payload: {
+        action: "playoffs_seeded",
+        seeds,
+        eliminated: standings.slice(settings.playoffTeams).map((r) => r.teamId),
+        at: clock.now().toISOString(),
+      },
+    });
     return ok({ seeds });
   });
 }
@@ -284,7 +317,18 @@ export async function advancePlayoffs(
       });
       created++;
     }
-    void clock;
+    await recordTransaction(tx, {
+      type: "commissioner",
+      week: nextWeek,
+      teamIds: pairs.flat(),
+      payload: {
+        action: "playoff_round_created",
+        round,
+        matchups: pairs.map(([a, b]) => ({ a, b })),
+        eliminated: prev.map((m) => (m.winnerTeamId === m.homeTeamId ? m.awayTeamId : m.homeTeamId)),
+        at: clock.now().toISOString(),
+      },
+    });
     return ok({ created });
   });
 }
