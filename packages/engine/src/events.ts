@@ -41,6 +41,8 @@ export interface CreateSessionInput {
   idempotencyKey: string;
   modelId: string;
   dueAt: Date;
+  /** Creation instant from the engine Clock (keeps simulation time consistent, §4.3). */
+  now: Date;
   /** Real-event deadline; when omitted the kind's wall-time window applies from dueAt. */
   deadlineAt?: Date;
   context?: Record<string, unknown>;
@@ -68,6 +70,7 @@ export async function createSession(
       idempotencyKey: input.idempotencyKey,
       modelId: input.modelId,
       status: "queued",
+      createdAt: input.now,
       context: {
         ...(input.context ?? {}),
         deadline_at: deadlineAt.toISOString(),
@@ -119,6 +122,7 @@ export async function handleEvent(db: EngineDb, clock: Clock, event: EngineEvent
         idempotencyKey: `session:${team.id}:trade_response:${season}:${week}:trade${event.tradeId}`,
         modelId: team.modelId,
         dueAt: now,
+        now,
         context: { trade_id: event.tradeId },
       });
       return;
@@ -138,6 +142,7 @@ export async function handleEvent(db: EngineDb, clock: Clock, event: EngineEvent
           idempotencyKey: `session:${t.id}:trade_vote:${season}:${week}:trade${event.tradeId}`,
           modelId: t.modelId,
           dueAt: new Date(now.getTime() + i * 30_000), // staggered 30 s
+          now,
           deadlineAt: event.reviewEndsAt,
           context: { trade_id: event.tradeId },
         });
@@ -158,6 +163,7 @@ export async function handleEvent(db: EngineDb, clock: Clock, event: EngineEvent
         idempotencyKey: `session:reporter:reporter_trade_note:${season}:${week}:trade${event.tradeId}`,
         modelId: reporterModelId(settings),
         dueAt: now,
+        now,
         context: { trade_id: event.tradeId },
       });
       return;
@@ -179,6 +185,7 @@ export async function handleEvent(db: EngineDb, clock: Clock, event: EngineEvent
         idempotencyKey: injurySessionKey(team.id, event.playerId, event.status, event.week),
         modelId: team.modelId,
         dueAt: now,
+        now,
         deadlineAt: deadline,
         context: { player_id: event.playerId, injury_status: event.status },
       });
@@ -211,6 +218,7 @@ export async function handleEvent(db: EngineDb, clock: Clock, event: EngineEvent
           idempotencyKey: `session:${team.id}:board_reply:${season}:${week}:post${event.postId}`,
           modelId: team.modelId,
           dueAt: now,
+          now,
           context: { thread_post_id: event.postId },
         });
       }
