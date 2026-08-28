@@ -32,8 +32,6 @@ import {
   upsertWeekStats,
 } from "@league/data";
 import { reporterModelId } from "@league/engine";
-import { finalizeWeek } from "./finalize";
-import { runAgentSession } from "./runSession";
 
 /** Book a job unless its idempotency key already exists. */
 export async function bookJob(
