@@ -15,6 +15,7 @@ export interface DbClientOptions {
   url?: string;
   /** Serverless functions should keep the pool tiny; each instance is short-lived. */
   max?: number;
+  connectTimeoutSeconds?: number;
 }
 
 /**
@@ -28,7 +29,12 @@ export function getDb(options: DbClientOptions = {}): EngineDb {
   const sql = postgres(url, {
     max: options.max ?? 3,
     idle_timeout: 20,
-    connect_timeout: 15,
+    // Fail fast rather than hang. Pages are ISR-prerendered at build time, so
+    // an unreachable database must surface as an error the page can degrade
+    // on, well inside Next's 60-second per-page budget — not as a long retry
+    // that fails the whole deploy.
+    connect_timeout: options.connectTimeoutSeconds ?? 8,
+    max_lifetime: 60 * 30,
     onnotice: () => {},
   });
   const db = drizzle(sql, { schema }) as unknown as EngineDb;

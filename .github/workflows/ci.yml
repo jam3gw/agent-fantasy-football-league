@@ -18,3 +18,11 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
+      # The app builds without a database: pages render per request, so a
+      # broken page or workflow is caught here rather than on deploy.
+      - run: pnpm --filter @league/web exec next build
+        env:
+          DATABASE_URL: postgresql://unused:unused@127.0.0.1:5432/unused
+          SESSION_SECRET: ci
+          CRON_SECRET: ci
+          COMMISSIONER_PASSWORD: ci

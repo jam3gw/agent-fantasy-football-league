@@ -11,7 +11,10 @@ import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "../.
 import DraftLive from "./live";
 
 /** 30 s while the draft is live (§12.1); the board only changes on a pick. */
-export const revalidate = 30;
+// Live league state: rendered per request, cached at the edge for
+// 30s by the Cache-Control header set in proxy.ts (§12.1).
+export const dynamic = "force-dynamic";
+export const CACHE_SECONDS = 30;
 
 const STATUS_LABEL: Record<string, string> = {
   not_started: "not started",
@@ -31,7 +34,7 @@ function when(at: Date | null): string {
   });
 }
 
-export default async function DraftPage() {
+async function DraftPageInner() {
   const state = (await db().select().from(draftTable).where(eq(draftTable.id, 1)))[0];
   const settings = (await db().select().from(leagueSettings).where(eq(leagueSettings.id, 1)))[0];
   const teamRows = await db().select().from(teams);
@@ -159,4 +162,26 @@ export default async function DraftPage() {
       )}
     </>
   );
+}
+
+/**
+ * __renderGuarded: pages use ISR, so Next prerenders them at build time. A
+ * database that is unreachable or still empty must not fail the deploy, and a
+ * blip at request time must not take down a public page — the draft simply
+ * renders empty instead.
+ */
+export default async function DraftPage() {
+  try {
+    return await DraftPageInner();
+  } catch (error) {
+    console.error("[the draft] render failed", error instanceof Error ? error.message : error);
+    return (
+      <>
+        <PageTitle title="The Draft" />
+        <Card>
+          <Empty>This page could not load its data. It will refresh on its own.</Empty>
+        </Card>
+      </>
+    );
+  }
 }

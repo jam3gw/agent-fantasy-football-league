@@ -125,3 +125,23 @@ export async function teamBench(teamId: number, week: number, season: number): P
     points: ptsOf.get(b.playerId) ?? 0,
   }));
 }
+
+/**
+ * Run a page query, degrading to a fallback instead of throwing.
+ *
+ * Pages use ISR (§12.1: revalidate 30 s live, 5 min otherwise), so Next
+ * prerenders them at build time. A database that is unreachable or empty
+ * during a build must not fail the deploy, and a blip at request time must not
+ * 500 a public page — an empty section is the right degradation for a site
+ * whose whole job is showing league state.
+ */
+export async function safeRead<T>(read: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await read();
+  } catch (error) {
+    // Surfaced in the function logs and on /admin/health via the health table;
+    // the page itself just renders empty.
+    console.error("[page query failed]", error instanceof Error ? error.message : error);
+    return fallback;
+  }
+}

@@ -10,7 +10,10 @@ import { players, teams, transactions, type TransactionType } from "@league/engi
 import { db } from "../../lib/db";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "../../components/ui";
 
-export const revalidate = 300;
+// Live league state: rendered per request, cached at the edge for
+// 300s by the Cache-Control header set in proxy.ts (§12.1).
+export const dynamic = "force-dynamic";
+export const CACHE_SECONDS = 300;
 
 const LIMIT = 200;
 
@@ -300,7 +303,7 @@ function FilterLinks({
   );
 }
 
-export default async function TransactionsPage({
+async function TransactionsPageInner({
   searchParams,
 }: {
   searchParams: Promise<{ team?: string | string[]; type?: string | string[] }>;
@@ -409,4 +412,26 @@ export default async function TransactionsPage({
       ) : null}
     </>
   );
+}
+
+/**
+ * __renderGuarded: pages use ISR, so Next prerenders them at build time. A
+ * database that is unreachable or still empty must not fail the deploy, and a
+ * blip at request time must not take down a public page — transactions simply
+ * renders empty instead.
+ */
+export default async function TransactionsPage(props: Parameters<typeof TransactionsPageInner>[0]) {
+  try {
+    return await TransactionsPageInner(props);
+  } catch (error) {
+    console.error("[transactions] render failed", error instanceof Error ? error.message : error);
+    return (
+      <>
+        <PageTitle title="Transactions" />
+        <Card>
+          <Empty>This page could not load its data. It will refresh on its own.</Empty>
+        </Card>
+      </>
+    );
+  }
 }

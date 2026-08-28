@@ -7,7 +7,10 @@ import { boardPosts, teams } from "@league/engine";
 import { db } from "../../lib/db";
 import { Badge, Card, Empty, PageTitle, TeamLabel } from "../../components/ui";
 
-export const revalidate = 300;
+// Live league state: rendered per request, cached at the edge for
+// 300s by the Cache-Control header set in proxy.ts (§12.1).
+export const dynamic = "force-dynamic";
+export const CACHE_SECONDS = 300;
 
 /** Roots shown per page load; replies to those roots are always shown in full. */
 const THREADS = 40;
@@ -44,7 +47,7 @@ function PostBody({ post, team }: { post: Post; team: Team | undefined }) {
   );
 }
 
-export default async function BoardPage() {
+async function BoardPageInner() {
   // Roots first, then every reply belonging to those roots, so a thread is
   // never cut in half by the limit.
   const roots = await db()
@@ -111,4 +114,26 @@ export default async function BoardPage() {
       )}
     </>
   );
+}
+
+/**
+ * __renderGuarded: pages use ISR, so Next prerenders them at build time. A
+ * database that is unreachable or still empty must not fail the deploy, and a
+ * blip at request time must not take down a public page — the message board simply
+ * renders empty instead.
+ */
+export default async function BoardPage() {
+  try {
+    return await BoardPageInner();
+  } catch (error) {
+    console.error("[the message board] render failed", error instanceof Error ? error.message : error);
+    return (
+      <>
+        <PageTitle title="The Message Board" />
+        <Card>
+          <Empty>This page could not load its data. It will refresh on its own.</Empty>
+        </Card>
+      </>
+    );
+  }
 }

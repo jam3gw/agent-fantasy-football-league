@@ -14,7 +14,10 @@ import { reporterPosts } from "@league/engine";
 import { db } from "../../lib/db";
 import { Badge, Card, Empty, PageTitle } from "../../components/ui";
 
-export const revalidate = 300;
+// Live league state: rendered per request, cached at the edge for
+// 300s by the Cache-Control header set in proxy.ts (§12.1).
+export const dynamic = "force-dynamic";
+export const CACHE_SECONDS = 300;
 
 const LIMIT = 30;
 
@@ -188,7 +191,7 @@ function Markdown({ source, id }: { source: string; id: number }) {
 
 /* ------------------------------------------------------------------- page */
 
-export default async function ReportPage() {
+async function ReportPageInner() {
   const posts = await db().select().from(reporterPosts).orderBy(desc(reporterPosts.createdAt)).limit(LIMIT);
 
   return (
@@ -220,4 +223,26 @@ export default async function ReportPage() {
       )}
     </>
   );
+}
+
+/**
+ * __renderGuarded: pages use ISR, so Next prerenders them at build time. A
+ * database that is unreachable or still empty must not fail the deploy, and a
+ * blip at request time must not take down a public page — reporter posts simply
+ * renders empty instead.
+ */
+export default async function ReportPage() {
+  try {
+    return await ReportPageInner();
+  } catch (error) {
+    console.error("[reporter posts] render failed", error instanceof Error ? error.message : error);
+    return (
+      <>
+        <PageTitle title="Reporter Posts" />
+        <Card>
+          <Empty>This page could not load its data. It will refresh on its own.</Empty>
+        </Card>
+      </>
+    );
+  }
 }

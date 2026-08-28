@@ -11,7 +11,10 @@ import { leagueSettings, players, teams, waiverClaims, waiverRuns } from "@leagu
 import { db } from "../../lib/db";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "../../components/ui";
 
-export const revalidate = 300;
+// Live league state: rendered per request, cached at the edge for
+// 300s by the Cache-Control header set in proxy.ts (§12.1).
+export const dynamic = "force-dynamic";
+export const CACHE_SECONDS = 300;
 
 function when(at: Date): string {
   return at.toLocaleString("en-US", {
@@ -23,7 +26,7 @@ function when(at: Date): string {
   });
 }
 
-export default async function WaiversPage() {
+async function WaiversPageInner() {
   const settings = (await db().select().from(leagueSettings).where(eq(leagueSettings.id, 1)))[0];
   const teamRows = await db().select().from(teams);
   const teamById = new Map(teamRows.map((t) => [t.id, t]));
@@ -179,4 +182,26 @@ export default async function WaiversPage() {
       </div>
     </>
   );
+}
+
+/**
+ * __renderGuarded: pages use ISR, so Next prerenders them at build time. A
+ * database that is unreachable or still empty must not fail the deploy, and a
+ * blip at request time must not take down a public page — waivers simply
+ * renders empty instead.
+ */
+export default async function WaiversPage() {
+  try {
+    return await WaiversPageInner();
+  } catch (error) {
+    console.error("[waivers] render failed", error instanceof Error ? error.message : error);
+    return (
+      <>
+        <PageTitle title="Waivers" />
+        <Card>
+          <Empty>This page could not load its data. It will refresh on its own.</Empty>
+        </Card>
+      </>
+    );
+  }
 }
