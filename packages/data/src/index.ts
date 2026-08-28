@@ -7,3 +7,5 @@ export * from "./ingest/players.ts";
 export * from "./ingest/schedule.ts";
 export * from "./ingest/stats.ts";
 export * from "./fantasypros.ts";
+export * from "./playerMatch.ts";
+export * from "./ingest/rankings.ts";

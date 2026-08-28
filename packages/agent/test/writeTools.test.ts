@@ -11,6 +11,8 @@ import {
   draft,
   draftPicks,
   lineupEntries,
+  playerWeekProj,
+  playerWeekStats,
   rankings,
   rosterEntries,
   teams,
@@ -25,6 +27,7 @@ import {
 } from "../src/tools/write.ts";
 import {
   DRAFT_TOOLS,
+  autoPickCandidate,
   getAvailablePlayersTool,
   getDraftStateTool,
   makePickTool,
@@ -670,6 +673,93 @@ describe("get_available_players", () => {
 
     const res = await getAvailablePlayersTool.execute({}, ctxFor({ teamId: teamIds[0]!, kind: "draft_pick" }));
     expect((res.items as Array<{ player_id: string }>).map((p) => p.player_id)).not.toContain(ids[2]);
+  });
+});
+
+/* ========================================================================== */
+/* autoPickCandidate (§10.4)                                                  */
+/* ========================================================================== */
+
+describe("autoPickCandidate", () => {
+  it("takes the highest-ranked available player that passes both rules", async () => {
+    await seedLeague(db, { phase: "drafting" });
+    const teamIds = await seedTeams(db);
+    await startDraft(teamIds, 1);
+    const teamId = teamIds[0]!;
+
+    const k1 = await makePlayer(db, { playerId: "ap-k1", position: "K" });
+    const k2 = await makePlayer(db, { playerId: "ap-k2", position: "K" });
+    const wr = await makePlayer(db, { playerId: "ap-wr", position: "WR" });
+    await db.insert(rankings).values([
+      { playerId: k2, set: "draft", week: 0, rank: 1, fetchedAt: new Date(NOW) },
+      { playerId: wr, set: "draft", week: 0, rank: 2, fetchedAt: new Date(NOW) },
+    ]);
+    // The team already has its one allowed kicker, so rank 1 is over the cap.
+    await rosterPlayer(db, teamId, k1);
+
+    const pick = await autoPickCandidate(db as unknown as EngineDb, teamId, 1);
+    expect(pick?.player_id).toBe(wr);
+  });
+
+  it("falls back to last-season points, then to the projection", async () => {
+    await seedLeague(db, { phase: "drafting" });
+    const teamIds = await seedTeams(db);
+    await startDraft(teamIds, 1);
+
+    const quiet = await makePlayer(db, { playerId: "ap-quiet", position: "RB" });
+    const proven = await makePlayer(db, { playerId: "ap-proven", position: "RB" });
+    await db.insert(playerWeekStats).values([
+      { playerId: proven, season: SEASON - 1, week: 1, stats: {}, ptsPpr: 22.5 },
+      { playerId: quiet, season: SEASON - 1, week: 1, stats: {}, ptsPpr: 3 },
+    ]);
+
+    const pick = await autoPickCandidate(db as unknown as EngineDb, teamIds[0]!, 1);
+    expect(pick?.player_id).toBe(proven);
+
+    // With no stats at all, the preseason projection decides.
+    await db.delete(playerWeekStats);
+    await db
+      .insert(playerWeekProj)
+      .values({ playerId: quiet, season: SEASON, week: 0, projPtsPpr: 180 });
+    const projPick = await autoPickCandidate(db as unknown as EngineDb, teamIds[0]!, 1);
+    expect(projPick?.player_id).toBe(quiet);
+  });
+
+  it("never returns a player that make_pick would reject", async () => {
+    // Last round of a 2-round draft: only a slot-filling starter is legal.
+    await seedLeague(db, { phase: "drafting", draftRounds: 2 });
+    const teamIds = await seedTeams(db);
+    await startDraft(teamIds, 13);
+    const here = snakePosition(teamIds, 13)!;
+
+    const wr = await makePlayer(db, { playerId: "ap-late-wr", position: "WR" });
+    const qb = await makePlayer(db, { playerId: "ap-late-qb", position: "QB" });
+    await db.insert(rankings).values([
+      { playerId: wr, set: "draft", week: 0, rank: 1, fetchedAt: new Date(NOW) },
+      { playerId: qb, set: "draft", week: 0, rank: 2, fetchedAt: new Date(NOW) },
+    ]);
+    // 8 of 9 starting slots are filled; only QB is missing, so only a QB is legal.
+    for (const [id, position] of [
+      ["ap-rb1", "RB"],
+      ["ap-rb2", "RB"],
+      ["ap-wr1", "WR"],
+      ["ap-wr2", "WR"],
+      ["ap-te", "TE"],
+      ["ap-flex", "RB"],
+      ["ap-dst", "DEF"],
+      ["ap-k", "K"],
+    ] as const) {
+      await rosterPlayer(db, here.teamId, await makePlayer(db, { playerId: id, position }));
+    }
+
+    const pick = await autoPickCandidate(db as unknown as EngineDb, here.teamId, 13);
+    expect(pick?.player_id).toBe(qb);
+
+    const res = await makePickTool.execute(
+      { player_id: pick!.player_id, reason: "auto-pick: deadline" },
+      ctxFor({ teamId: here.teamId, kind: "draft_pick", sessionContext: { pick_no: 13 } }),
+    );
+    expect(res).toMatchObject({ ok: true });
   });
 });
 
