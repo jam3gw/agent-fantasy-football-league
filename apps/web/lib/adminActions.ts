@@ -1,0 +1,878 @@
+"use server";
+/**
+ * Commissioner server actions (SPEC §12.2).
+ *
+ * Every action re-checks `isCommissioner()` itself. `proxy.ts` already guards
+ * `/admin/*` and `/api/admin/*`, but a server action is a POST endpoint of its
+ * own and §15.5 asks for defence in depth, so the proxy is never the only gate.
+ *
+ * Every action writes a `commissioner_actions` row; the ones that change league
+ * state also write a public `transactions` row of type `commissioner` so they
+ * show up on /transactions (§12.2).
+ *
+ * Nothing here ever logs, echoes, or stores a secret.
+ */
+import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
+import { after } from "next/server";
+import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import type { Clock } from "@league/shared";
+import { etDay, sessionKey } from "@league/shared";
+import type { EngineDb, SessionKind } from "@league/engine";
+import {
+  commissionerActions,
+  costAlarmRules,
+  costAlarms,
+  createSession,
+  draftPicks,
+  finalizeWeekCore,
+  fpPlayerMap,
+  getSettings,
+  lineupEntries,
+  players,
+  playerWeekStats,
+  rankings,
+  rankingsUnmatched,
+  recordTransaction,
+  rosterEntries,
+  scheduledJobs,
+  scoreWeek,
+  teams,
+  toolCosts,
+  trades,
+  updateSettings,
+} from "@league/engine";
+import { LEAGUE_MODELS, seedAlarmRules } from "@league/agent";
+import { fetchWeekStats, fetchNflverseWeeklyStats, fpRequest, upsertWeekStats } from "@league/data";
+import type { SleeperStatsEntry } from "@league/data";
+import { db, leagueClock } from "./db";
+import { env } from "./env";
+import { isCommissioner } from "./auth";
+import { bookJobNow, runJob } from "./jobs";
+import { finalizeWeek } from "./finalize";
+import { sendWeeklyDigest } from "./digest";
+import {
+  drawDraftOrder,
+  forceAutoPick,
+  getDraft,
+  pauseDraft,
+  resumeDraft,
+  runDraft,
+} from "./draft";
+
+/** Job types the commissioner may book by hand from /admin/jobs. */
+const BOOKABLE_JOBS = [
+  "ingest.players",
+  "ingest.trending",
+  "ingest.schedule",
+  "ingest.stats",
+  "ingest.projections",
+  "ingest.season_stats",
+  "ingest.fp_rankings",
+  "ingest.fp_injuries",
+  "waivers.run",
+  "stats.finalize",
+  "week.plan",
+  "book_daily_jobs",
+  "digest.weekly",
+] as const;
+
+const SESSION_KINDS: SessionKind[] = [
+  "onboarding",
+  "weekly_review",
+  "post_waivers",
+  "trade_window",
+  "lineup_check",
+  "injury_response",
+  "board_reply",
+  "manual",
+  "smoke",
+];
+
+// ------------------------------------------------------------------ helpers
+
+async function guard(): Promise<void> {
+  // Defence in depth (§15.5): never trust the proxy alone.
+  if (!(await isCommissioner())) throw new Error("unauthorized");
+}
+
+interface Ctx {
+  database: EngineDb;
+  clock: Clock;
+  now: Date;
+}
+
+async function ctx(): Promise<Ctx> {
+  await guard();
+  const database = db();
+  const clock = await leagueClock();
+  return { database, clock, now: clock.now() };
+}
+
+function str(form: FormData, key: string): string {
+  const v = form.get(key);
+  return typeof v === "string" ? v.trim() : "";
+}
+
+function num(form: FormData, key: string): number | null {
+  const v = str(form, key);
+  if (v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function requireReason(form: FormData): string {
+  const reason = str(form, "reason");
+  if (reason.length < 3) throw new Error("a reason is required");
+  return reason;
+}
+
+/** The commissioner_actions row every action writes (§12.2). */
+async function logAction(
+  c: Ctx,
+  action: string,
+  payload: Record<string, unknown>,
+  reason?: string,
+): Promise<void> {
+  await c.database.insert(commissionerActions).values({
+    action,
+    payload,
+    reason: reason ?? null,
+    createdAt: c.now,
+  });
+}
+
+/** The public transactions row for actions that change league state (§12.2). */
+async function publicTransaction(
+  c: Ctx,
+  action: string,
+  teamIds: number[],
+  payload: Record<string, unknown>,
+  week: number | null = null,
+): Promise<void> {
+  await recordTransaction(c.database, {
+    type: "commissioner",
+    week,
+    teamIds,
+    payload: { action, ...payload },
+  });
+}
+
+/** Finish an action: revalidate the page and come back with a message. */
+function finish(path: string, message: string): never {
+  revalidatePath(path);
+  redirect(`${path}?msg=${encodeURIComponent(message)}`);
+}
+
+/**
+ * Re-finalize a week without letting `current_week` or `phase` walk backwards:
+ * finalizeWeekCore always sets current_week = week + 1, which is right the
+ * first time and wrong when an older week is re-scored.
+ */
+async function refinalizePreservingClock(c: Ctx, week: number): Promise<void> {
+  const before = await getSettings(c.database);
+  const result = await finalizeWeekCore(c.database, c.clock, week);
+  if (!result.ok) throw new Error(`finalization failed: ${result.message}`);
+  const after_ = await getSettings(c.database);
+  const patch: { currentWeek?: number; phase?: typeof before.phase } = {};
+  if (after_.currentWeek < before.currentWeek) patch.currentWeek = before.currentWeek;
+  if (after_.phase !== before.phase && before.phase === "playoffs") patch.phase = before.phase;
+  if (Object.keys(patch).length > 0) await updateSettings(c.database, patch);
+}
+
+/** Stats for one week from one named source (§13.4 ladder, one rung at a time). */
+async function statsFromSource(
+  c: Ctx,
+  season: number,
+  week: number,
+  source: "sleeper" | "fantasypros" | "nflverse",
+): Promise<SleeperStatsEntry[]> {
+  if (source === "sleeper") {
+    return fetchWeekStats(season, week, { db: c.database });
+  }
+  if (source === "fantasypros") {
+    const apiKey = env.toolConfig.fantasyprosApiKey;
+    if (!apiKey) throw new Error("FANTASYPROS_API_KEY is not configured");
+    const res = await fpRequest(
+      c.database,
+      c.clock,
+      { apiKey, baseUrl: env.toolConfig.fantasyprosBaseUrl, dailyCap: env.toolConfig.fantasyprosDailyCap },
+      { kind: "engine" },
+      `/nfl/${season}/player-points`,
+      { scoring: "PPR", position: "ALL", start: week, end: week },
+    );
+    if (!res.ok) throw new Error("the FantasyPros player-points call did not succeed");
+    const body = res.body as { players?: Array<{ player_id?: string | number; weeks?: Record<string, number> }> };
+    const map = await c.database.select().from(fpPlayerMap);
+    const toSleeper = new Map(map.map((m) => [m.fpPlayerId, m.playerId]));
+    const out: SleeperStatsEntry[] = [];
+    for (const p of body.players ?? []) {
+      const fpId = p.player_id === undefined ? null : String(p.player_id);
+      if (!fpId) continue;
+      const sleeperId = toSleeper.get(fpId);
+      if (!sleeperId) continue;
+      const pts = p.weeks?.[String(week)];
+      if (typeof pts !== "number") continue;
+      out.push({ player_id: sleeperId, season, week, stats: { pts_ppr: pts } });
+    }
+    return out;
+  }
+  // nflverse: offense and kickers only; D/ST scores 0 on this rung (§13.4).
+  const rows = await fetchNflverseWeeklyStats(season, { db: c.database });
+  const settings = await getSettings(c.database);
+  const idRows = await c.database
+    .select({ playerId: players.playerId, gsisId: players.gsisId })
+    .from(players);
+  const byGsis = new Map(idRows.filter((p) => p.gsisId).map((p) => [p.gsisId!, p.playerId]));
+  const out: SleeperStatsEntry[] = [];
+  for (const r of rows) {
+    if (r.week !== week) continue;
+    const playerId = byGsis.get(r.gsisId);
+    if (!playerId) continue;
+    let total = 0;
+    for (const [k, v] of Object.entries(r.stats)) {
+      const coeff = settings.scoringSettings[k];
+      if (coeff) total += coeff * v;
+    }
+    out.push({
+      player_id: playerId,
+      season,
+      week,
+      stats: { ...r.stats, pts_ppr: Math.round(total * 100) / 100 },
+    });
+  }
+  return out;
+}
+
+// ------------------------------------------------------------------- health
+
+export async function acknowledgeAlarmAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const alarmId = num(form, "alarmId");
+  if (alarmId === null) throw new Error("alarmId is required");
+  await c.database
+    .update(costAlarms)
+    .set({ acknowledgedAt: c.now })
+    .where(eq(costAlarms.id, alarmId));
+  await logAction(c, "alarm_acknowledged", { alarmId });
+  finish("/admin/health", `Alarm ${alarmId} acknowledged.`);
+}
+
+export async function sendDigestNowAction(): Promise<void> {
+  const c = await ctx();
+  const sent = await sendWeeklyDigest(c.database, c.clock);
+  await logAction(c, "digest_sent", { sent });
+  finish(
+    "/admin/health",
+    sent ? "Digest sent." : "Digest built but email is not configured (RESEND_API_KEY / ALERT_EMAIL_TO).",
+  );
+}
+
+// --------------------------------------------------------------------- jobs
+
+export async function runJobNowAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const jobId = num(form, "jobId");
+  if (jobId === null) throw new Error("jobId is required");
+  const row = (await c.database.select().from(scheduledJobs).where(eq(scheduledJobs.id, jobId)))[0];
+  if (!row) throw new Error(`job ${jobId} not found`);
+
+  // Claim it first so the per-minute tick cannot pick up the same row.
+  await c.database
+    .update(scheduledJobs)
+    .set({ status: "claimed", claimedAt: c.now, error: null })
+    .where(eq(scheduledJobs.id, jobId));
+
+  let message: string;
+  try {
+    await runJob(c.database, c.clock, row.type, row.payload);
+    await c.database
+      .update(scheduledJobs)
+      .set({ status: "done", doneAt: c.clock.now() })
+      .where(eq(scheduledJobs.id, jobId));
+    message = `Ran ${row.type}.`;
+  } catch (err) {
+    await c.database
+      .update(scheduledJobs)
+      .set({ status: "failed", doneAt: c.clock.now(), error: String(err) })
+      .where(eq(scheduledJobs.id, jobId));
+    message = `${row.type} failed: ${String(err).slice(0, 200)}`;
+  }
+  await logAction(c, "job_run_now", { jobId, type: row.type });
+  finish("/admin/jobs", message);
+}
+
+export async function cancelJobAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const jobId = num(form, "jobId");
+  if (jobId === null) throw new Error("jobId is required");
+  await c.database
+    .update(scheduledJobs)
+    .set({ status: "done", doneAt: c.now, error: "cancelled by the commissioner" })
+    .where(and(eq(scheduledJobs.id, jobId), inArray(scheduledJobs.status, ["due", "claimed"])));
+  await logAction(c, "job_cancelled", { jobId });
+  finish("/admin/jobs", `Job ${jobId} cancelled.`);
+}
+
+export async function bookJobAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const type = str(form, "type");
+  if (!(BOOKABLE_JOBS as readonly string[]).includes(type)) throw new Error(`job type not bookable: ${type}`);
+  const week = num(form, "week");
+  const payload: Record<string, unknown> = week === null ? {} : { week };
+  await bookJobNow(c.database, c.clock, type, payload);
+  await logAction(c, "job_booked", { type, payload });
+  finish("/admin/jobs", `Booked ${type}; the next tick runs it.`);
+}
+
+// -------------------------------------------------------------------- teams
+
+export async function setTeamPausedAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const teamId = num(form, "teamId");
+  const paused = str(form, "paused") === "1";
+  if (teamId === null) throw new Error("teamId is required");
+  await c.database.update(teams).set({ paused }).where(eq(teams.id, teamId));
+  await logAction(c, paused ? "team_paused" : "team_unpaused", { teamId });
+  await publicTransaction(c, paused ? "team_paused" : "team_unpaused", [teamId], { teamId });
+  finish("/admin/teams", `Team ${teamId} ${paused ? "paused" : "unpaused"}.`);
+}
+
+export async function runSessionNowAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const teamId = num(form, "teamId");
+  const kind = str(form, "kind") as SessionKind;
+  const objective = str(form, "objective");
+  if (teamId === null) throw new Error("teamId is required");
+  if (!SESSION_KINDS.includes(kind)) throw new Error(`unsupported session kind: ${kind}`);
+
+  const settings = await getSettings(c.database);
+  const team = (await c.database.select().from(teams).where(eq(teams.id, teamId)))[0];
+  if (!team) throw new Error(`team ${teamId} not found`);
+
+  const sessionId = await createSession(c.database, settings, {
+    teamId,
+    kind,
+    trigger: "commissioner",
+    idempotencyKey: sessionKey(teamId, kind, settings.season, settings.currentWeek, `manual-${c.now.getTime()}`),
+    modelId: team.modelId,
+    dueAt: c.now,
+    now: c.now,
+    context: { week: settings.currentWeek, ...(objective ? { objective } : {}) },
+  });
+  await logAction(c, "session_run_now", { teamId, kind, objective: objective || null, sessionId });
+  await publicTransaction(c, "session_run_now", [teamId], { kind, sessionId }, settings.currentWeek);
+  finish("/admin/teams", `Queued a ${kind} session for ${team.name ?? team.slug}.`);
+}
+
+export async function swapModelAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const teamId = num(form, "teamId");
+  const reason = requireReason(form);
+  if (teamId === null) throw new Error("teamId is required");
+
+  const picked = str(form, "modelId");
+  const custom = str(form, "customModelId");
+  const modelId = custom || picked;
+  if (!modelId) throw new Error("a model id is required");
+
+  const known = LEAGUE_MODELS.find((m) => m.modelId === modelId);
+  const modelLabel = str(form, "modelLabel") || known?.label || modelId;
+  const provider = str(form, "provider") || known?.provider || (modelId.split("/")[0] ?? "unknown");
+
+  const team = (await c.database.select().from(teams).where(eq(teams.id, teamId)))[0];
+  if (!team) throw new Error(`team ${teamId} not found`);
+
+  await c.database.update(teams).set({ modelId, modelLabel, provider }).where(eq(teams.id, teamId));
+  const payload = { teamId, from: team.modelId, to: modelId, modelLabel, provider };
+  await logAction(c, "model_swapped", payload, reason);
+  await publicTransaction(c, "model_swapped", [teamId], { ...payload, reason });
+  finish("/admin/teams", `${team.name ?? team.slug} now runs ${modelLabel}.`);
+}
+
+export async function runOnboardingAction(): Promise<void> {
+  const c = await ctx();
+  const settings = await getSettings(c.database);
+  const allTeams = await c.database.select().from(teams);
+  let queued = 0;
+  let i = 0;
+  for (const team of allTeams) {
+    const id = await createSession(c.database, settings, {
+      teamId: team.id,
+      kind: "onboarding",
+      trigger: "commissioner",
+      idempotencyKey: sessionKey(team.id, "onboarding", settings.season, 0, "setup"),
+      modelId: team.modelId,
+      // A minute apart so twelve sessions do not all start at once (§9.1).
+      dueAt: new Date(c.now.getTime() + i * 60_000),
+      now: c.now,
+      context: { week: settings.currentWeek },
+    });
+    if (id !== null) queued++;
+    i++;
+  }
+  await logAction(c, "onboarding_run", { teams: allTeams.length, queued });
+  await publicTransaction(c, "onboarding_run", allTeams.map((t) => t.id), { queued });
+  finish("/admin/draft", `Queued ${queued} onboarding session(s) of ${allTeams.length} teams.`);
+}
+
+// ------------------------------------------------------------------- trades
+
+export async function reverseTradeAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const tradeId = num(form, "tradeId");
+  const reason = requireReason(form);
+  if (tradeId === null) throw new Error("tradeId is required");
+
+  const settings = await getSettings(c.database);
+  const week = settings.currentWeek;
+
+  await c.database.transaction(async (tx) => {
+    const trade = (await tx.select().from(trades).where(eq(trades.id, tradeId)))[0];
+    if (!trade) throw new Error(`trade ${tradeId} not found`);
+    if (trade.status !== "executed") throw new Error("only an executed trade can be reversed");
+
+    const a = trade.proposerTeamId;
+    const b = trade.counterpartyTeamId;
+    // Undo the swap: give-side players go back to the proposer, get-side to
+    // the counterparty. Mirrors §7.5 execution, in reverse.
+    const moves = [
+      ...trade.givePlayerIds.map((playerId) => ({ playerId, to: a })),
+      ...trade.getPlayerIds.map((playerId) => ({ playerId, to: b })),
+    ];
+    for (const m of moves) {
+      await tx.delete(rosterEntries).where(eq(rosterEntries.playerId, m.playerId));
+      await tx
+        .insert(rosterEntries)
+        .values({ teamId: m.to, playerId: m.playerId, acquiredVia: "commissioner", acquiredAt: c.now });
+      // Clear any lineup entry the player now holds for the current or next
+      // week; returning players land on the bench (§7.8).
+      await tx
+        .delete(lineupEntries)
+        .where(and(eq(lineupEntries.playerId, m.playerId), inArray(lineupEntries.week, [week, week + 1])));
+    }
+
+    await tx
+      .update(trades)
+      .set({
+        status: "cancelled",
+        resolutionReason: `commissioner reversal: ${reason}`,
+        resolvedAt: c.now,
+        updatedAt: c.now,
+      })
+      .where(eq(trades.id, tradeId));
+
+    await tx.insert(commissionerActions).values({
+      action: "trade_reversed",
+      payload: { tradeId, proposerTeamId: a, counterpartyTeamId: b },
+      reason,
+      createdAt: c.now,
+    });
+    await recordTransaction(tx, {
+      type: "commissioner",
+      week,
+      teamIds: [a, b],
+      payload: {
+        action: "trade_reversed",
+        tradeId,
+        reason,
+        returnedToProposer: trade.givePlayerIds,
+        returnedToCounterparty: trade.getPlayerIds,
+      },
+    });
+  });
+
+  finish("/admin/trades", `Trade ${tradeId} reversed. Lineups for weeks ${week} and ${week + 1} were cleared for the players involved.`);
+}
+
+// ------------------------------------------------------------------- scores
+
+export async function refinalizeWeekAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const week = num(form, "week");
+  const source = str(form, "source") || "auto";
+  if (week === null) throw new Error("week is required");
+
+  const settings = await getSettings(c.database);
+  let message: string;
+
+  if (source === "auto") {
+    const result = await finalizeWeek(c.database, c.clock, week);
+    message = `Week ${week} re-finalized from ${result.source} (${result.playersScored} players).`;
+  } else if (source === "sleeper" || source === "fantasypros" || source === "nflverse") {
+    const entries = await statsFromSource(c, settings.season, week, source);
+    if (entries.length === 0) throw new Error(`${source} returned no rows for week ${week}`);
+    const res = await upsertWeekStats(c.database, {
+      season: settings.season,
+      week,
+      entries,
+      markFinal: true,
+      source,
+    });
+    await refinalizePreservingClock(c, week);
+    const extra = (await getSettings(c.database)).extra as Record<string, unknown>;
+    await updateSettings(c.database, {
+      extra: {
+        ...extra,
+        weekScoringSources: {
+          ...((extra.weekScoringSources as Record<string, string>) ?? {}),
+          [String(week)]: source,
+        },
+      },
+    });
+    message = `Week ${week} re-finalized from ${source} (${res.count} players).`;
+  } else {
+    throw new Error(`unknown scoring source: ${source}`);
+  }
+
+  await logAction(c, "week_refinalized", { week, source });
+  await publicTransaction(c, "week_refinalized", [], { week, source }, week);
+  finish("/admin/scores", message);
+}
+
+export async function correctPlayerPointsAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const week = num(form, "week");
+  const playerId = str(form, "playerId");
+  const points = num(form, "points");
+  const reason = requireReason(form);
+  if (week === null) throw new Error("week is required");
+  if (!playerId) throw new Error("a player id is required");
+  if (points === null) throw new Error("points are required");
+
+  const settings = await getSettings(c.database);
+  const existing = (
+    await c.database
+      .select()
+      .from(playerWeekStats)
+      .where(
+        and(
+          eq(playerWeekStats.playerId, playerId),
+          eq(playerWeekStats.season, settings.season),
+          eq(playerWeekStats.week, week),
+        ),
+      )
+  )[0];
+
+  const before = existing?.ptsPpr ?? null;
+  const stats = { ...(existing?.stats ?? {}), pts_ppr: points };
+  await c.database
+    .insert(playerWeekStats)
+    .values({
+      playerId,
+      season: settings.season,
+      week,
+      stats,
+      ptsPpr: points,
+      enginePts: existing?.enginePts ?? points,
+      source: existing?.source ?? "sleeper",
+      final: true,
+      updatedAt: c.now,
+    })
+    .onConflictDoUpdate({
+      target: [playerWeekStats.playerId, playerWeekStats.season, playerWeekStats.week],
+      set: { stats, ptsPpr: points, updatedAt: c.now },
+    });
+
+  // Re-score the week so matchups, winners and team_week_results follow the
+  // correction; the league clock is preserved for an already-past week.
+  await scoreWeek(c.database, week);
+  await refinalizePreservingClock(c, week);
+
+  const payload = { week, playerId, before, after: points };
+  await logAction(c, "player_points_corrected", payload, reason);
+  await publicTransaction(c, "player_points_corrected", [], { ...payload, reason }, week);
+  finish("/admin/scores", `${playerId} week ${week}: ${before ?? "—"} → ${points.toFixed(2)}.`);
+}
+
+// ----------------------------------------------------------------- settings
+
+export async function saveSettingsAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const current = await getSettings(c.database);
+  const patch: Record<string, unknown> = {};
+
+  const setNum = (field: string, key: string) => {
+    const v = num(form, key);
+    if (v !== null) patch[field] = Math.round(v);
+  };
+  setNum("waiverClearHours", "waiverClearHours");
+  setNum("tradeReviewHours", "tradeReviewHours");
+  setNum("tradeVetoVotes", "tradeVetoVotes");
+  setNum("tradeMaxOffersPerDay", "tradeMaxOffersPerDay");
+  setNum("tradeOfferExpiryHours", "tradeOfferExpiryHours");
+  setNum("tradeDeadlineWeek", "tradeDeadlineWeek");
+  setNum("draftClockSeconds", "draftClockSeconds");
+  setNum("draftRounds", "draftRounds");
+  setNum("fantasyprosDailyAllowance", "fantasyprosDailyAllowance");
+
+  const waiverRunTimeEt = str(form, "waiverRunTimeEt");
+  if (waiverRunTimeEt) {
+    if (!/^\d{2}:\d{2}$/.test(waiverRunTimeEt)) throw new Error("waiver run time must look like 04:30");
+    patch.waiverRunTimeEt = waiverRunTimeEt;
+  }
+
+  const irStatuses = str(form, "irEligibleStatuses");
+  if (irStatuses) {
+    patch.irEligibleStatuses = irStatuses
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  // Roster and scoring are frozen once the draft has started (§12.2).
+  const structureLocked = current.phase !== "pre_draft";
+  if (!structureLocked) {
+    const rosterSlots = str(form, "rosterSlots");
+    if (rosterSlots) patch.rosterSlots = JSON.parse(rosterSlots);
+    const scoringSettings = str(form, "scoringSettings");
+    if (scoringSettings) patch.scoringSettings = JSON.parse(scoringSettings);
+  }
+
+  // Loop guards live in extra.sessionGuards (§8.3); they stay editable.
+  const guards = str(form, "sessionGuards");
+  if (guards) {
+    const extra = { ...(current.extra as Record<string, unknown>) };
+    extra.sessionGuards = JSON.parse(guards);
+    patch.extra = extra;
+  }
+
+  await updateSettings(c.database, patch);
+  await logAction(c, "settings_updated", { fields: Object.keys(patch), structureLocked });
+  await publicTransaction(c, "settings_updated", [], { fields: Object.keys(patch) }, current.currentWeek);
+  finish(
+    "/admin/settings",
+    structureLocked
+      ? "Settings saved. Roster and scoring stayed locked (the draft has started)."
+      : "Settings saved.",
+  );
+}
+
+export async function savePauseAgentAtAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const current = await getSettings(c.database);
+  const raw = str(form, "pauseAgentAtUsd");
+  const extra = { ...(current.extra as Record<string, unknown>) };
+  if (raw === "") delete extra.pauseAgentAtUsd;
+  else {
+    const v = Number(raw);
+    if (!Number.isFinite(v) || v <= 0) throw new Error("pause_agent_at_usd must be a positive number or blank");
+    extra.pauseAgentAtUsd = v;
+  }
+  await updateSettings(c.database, { extra });
+  await logAction(c, "pause_agent_at_set", { pauseAgentAtUsd: extra.pauseAgentAtUsd ?? null });
+  finish(
+    "/admin/settings",
+    raw === "" ? "Hard stop off — no dollar amount ever stops an agent." : `Hard stop set at $${Number(raw).toFixed(2)} per season.`,
+  );
+}
+
+export async function saveAlarmRulesAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const ids = form.getAll("ruleId").map((v) => Number(v)).filter(Number.isFinite);
+  for (const id of ids) {
+    const threshold = num(form, `threshold_${id}`);
+    const stepRaw = str(form, `step_${id}`);
+    const channels = ["email", "site", "webhook"].filter((ch) => str(form, `channel_${ch}_${id}`) === "1");
+    await c.database
+      .update(costAlarmRules)
+      .set({
+        ...(threshold === null ? {} : { thresholdUsd: threshold }),
+        stepUsd: stepRaw === "" ? null : Number(stepRaw),
+        enabled: str(form, `enabled_${id}`) === "1",
+        channels,
+        updatedAt: c.now,
+      })
+      .where(eq(costAlarmRules.id, id));
+  }
+  await logAction(c, "alarm_rules_updated", { rules: ids.length });
+  finish("/admin/settings", `${ids.length} alarm rule(s) saved.`);
+}
+
+export async function seedAlarmRulesAction(): Promise<void> {
+  const c = await ctx();
+  await seedAlarmRules(c.database);
+  await logAction(c, "alarm_rules_seeded", {});
+  finish("/admin/settings", "Default alarm rules created.");
+}
+
+export async function saveToolCostsAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const names = form.getAll("toolName").map(String);
+  for (const name of names) {
+    const price = num(form, `cost_${name}`);
+    if (price === null) continue;
+    await c.database
+      .update(toolCosts)
+      .set({ usdPerCall: price, updatedAt: c.now })
+      .where(eq(toolCosts.toolName, name));
+  }
+  const newName = str(form, "newToolName");
+  const newPrice = num(form, "newToolCost");
+  if (newName && newPrice !== null) {
+    await c.database
+      .insert(toolCosts)
+      .values({ toolName: newName, usdPerCall: newPrice, updatedAt: c.now })
+      .onConflictDoUpdate({
+        target: toolCosts.toolName,
+        set: { usdPerCall: newPrice, updatedAt: c.now },
+      });
+  }
+  await logAction(c, "tool_costs_updated", { tools: names, added: newName || null });
+  finish("/admin/settings", "Tool costs saved.");
+}
+
+// ---------------------------------------------------------------- rankings
+
+export async function mapUnmatchedPlayerAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const unmatchedId = num(form, "unmatchedId");
+  const chosen = str(form, "playerId");
+  const custom = str(form, "customPlayerId");
+  const playerId = custom || chosen;
+  if (unmatchedId === null) throw new Error("unmatchedId is required");
+  if (!playerId) throw new Error("a Sleeper player id is required");
+
+  const row = (await c.database.select().from(rankingsUnmatched).where(eq(rankingsUnmatched.id, unmatchedId)))[0];
+  if (!row) throw new Error(`unmatched row ${unmatchedId} not found`);
+  const exists = (await c.database.select({ id: players.playerId }).from(players).where(eq(players.playerId, playerId)))[0];
+  if (!exists) throw new Error(`no Sleeper player with id ${playerId}`);
+
+  await c.database
+    .insert(fpPlayerMap)
+    .values({ fpPlayerId: row.fpPlayerId, playerId, matchedBy: "manual", updatedAt: c.now })
+    .onConflictDoUpdate({
+      target: fpPlayerMap.fpPlayerId,
+      set: { playerId, matchedBy: "manual", updatedAt: c.now },
+    });
+  await c.database
+    .update(rankingsUnmatched)
+    .set({ resolvedPlayerId: playerId })
+    .where(eq(rankingsUnmatched.id, unmatchedId));
+
+  await logAction(c, "fp_player_mapped", { fpPlayerId: row.fpPlayerId, fpName: row.fpName, playerId });
+  finish("/admin/rankings", `${row.fpName} mapped to ${playerId}. Re-run the rankings pull to pick it up.`);
+}
+
+export async function refreshRankingsAction(): Promise<void> {
+  const c = await ctx();
+  await bookJobNow(c.database, c.clock, "ingest.fp_rankings");
+  await logAction(c, "rankings_refresh_booked", {});
+  finish("/admin/rankings", "Rankings refresh booked; the next tick runs it.");
+}
+
+// ------------------------------------------------------------------- draft
+
+/** §5.7 gate: at least 200 ranked players and nothing unmatched in the top 200. */
+async function draftGate(database: EngineDb): Promise<{ ranked: number; unmatchedTop200: number; ok: boolean }> {
+  const rankedRows = await database
+    .select({ n: sql<number>`count(*)::int` })
+    .from(rankings)
+    .where(and(eq(rankings.set, "draft"), sql`${rankings.rank} is not null`));
+  const ranked = rankedRows[0]?.n ?? 0;
+  const unmatchedRows = await database
+    .select({ n: sql<number>`count(*)::int` })
+    .from(rankingsUnmatched)
+    .where(and(isNull(rankingsUnmatched.resolvedPlayerId), sql`(${rankingsUnmatched.raw} ->> 'rank_ecr')::float <= 200`));
+  const unmatchedTop200 = unmatchedRows[0]?.n ?? 0;
+  return { ranked, unmatchedTop200, ok: ranked >= 200 && unmatchedTop200 === 0 };
+}
+
+export async function drawDraftOrderAction(): Promise<void> {
+  const c = await ctx();
+  const state = await getDraft(c.database);
+  if (state && state.status !== "not_started") throw new Error("the order cannot be redrawn once the draft has started");
+  const order = await drawDraftOrder(c.database, c.clock);
+  await logAction(c, "draft_order_drawn", { order });
+  finish("/admin/draft", `Order drawn: ${order.join(", ")}.`);
+}
+
+export async function startDraftAction(): Promise<void> {
+  const c = await ctx();
+  const state = await getDraft(c.database);
+  if (!state?.order || state.order.length === 0) throw new Error("draw the order first");
+  if (state.status === "complete") throw new Error("the draft is already complete");
+
+  const gate = await draftGate(c.database);
+  if (!gate.ok) {
+    throw new Error(
+      `the §5.7 gate is not met: ${gate.ranked} ranked players (200 needed), ${gate.unmatchedTop200} unmatched inside the top 200`,
+    );
+  }
+
+  await logAction(c, "draft_started", { from: state.currentPick ?? 1 });
+  await publicTransaction(c, "draft_started", state.order, { from: state.currentPick ?? 1 });
+  // The draft loop runs long; start it after the response so the button
+  // returns straight away. It resumes from draft.current_pick, so pressing
+  // Start again picks up exactly where a stopped run left off (§10.2).
+  after(async () => {
+    await runDraft();
+  });
+  finish("/admin/draft", "Draft started. It resumes from the current pick if the run is interrupted — press Start again.");
+}
+
+export async function pauseDraftAction(): Promise<void> {
+  const c = await ctx();
+  await pauseDraft(c.database, c.clock);
+  await logAction(c, "draft_paused", {});
+  await publicTransaction(c, "draft_paused", [], {});
+  finish("/admin/draft", "Draft paused. The clock for the current pick is stored.");
+}
+
+export async function resumeDraftAction(): Promise<void> {
+  const c = await ctx();
+  await resumeDraft(c.database, c.clock);
+  await logAction(c, "draft_resumed", {});
+  await publicTransaction(c, "draft_resumed", [], {});
+  after(async () => {
+    await runDraft();
+  });
+  finish("/admin/draft", "Draft resumed.");
+}
+
+export async function emergencyAutoPickAction(): Promise<void> {
+  const c = await ctx();
+  const state = await getDraft(c.database);
+  await forceAutoPick(c.database, c.clock);
+  await logAction(c, "draft_emergency_autopick", { pickNo: state?.currentPick ?? null });
+  await publicTransaction(c, "draft_emergency_autopick", [], { pickNo: state?.currentPick ?? null });
+  finish("/admin/draft", `Emergency auto-pick armed for pick ${state?.currentPick ?? "—"}.`);
+}
+
+// --------------------------------------------------------------- read-side
+
+/** Used by /admin/draft to show the §5.7 gate. Read-only. */
+export async function draftGateStatus(): Promise<{ ranked: number; unmatchedTop200: number; ok: boolean }> {
+  await guard();
+  return draftGate(db());
+}
+
+/** Auto-picks so far, for the draft page. Read-only. */
+export async function autoPickCount(): Promise<number> {
+  await guard();
+  const rows = await db()
+    .select({ n: sql<number>`count(*)::int` })
+    .from(draftPicks)
+    .where(eq(draftPicks.madeBy, "autopick"));
+  return rows[0]?.n ?? 0;
+}
+
+/** FantasyPros requests used today, globally and per agent (health page). */
+export async function fpUsageToday(): Promise<{ day: string; total: number; byTeam: Record<string, number> }> {
+  await guard();
+  const clock = await leagueClock();
+  const day = etDay(clock.now());
+  const { fpUsage } = await import("@league/engine");
+  const rows = await db()
+    .select({ teamId: fpUsage.teamId, n: sql<number>`count(*)::int` })
+    .from(fpUsage)
+    .where(eq(fpUsage.dayEt, day))
+    .groupBy(fpUsage.teamId);
+  const byTeam: Record<string, number> = {};
+  let total = 0;
+  for (const r of rows) {
+    byTeam[r.teamId === null ? "engine" : String(r.teamId)] = r.n;
+    total += r.n;
+  }
+  return { day, total, byTeam };
+}
