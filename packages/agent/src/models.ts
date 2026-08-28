@@ -130,8 +130,16 @@ export function byokCredentialsFromEnv(env: NodeJS.ProcessEnv = process.env): By
 
 export type BilledTo = "gateway" | `byok:${ByokProvider}`;
 
+/** JSON-safe gateway options (the AI SDK requires a JSON object here). */
+export interface GatewayOptions {
+  /** provider slug → credential objects (§8.9 request-scoped BYOK). */
+  byok?: Record<string, Array<Record<string, string>>>;
+  /** Pin routing so a request cannot silently reroute at a different price. */
+  only?: string[];
+}
+
 export interface GatewayCallOptions {
-  providerOptions?: { gateway: Record<string, unknown> };
+  providerOptions?: { gateway: GatewayOptions };
   billedTo: BilledTo;
 }
 
@@ -148,7 +156,7 @@ export function gatewayCallOptions(
   const provider = routes[modelId];
   if (!provider) return { billedTo: "gateway" };
 
-  let credential: Record<string, unknown> | null = null;
+  let credential: Record<string, string> | null = null;
   if (provider === "vertex" && creds.vertex) {
     credential = {
       project: creds.vertex.project,
