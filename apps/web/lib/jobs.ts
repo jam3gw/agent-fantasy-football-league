@@ -127,6 +127,46 @@ export async function runJob(
       await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek));
       return;
     }
+    case "ingest.fp_rankings": {
+      const { ingestFpRankings } = await import("@league/data");
+      const apiKey = process.env.FANTASYPROS_API_KEY;
+      if (!apiKey) return; // no key configured: skip rather than fail the tick
+      const set = settings.phase === "pre_draft" || settings.phase === "drafting" ? "draft" : "weekly";
+      await ingestFpRankings(
+        db,
+        clock,
+        {
+          apiKey,
+          baseUrl: process.env.FANTASYPROS_BASE_URL,
+          dailyCap: Number(process.env.FANTASYPROS_DAILY_CAP ?? 100),
+        },
+        { season, set, week: settings.currentWeek },
+      );
+      return;
+    }
+    case "ingest.fp_injuries": {
+      const { fpRequest } = await import("@league/data");
+      const apiKey = process.env.FANTASYPROS_API_KEY;
+      if (!apiKey) return;
+      await fpRequest(
+        db,
+        clock,
+        {
+          apiKey,
+          baseUrl: process.env.FANTASYPROS_BASE_URL,
+          dailyCap: Number(process.env.FANTASYPROS_DAILY_CAP ?? 100),
+        },
+        { kind: "engine" },
+        "/nfl/injuries",
+        { year: season, week: settings.currentWeek, include_probabilities: "true" },
+      );
+      return;
+    }
+    case "draft.run": {
+      const { runDraft } = await import("./draft");
+      await runDraft();
+      return;
+    }
     case "digest.weekly": {
       const { sendWeeklyDigest } = await import("./digest");
       await sendWeeklyDigest(db, clock);
