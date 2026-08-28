@@ -110,7 +110,7 @@ function endingArgs(kind: string): Record<string, unknown> {
   return { summary: `what ${kind} decided` };
 }
 
-function depsFor(kind: string, teamId: number | null): RunSessionDeps {
+function depsFor(kind: string): RunSessionDeps {
   const endingTool = endingToolFor(kind as never);
   const result: ModelStepResult = {
     text: "here is my decision",
@@ -143,7 +143,7 @@ describe("§15.3 — every session kind runs", () => {
     const endingTool = endingToolFor(kind as never);
     expect(toolsForKind(kind as never).map((t) => t.name)).toContain(endingTool);
 
-    const result = await runSession(sessionId, depsFor(kind, teamId));
+    const result = await runSession(sessionId, depsFor(kind));
     expect(result.status, `${kind} did not succeed`).toBe("succeeded");
     expect(result.endedBy).toBe("ending_tool");
 
@@ -160,7 +160,7 @@ describe("§15.3 — every session kind runs", () => {
 
   it.each(REPORTER_KINDS)("the reporter's %s session publishes a post", async (kind) => {
     const sessionId = await makeSession(null, kind, `k-${kind}`);
-    const result = await runSession(sessionId, depsFor(kind, null));
+    const result = await runSession(sessionId, depsFor(kind));
     expect(result.status, `${kind} did not succeed`).toBe("succeeded");
 
     const posts = await db.select().from(reporterPosts).where(eq(reporterPosts.sessionId, sessionId));
@@ -178,7 +178,7 @@ describe("§15.3 — the total cost is reported", () => {
       [b, "b"],
     ] as const) {
       const sessionId = await makeSession(teamId, "weekly_review", `k-${slug}`);
-      await runSession(sessionId, depsFor("weekly_review", teamId));
+      await runSession(sessionId, depsFor("weekly_review"));
     }
     await updateRollups(db, clock);
 

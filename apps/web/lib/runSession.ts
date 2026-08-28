@@ -10,11 +10,9 @@ import { and, eq, ne, sql } from "drizzle-orm";
 import type { EngineDb } from "@league/engine";
 import {
   buildContextSnapshot,
-  byokCredentialsFromEnv,
   createModelStep,
   runSession,
   toolsForKind,
-  DEFAULT_BYOK_ROUTES,
   buildReporterSystemPrompt,
   buildSystemPrompt,
   type RunSessionResult,
@@ -38,12 +36,23 @@ const MAX_CONCURRENT_SESSIONS = 6;
 const SLOT_LOCK_KEY = 728_314_501;
 
 /**
- * Take one of the six slots for this session, atomically. Returns false when
- * the league is at its cap or this team is already running something — the
- * session stays `queued` and the tick's sweeper tries again next minute, which
- * is §9.2's wait-for-slot step.
+ * Why a slot claim did not succeed. The distinction matters to the sweeper:
+ * `at_capacity` means the whole league must wait, so it stops; `team_busy`
+ * means only this session waits, so it moves on to the next one — otherwise
+ * one team's long session would hold five free slots empty behind it.
  */
-export async function claimSlot(database: EngineDb, sessionId: number, teamId: number | null): Promise<boolean> {
+export type SlotOutcome = "claimed" | "at_capacity" | "team_busy" | "not_queued";
+
+/**
+ * Take one of the six slots for this session, atomically (§9.2's wait-for-slot).
+ * A session that does not get one stays `queued` and is tried again next tick.
+ */
+export async function claimSlot(
+  database: EngineDb,
+  sessionId: number,
+  teamId: number | null,
+  now: Date = new Date(),
+): Promise<SlotOutcome> {
   return database.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(${SLOT_LOCK_KEY})`);
 
@@ -51,24 +60,24 @@ export async function claimSlot(database: EngineDb, sessionId: number, teamId: n
       .select({ n: sql<number>`count(*)::int` })
       .from(sessions)
       .where(and(eq(sessions.status, "running"), ne(sessions.id, sessionId)));
-    if ((running[0]?.n ?? 0) >= MAX_CONCURRENT_SESSIONS) return false;
+    if ((running[0]?.n ?? 0) >= MAX_CONCURRENT_SESSIONS) return "at_capacity";
 
     if (teamId !== null) {
       const mine = await tx
         .select({ n: sql<number>`count(*)::int` })
         .from(sessions)
         .where(and(eq(sessions.status, "running"), eq(sessions.teamId, teamId), ne(sessions.id, sessionId)));
-      if ((mine[0]?.n ?? 0) > 0) return false;
+      if ((mine[0]?.n ?? 0) > 0) return "team_busy";
     }
 
     // Only a still-queued session may be claimed, so two ticks racing on the
     // same session cannot both start it.
     const claimed = await tx
       .update(sessions)
-      .set({ status: "running", startedAt: new Date(), updatedAt: new Date() })
+      .set({ status: "running", startedAt: now, updatedAt: now })
       .where(and(eq(sessions.id, sessionId), eq(sessions.status, "queued")))
       .returning({ id: sessions.id });
-    return claimed.length > 0;
+    return claimed.length > 0 ? "claimed" : "not_queued";
   });
 }
 
@@ -91,7 +100,7 @@ export async function runAgentSession(
   const resuming = session.status === "running";
 
   const deadlineAt = new Date(String(session.context.deadline_at));
-  if (!resuming && !(await claimSlot(database, sessionId, session.teamId))) {
+  if (!resuming && (await claimSlot(database, sessionId, session.teamId, clock.now())) !== "claimed") {
     if (clock.now() >= deadlineAt) {
       await database
         .update(sessions)
@@ -107,10 +116,7 @@ export async function runAgentSession(
   const settings = await getSettings(database);
   const team = session.teamId === null ? null : (await database.select().from(teams).where(eq(teams.id, session.teamId)))[0];
 
-  const modelStep = createModelStep(database, {
-    byokRoutes: (settings.extra as { byokRoutes?: typeof DEFAULT_BYOK_ROUTES }).byokRoutes ?? DEFAULT_BYOK_ROUTES,
-    byokCredentials: byokCredentialsFromEnv(),
-  });
+  const modelStep = createModelStep(database);
 
   return runSession(sessionId, {
     db: database,

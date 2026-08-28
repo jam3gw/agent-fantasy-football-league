@@ -39,6 +39,7 @@ export interface TickSummary {
   sessionsRequeued: number;
   sessionsStarted: number;
   sessionsExpired: number;
+  sessionsReclaimed: number;
   outages: number;
 }
 
@@ -57,8 +58,15 @@ const INLINE_JOB_TYPES = new Set([
   "stats.finalize",
 ]);
 
-/** How long a claimed job may sit before the queue takes it back. */
-const CLAIM_STALE_MS = 15 * 60_000;
+/**
+ * How long a claimed job may sit before the queue takes it back. The workflow
+ * refreshes the claim when it actually begins, so this only reclaims jobs whose
+ * workflow never started — not one that is simply taking a while.
+ */
+const CLAIM_STALE_MS = 30 * 60_000;
+
+/** How long a running session may go without writing anything before it counts as dead. */
+const STUCK_SESSION_IDLE_MS = 15 * 60_000;
 
 /** Queued sessions examined per tick. More than the cap, so expiries are seen too. */
 const MAX_QUEUED_SESSIONS_PER_TICK = 40;
@@ -83,6 +91,7 @@ export async function runTick(): Promise<TickSummary> {
     sessionsRequeued: 0,
     sessionsStarted: 0,
     sessionsExpired: 0,
+    sessionsReclaimed: 0,
     outages: 0,
   };
 
@@ -147,13 +156,12 @@ export async function runTick(): Promise<TickSummary> {
   // for good. Put anything stale back in the queue.
   summary.jobsReleased = await releaseStaleClaims(database, clock);
 
-  // 1b. Sessions still waiting for one of the six slots (§9.2's wait-for-slot).
-  // A session whose job already ran but that lost the concurrency race is left
-  // `queued`; without this it would wait forever, because the job row is
-  // already `done`.
+  // 1b. Start the sessions whose turn has come (§9.2's wait-for-slot). This is
+  // the only place a session is started.
   const swept = await startQueuedSessions(database, clock);
   summary.sessionsStarted = swept.started;
   summary.sessionsExpired = swept.expired;
+  summary.sessionsReclaimed = swept.reclaimed;
 
   // 2. Games that kicked off since the last tick.
   summary.gamesStarted = await startKickedOffGames(database, clock);
@@ -192,19 +200,27 @@ async function releaseStaleClaims(database: EngineDb, clock: Clock): Promise<num
 }
 
 /**
- * Start queued sessions whose turn has come, oldest first, and expire the ones
- * whose deadline passed while they waited (§8.3, §9.2).
+ * Start queued sessions whose turn has come, and clean up the ones that cannot
+ * run any more (§8.3, §9.2). This is the *only* thing that starts a session:
+ * a second starter meant the same session ran twice, in parallel.
  *
- * The slot claim itself is atomic, so this can stop as soon as one session
- * fails to get a slot: the league is at its cap and the rest wait a minute.
- * A session that has no team never blocks on the per-team rule, so it is only
- * the cap that can stop us — hence the plain loop rather than a per-team scan.
+ * Three things happen here, in order of urgency:
+ *  - a session past its deadline is skipped rather than run late (a lineup
+ *    check after kickoff cannot change anything);
+ *  - a session whose turn has come takes a slot and is handed to its workflow;
+ *  - a session left `running` by an invocation that died is failed, so its slot
+ *    comes back and `requeueFailedSessions` can retry it. Without this one leak
+ *    holds a slot — and blocks that team entirely — for the rest of the season.
  */
-async function startQueuedSessions(
+export async function startQueuedSessions(
   database: EngineDb,
   clock: Clock,
-): Promise<{ started: number; expired: number }> {
+  /** Hand a claimed session to its durable run. Overridden in tests. */
+  startRun: (sessionId: number) => Promise<void> = startAgentSessionWorkflow,
+): Promise<{ started: number; expired: number; reclaimed: number }> {
   const now = clock.now();
+  const reclaimed = await reclaimStuckSessions(database, clock);
+
   const queued = await database
     .select({ id: sessions.id, teamId: sessions.teamId, context: sessions.context })
     .from(sessions)
@@ -212,14 +228,12 @@ async function startQueuedSessions(
     .orderBy(asc(sessions.createdAt))
     .limit(MAX_QUEUED_SESSIONS_PER_TICK);
 
+  const { claimSlot } = await import("./runSession");
   let started = 0;
   let expired = 0;
   for (const session of queued) {
-    const raw = session.context.deadline_at;
-    const deadlineAt = typeof raw === "string" ? new Date(raw) : null;
-    if (deadlineAt && !Number.isNaN(deadlineAt.getTime()) && now >= deadlineAt) {
-      // §8.3: a session that never got a slot before its deadline is skipped,
-      // not run late — a lineup check after kickoff cannot change anything.
+    const deadlineAt = parseDate(session.context.deadline_at);
+    if (deadlineAt && now >= deadlineAt) {
       const rows = await database
         .update(sessions)
         .set({ status: "skipped", endedBy: "deadline", endedAt: now, updatedAt: now })
@@ -229,16 +243,22 @@ async function startQueuedSessions(
       continue;
     }
 
-    const { claimSlot } = await import("./runSession");
-    if (!(await claimSlot(database, session.id, session.teamId))) break; // at the cap
+    // Bookings are staggered a minute apart (§9.1); a session is not due yet.
+    const dueAt = parseDate(session.context.due_at);
+    if (dueAt && now < dueAt) continue;
+
+    const outcome = await claimSlot(database, session.id, session.teamId, now);
+    // The league is full: everything else waits too, so stop here.
+    if (outcome === "at_capacity") break;
+    // This team is already running something, or another tick took the row.
+    // Neither says anything about the next session in the list.
+    if (outcome !== "claimed") continue;
 
     // The slot is taken; hand the session to its durable run. Release the slot
     // again if the workflow cannot even be started, so one bad start does not
     // hold a slot until the deadline.
     try {
-      const { start } = await import("workflow/api");
-      const { agentSessionWorkflow } = await import("../workflows/agentSession");
-      await start(agentSessionWorkflow, [session.id]);
+      await startRun(session.id);
       started++;
     } catch {
       await database
@@ -248,7 +268,50 @@ async function startQueuedSessions(
       break;
     }
   }
-  return { started, expired };
+  return { started, expired, reclaimed };
+}
+
+async function startAgentSessionWorkflow(sessionId: number): Promise<void> {
+  const { start } = await import("workflow/api");
+  const { agentSessionWorkflow } = await import("../workflows/agentSession");
+  await start(agentSessionWorkflow, [sessionId]);
+}
+
+/**
+ * Fail sessions left `running` by an invocation that died — a function kill
+ * between the slot claim and the workflow start, or a crash while building the
+ * context snapshot. A session is stuck once it is past its deadline and has
+ * not been touched for a while; `requeueFailedSessions` decides whether to
+ * retry it (§8.8).
+ */
+async function reclaimStuckSessions(database: EngineDb, clock: Clock): Promise<number> {
+  const now = clock.now();
+  const idleCutoff = new Date(now.getTime() - STUCK_SESSION_IDLE_MS);
+  const running = await database
+    .select({ id: sessions.id, context: sessions.context, updatedAt: sessions.updatedAt })
+    .from(sessions)
+    .where(eq(sessions.status, "running"));
+
+  let reclaimed = 0;
+  for (const session of running) {
+    if (session.updatedAt > idleCutoff) continue; // still writing transcript rows
+    const deadlineAt = parseDate(session.context.deadline_at);
+    if (deadlineAt && now < deadlineAt) continue; // still inside its window
+    const rows = await database
+      .update(sessions)
+      .set({ status: "failed", error: "abandoned: no progress past its deadline", endedAt: now, updatedAt: now })
+      .where(and(eq(sessions.id, session.id), eq(sessions.status, "running")))
+      .returning({ id: sessions.id });
+    reclaimed += rows.length;
+  }
+  return reclaimed;
+}
+
+/** A timestamp out of a session's JSON context, or null if it is not one. */
+function parseDate(raw: unknown): Date | null {
+  if (typeof raw !== "string") return null;
+  const at = new Date(raw);
+  return Number.isNaN(at.getTime()) ? null : at;
 }
 
 /** Mark newly kicked-off games live and put their unrostered players on waivers (§7.3). */

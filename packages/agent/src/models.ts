@@ -1,14 +1,15 @@
 /**
- * Model registry and BYOK routing (SPEC §8.1, §8.9).
+ * Model registry (SPEC §8.1).
  *
  * Hard rule from §8.1: no model-side limits anywhere. No `maxOutputTokens`,
  * no reasoning/thinking budget or effort flag, no temperature. Provider
  * defaults for every model. The only guards are the loop guards (§8.3).
  * Prompt caching is on wherever the provider supports it — caching changes
  * cost, never behavior.
+ *
+ * Every call bills the AI Gateway; see `BilledTo` below.
  */
 
-export type ByokProvider = "openai" | "xai" | "vertex" | "anthropic";
 
 export interface LeagueModel {
   /** Team slot 1–12 (the reporter has no slot). */
@@ -78,108 +79,16 @@ export const MODEL_PRICE_SEED: Record<
  * Cloud trial credit covers Anthropic models on Vertex. Left on the gateway
  * until that is verified in the provider console.
  */
-export const DEFAULT_BYOK_ROUTES: Record<string, ByokProvider> = {
-  "spacexai/grok-4.6": "xai",
-  "openai/gpt-5.6-sol": "openai",
-  "openai/gpt-5.6-terra": "openai",
-  "google/gemini-3.1-pro-preview": "vertex",
-};
-
-/** Provider slug the gateway routes to for a BYOK credential name. */
-const BYOK_PROVIDER_SLUG: Record<ByokProvider, string> = {
-  openai: "openai",
-  xai: "xai",
-  vertex: "vertex",
-  anthropic: "anthropic",
-};
-
-export interface ByokCredentials {
-  openai?: string;
-  xai?: string;
-  anthropic?: string;
-  vertex?: {
-    project: string;
-    location: string;
-    clientEmail: string;
-    privateKey: string;
-  };
-}
-
-/** Read BYOK credentials from the environment (§14). Never logged, never returned to a model. */
-export function byokCredentialsFromEnv(env: NodeJS.ProcessEnv = process.env): ByokCredentials {
-  const creds: ByokCredentials = {};
-  if (env.BYOK_OPENAI_API_KEY) creds.openai = env.BYOK_OPENAI_API_KEY;
-  if (env.BYOK_XAI_API_KEY) creds.xai = env.BYOK_XAI_API_KEY;
-  if (env.BYOK_ANTHROPIC_API_KEY) creds.anthropic = env.BYOK_ANTHROPIC_API_KEY;
-  if (
-    env.BYOK_VERTEX_PROJECT &&
-    env.BYOK_VERTEX_LOCATION &&
-    env.BYOK_VERTEX_CLIENT_EMAIL &&
-    env.BYOK_VERTEX_PRIVATE_KEY
-  ) {
-    creds.vertex = {
-      project: env.BYOK_VERTEX_PROJECT,
-      location: env.BYOK_VERTEX_LOCATION,
-      clientEmail: env.BYOK_VERTEX_CLIENT_EMAIL,
-      // Vercel env vars keep newlines escaped.
-      privateKey: env.BYOK_VERTEX_PRIVATE_KEY.replace(/\\n/g, "\n"),
-    };
-  }
-  return creds;
-}
-
-export type BilledTo = "gateway" | `byok:${ByokProvider}`;
-
-/** JSON-safe gateway options (the AI SDK requires a JSON object here). */
-export interface GatewayOptions {
-  /** provider slug → credential objects (§8.9 request-scoped BYOK). */
-  byok?: Record<string, Array<Record<string, string>>>;
-  /** Pin routing so a request cannot silently reroute at a different price. */
-  only?: string[];
-}
-
-export interface GatewayCallOptions {
-  providerOptions?: { gateway: GatewayOptions };
-  billedTo: BilledTo;
-}
-
 /**
- * Build the gateway provider options for one model call.
- * Returns `billed_to` for the ledger (§8.9): a routed call with a usable
- * credential bills the provider account; anything else bills the gateway.
+ * Every model call bills the AI Gateway — the commissioner's decision on
+ * 2026-08-28, superseding §8.9's BYOK routing. One billing path means one
+ * price list, one balance to watch on /spend, and no provider account whose
+ * credential can quietly expire mid-season and reroute a model.
+ *
+ * `spend_ledger.billed_to` keeps the column §6 defines and always reads
+ * `gateway`, so the ledger stays comparable if that decision is ever revisited.
  */
-export function gatewayCallOptions(
-  modelId: string,
-  routes: Record<string, ByokProvider>,
-  creds: ByokCredentials,
-): GatewayCallOptions {
-  const provider = routes[modelId];
-  if (!provider) return { billedTo: "gateway" };
-
-  let credential: Record<string, string> | null = null;
-  if (provider === "vertex" && creds.vertex) {
-    credential = {
-      project: creds.vertex.project,
-      location: creds.vertex.location,
-      clientEmail: creds.vertex.clientEmail,
-      privateKey: creds.vertex.privateKey,
-    };
-  } else if (provider !== "vertex") {
-    const apiKey = creds[provider];
-    if (apiKey) credential = { apiKey };
-  }
-  if (!credential) return { billedTo: "gateway" }; // no credential configured → gateway balance
-
-  return {
-    providerOptions: {
-      gateway: {
-        byok: { [BYOK_PROVIDER_SLUG[provider]]: [credential] },
-        only: [BYOK_PROVIDER_SLUG[provider]],
-      },
-    },
-    billedTo: `byok:${provider}`,
-  };
-}
+export type BilledTo = "gateway";
 
 /**
  * Anthropic prompt caching (§8.1): cache_control breakpoints on the system

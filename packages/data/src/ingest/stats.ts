@@ -52,7 +52,12 @@ export async function upsertWeekStats(
           set: { ...values },
         });
       count++;
-      if (input.markFinal && ptsPpr !== null && Math.abs(ptsPpr - enginePts) > 0.01) {
+      // §3.2's fit check compares Sleeper's own `pts_ppr` with what our
+      // scoring settings produce from Sleeper's stat line. A FantasyPros or
+      // nflverse row carries computed points and no comparable stat line, so
+      // `engine_pts` is 0 there and every player would look like a mismatch.
+      const auditable = (input.source ?? "sleeper") === "sleeper";
+      if (auditable && input.markFinal && ptsPpr !== null && Math.abs(ptsPpr - enginePts) > 0.01) {
         discrepancies++;
         await tx.insert(scoringDiscrepancies).values({
           playerId: e.player_id,

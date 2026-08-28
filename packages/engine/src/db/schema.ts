@@ -583,6 +583,9 @@ export const spendLedger = pgTable(
     costUsd: numeric("cost_usd", { precision: 12, scale: 6, mode: "number" }).notNull(),
     source: text("source").$type<"gateway" | "price_table" | "tool">().notNull(),
     toolName: text("tool_name"),
+    // §6 defines the column; the league bills the AI Gateway for every step
+    // (commissioner's decision, 2026-08-28), so it always reads `gateway`.
+    // The wider type stays so the ledger is comparable if that is revisited.
     billedTo: text("billed_to")
       .$type<"gateway" | "byok:openai" | "byok:xai" | "byok:vertex" | "byok:anthropic">()
       .notNull()

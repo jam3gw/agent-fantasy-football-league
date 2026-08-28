@@ -1,5 +1,5 @@
 /**
- * The gateway model call (SPEC §8.1, §8.7, §8.9).
+ * The gateway model call (SPEC §8.1, §8.7).
  *
  * One call to `generateText` per session step. The tools are declared to the
  * model but NOT executed here — the session loop runs each tool as its own
@@ -14,13 +14,10 @@ import { generateText, dynamicTool, jsonSchema } from "ai";
 import { z } from "zod";
 import type { EngineDb } from "@league/engine";
 import type { ModelStepRequest, ModelStepResult, ModelMessage } from "./session.ts";
-import type { ByokCredentials, ByokProvider } from "./models.ts";
-import { gatewayCallOptions, supportsExplicitCaching } from "./models.ts";
+import { supportsExplicitCaching } from "./models.ts";
 import type { UsageTokens } from "./spend.ts";
 
 export interface ModelStepConfig {
-  byokRoutes: Record<string, ByokProvider>;
-  byokCredentials: ByokCredentials;
   /** Optional override for tests. */
   generate?: typeof generateText;
 }
@@ -97,14 +94,11 @@ function withCaching(messages: ModelMessage[], modelId: string): ModelMessage[] 
  */
 export function createModelStep(
   _db: EngineDb,
-  config: ModelStepConfig,
+  config: ModelStepConfig = {},
 ): (req: ModelStepRequest, stepNo: number) => Promise<ModelStepResult> {
   const generate = config.generate ?? generateText;
 
   return async function modelStep(req: ModelStepRequest): Promise<ModelStepResult> {
-    const call = gatewayCallOptions(req.modelId, config.byokRoutes, config.byokCredentials);
-    const providerOptions = call.providerOptions ?? undefined;
-
     // The session loop keeps its own message and tool types so it can be unit
     // tested without the SDK; this is the one boundary where they meet, so the
     // call options are assembled here and handed over with a single cast.
@@ -112,7 +106,6 @@ export function createModelStep(
       model: req.modelId,
       messages: withCaching(req.messages, req.modelId),
       tools: declareTools(req),
-      ...(providerOptions ? { providerOptions } : {}),
       // No maxOutputTokens, temperature, reasoning budget, or effort flag (§8.1).
     } as unknown as Parameters<typeof generateText>[0];
 
@@ -129,7 +122,8 @@ export function createModelStep(
       toolCalls,
       usage: usageOf(result.usage ?? {}),
       gatewayCostUsd: gatewayCostFrom(result.providerMetadata),
-      billedTo: call.billedTo,
+      // Every call bills the gateway (commissioner's decision, 2026-08-28).
+      billedTo: "gateway",
       assistantMessage: { role: "assistant", content: result.content ?? result.text ?? "" },
       finishReason: result.finishReason,
     };

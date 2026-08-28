@@ -4,10 +4,105 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 
 ## Questions for Jake
 
+
+
 *(none blocking — FYI items below)*
 
-- **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET`, `CRON_SECRET`, and BYOK keys are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
+- **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
+
+## 2026-08-28 — Second review round: a critical bug in the first round's own fix
+
+The reviewer read only the fixes, and found that one of them was worse than
+what it replaced.
+
+**Critical, and mine.** Adding the tick's queued-session sweeper without
+removing the `session.run` job left **two starters for every session**. In one
+tick: the job's workflow started session 42, then the sweeper — seeing it still
+`queued` — claimed it and started it again; and because the resume path treats
+`running` as "carry on" rather than "refuse", neither run backed off. Two loops
+ran the same session at once: duplicate model calls, doubled cost, interleaved
+transcript rows, and duplicate *writes* — two board posts, two trade proposals
+against the three-a-day limit, two waiver-claim replacements. On essentially
+every booked session. The queued session row is now the queue: `createSession`
+books no job, the sweeper is the only starter, and `session.run` means "this is
+due now". `due_at` moved into the session context so the stagger still holds.
+
+The rest of the round, all real:
+- The sweeper stopped the whole sweep when a session could not get a slot, but
+  that also happens when *that team* is busy — so one team's 90-minute session
+  idled five free slots behind it and every lineup check queued after it was
+  skipped at kickoff. `claimSlot` now says why it refused.
+- A session left `running` by an invocation that died held its slot, and blocked
+  its team, forever. The tick reclaims one that is past its deadline and has
+  written nothing for fifteen minutes.
+- The new week rollup attributed a step through `sessions.context.week`, which
+  `createSession` omitted for exactly the event-driven kinds — trade responses,
+  votes, board replies, injury responses. By the spec's own weekly mix that is
+  roughly 40% of a week's spend missing from `/spend` and from the alarm the
+  same commit was fixing. Every booking now carries its week.
+- The nflverse audit compared against `engine_pts`, which is 0 on a week scored
+  by FantasyPros — so the exact §13.4 scenario it exists for would have logged a
+  discrepancy for every player. It compares against the points that scored the
+  week. The §3.2 fit check had the same problem from the other end and now only
+  runs on Sleeper-scored rows.
+- The read breaker treated `ECONNRESET` as an outage. That is how a pooler drops
+  an idle connection — one of them would have blanked the home page, and ISR
+  would then have cached the empty render for five minutes.
+- Two of my new audit tests were vacuous (`toBeGreaterThanOrEqual(0)`, and a
+  loop over a list that was always empty) and one made real calls to Sleeper.
+  Rewritten to assert exact counts against a stubbed feed.
+- The §15.4 test re-implemented the sweeper instead of calling it, which is why
+  it could not see either of the two bugs above. It drives the real one now, and
+  seven new tests cover exactly-once starting, head-of-line blocking, the
+  stagger, deadline expiry and reclaiming.
+- Smaller: a resumed session repairs tool calls whose results were never
+  written (every provider rejects an unpaired call) and stops immediately if the
+  ending tool already succeeded; invalid-call counts are recorded rather than
+  inferred; a waiver resubmission with nothing valid in it keeps the previous
+  list; `claimSlot` uses the league clock.
+
+**A process note worth keeping.** I had been running `pnpm -s typecheck`, and
+`-s` silences the per-package output — so packages with type errors reported
+green. Two real errors were hiding behind it, and a missing export that only
+`next build` caught. Checks are run unsilenced from here on.
+
+Test suite: **368 tests green**.
+
+## 2026-08-28 — Commissioner's decisions: gateway-only billing, and schema+seed on every deploy
+
+**Everything bills the AI Gateway.** Jake's call, superseding §8.9's BYOK
+routing. Removed: `DEFAULT_BYOK_ROUTES`, `ByokCredentials`,
+`byokCredentialsFromEnv`, `gatewayCallOptions`, the `providerOptions.gateway`
+BYOK/`only` payload, and every `BYOK_*` variable from `.env.example`.
+`spend_ledger.billed_to` keeps the column §6 defines and always reads
+`gateway`, so the ledger stays comparable if this is ever revisited, and
+`/spend` and `/benchmark` no longer talk about a provider account absorbing
+cost. §8.9 in the spec is marked superseded rather than deleted.
+
+What this buys: one price list, one balance to watch, and no provider
+credential that can expire mid-season and silently reroute a model at a
+different price. What it costs: the free provider credits in Appendix F go
+unused. Three items drop off the go-live list — the OpenAI, xAI and Google
+Cloud provider accounts, and the open question about whether the Vertex trial
+credit covers Anthropic models.
+
+**The schema was already applied by the Vercel build; the data was not.** Every
+deploy has run `pnpm --filter @league/engine migrate` before `next build` since
+M1 — the build log for each deploy says `migrations applied` — so no schema is
+ever applied by hand. But the build log also said, thirty times per deploy:
+
+    [page query failed] league_settings singleton missing — initLeagueSettings was never run
+
+The schema was there and the league was not. `apps/web/scripts/seed.ts` now runs
+between the migration and the build, and is create-if-absent throughout: the
+settings singleton, the twelve teams (name left null — the agent names its own
+in onboarding), the model price seed, the default alarm rules, and the tool
+costs. Nothing it writes overwrites anything the league or the commissioner has
+since changed, so re-running it on every deploy is a no-op. A preview branch, a
+restored backup or the first production deploy now comes up as a complete
+league with nobody touching it, which is what §2's "no manual data entry" asks
+for.
 
 ## 2026-08-28 — Independent review before merge: findings and fixes
 
@@ -139,14 +234,13 @@ What is done, what needs Jake, and what needs the season to start. Nothing below
 - [x] Commissioner password login, signed cookie, admin routes guarded in `proxy.ts`, server actions re-check auth themselves.
 - [x] `docs/RUNBOOK.md` written: re-run a job, swap a model, correct a score, recover from a dead feed.
 - [x] Security properties from §15.5 enforced as tests, not just intentions.
-- [x] The app builds with no database reachable, so a database blip cannot fail a deploy.
+- [x] `next build` renders every page with no database reachable, so a blip during the render step cannot fail a deploy. The migrate and seed steps that run before it *do* require the database — a deploy that cannot reach its own database should not ship.
 
 ### Needs Jake (credentials or console access)
 - [ ] **Confirm the environment variables in Vercel** for Production and Preview — every name is in `.env.example`. `DATABASE_URL` should already be there from the Neon integration.
 - [ ] **Attach the custom domain** and set `SITE_DOMAIN` (the agents' web tools block it).
 - [ ] **Enable Neon backups/PITR.**
-- [ ] **Provider accounts for BYOK** (§8.9, §17): OpenAI data sharing on, xAI data-sharing credit visible, Google Cloud trial with a Vertex service account. Then `BYOK_*` in Vercel. The routes are already configured; a model with no credential simply bills the gateway.
-- [ ] **Confirm whether the Google Cloud trial credit covers Anthropic models on Vertex.** Until it does, Sonnet stays on the gateway — deliberately, per §8.9.
+- ~~Provider accounts for BYOK~~ — **dropped 2026-08-28**: everything bills the AI Gateway. Keep the gateway balance topped up; that is the only account that matters.
 
 ### Needs a preview deploy (code is ready; these are runs, not builds)
 - [ ] Smoke test per model (§8.1) — the `smoke` session kind and the admin button exist.
@@ -154,7 +248,6 @@ What is done, what needs Jake, and what needs the season to start. Nothing below
 - [ ] Rankings pull fresh, ≥ 200 ranked players, no unmatched player in the top 200 — `/admin/rankings` shows the gate and `startDraftAction` refuses below it.
 - [ ] Mock draft on a temporary Neon branch (§15.2), then delete the branch.
 - [ ] One test alarm and one test digest to `ALERT_EMAIL_TO`.
-- [ ] One session per BYOK-routed model showing `billed_to = byok:<provider>` in the ledger.
 
 ### Then
 - [ ] Onboarding sessions, draw the order, start the draft — all buttons on `/admin/draft`.
@@ -178,7 +271,7 @@ What is done, what needs Jake, and what needs the season to start. Nothing below
 - All 38 tools (17 read, 13 write, 3 draft, 6 reporter) as zod-schema'd definitions that re-validate their own arguments; per-kind tool sets asserted against the §8.6 tables, including that a team agent can never read another team's scratchpad or transcripts.
 - Session loop per §8.2 with both loop guards, the ceiling nudge, the five-invalid-call nudge, the closing rules per kind, full transcripts, and a spend-ledger row per model step.
 - **No model-side limits anywhere**: no `maxOutputTokens`, no temperature, no reasoning or effort flag. Anthropic cache breakpoints on the stable prefix; other providers cache prefixes themselves.
-- BYOK routing per §8.9 with provider pinning, verified against the live gateway option schema.
+- ~~BYOK routing per §8.9~~ — removed 2026-08-28; every call bills the AI Gateway (see the entry at the top).
 
 ### M4 — Draft (workflow complete; mock draft pending credentials)
 - Snake order, inline draft sessions against the 180-second clock, §10.4 auto-pick with position caps and the must-fill-starters rule, pause/resume that preserves the remaining clock, and crash-safe resume.
@@ -190,7 +283,6 @@ What is done, what needs Jake, and what needs the season to start. Nothing below
 
 ### Still outstanding
 - Live smoke tests per model, the mock draft, and the simulated week all need credentials that live only in Vercel; they run against a preview deploy.
-- `/spend` "paid cost" needs one real session per BYOK-routed model to confirm `billed_to` (§17).
 
 ## 2026-08-28 — Environment limitation: direct database access from the build sandbox
 

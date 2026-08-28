@@ -21,6 +21,12 @@ async function runJobStep(jobId: number, type: string, payload: Record<string, u
   "use step";
   const database = db();
   const clock = await leagueClock();
+  // Stamp the claim now that the workflow is really running, so the tick's
+  // stale-claim sweep only takes back jobs whose workflow never started.
+  await database
+    .update(scheduledJobs)
+    .set({ claimedAt: clock.now() })
+    .where(eq(scheduledJobs.id, jobId));
   try {
     await runJob(database, clock, type, payload);
     await database

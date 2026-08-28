@@ -10,9 +10,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
-import { initLeagueSettings, sessions, teams } from "@league/engine";
+import { createSession, getSettings, initLeagueSettings, scheduledJobs, sessions, teams } from "@league/engine";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
 import { claimSlot } from "../lib/runSession";
+import { startQueuedSessions } from "../lib/tick";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -85,7 +86,7 @@ describe("§9.2 — the slot claim", () => {
     const claimed: number[] = [];
     for (const id of ids) {
       const session = (await db.select().from(sessions).where(eq(sessions.id, id)))[0]!;
-      if (await claimSlot(db, id, session.teamId)) claimed.push(id);
+      if ((await claimSlot(db, id, session.teamId, clock.now())) === "claimed") claimed.push(id);
     }
     expect(claimed).toHaveLength(CAP);
     expect(await runningCount()).toBe(CAP);
@@ -112,10 +113,11 @@ describe("§9.2 — the slot claim", () => {
       )
       .returning({ id: sessions.id });
 
-    expect(await claimSlot(db, rows[0]!.id, teamId!)).toBe(true);
-    expect(await claimSlot(db, rows[1]!.id, teamId!)).toBe(false);
+    expect(await claimSlot(db, rows[0]!.id, teamId!, clock.now())).toBe("claimed");
+    // The distinction the sweeper depends on: this team is busy, the league is not.
+    expect(await claimSlot(db, rows[1]!.id, teamId!, clock.now())).toBe("team_busy");
     await finish(rows[0]!.id);
-    expect(await claimSlot(db, rows[1]!.id, teamId!)).toBe(true);
+    expect(await claimSlot(db, rows[1]!.id, teamId!, clock.now())).toBe("claimed");
   });
 
   it("claims a session once, so two ticks racing cannot both start it", async () => {
@@ -132,8 +134,8 @@ describe("§9.2 — the slot claim", () => {
         context: { deadline_at: "2026-11-08T18:00:00Z" },
       })
       .returning({ id: sessions.id });
-    expect(await claimSlot(db, row!.id, teamId!)).toBe(true);
-    expect(await claimSlot(db, row!.id, teamId!)).toBe(false);
+    expect(await claimSlot(db, row!.id, teamId!, clock.now())).toBe("claimed");
+    expect(await claimSlot(db, row!.id, teamId!, clock.now())).toBe("not_queued");
   });
 
   it("the reporter has no team, so the per-team rule never blocks it", async () => {
@@ -151,7 +153,199 @@ describe("§9.2 — the slot claim", () => {
         context: { deadline_at: "2026-11-08T18:00:00Z" },
       })
       .returning({ id: sessions.id });
-    expect(await claimSlot(db, reporter!.id, null)).toBe(true);
+    expect(await claimSlot(db, reporter!.id, null, clock.now())).toBe("claimed");
+  });
+});
+
+describe("the tick's sweeper is the only thing that starts a session", () => {
+  it("starts each session exactly once, however many ticks run", async () => {
+    // The bug this pins: a session was started by both its `session.run` job
+    // and the sweeper, in the same tick, and neither run refused — so the
+    // model calls, the ledger rows and every write the agent made happened
+    // twice.
+    const teamIds = await twelveTeams();
+    const ids = await bookTwelve(teamIds, new Date("2026-11-08T18:00:00Z"));
+    const started: number[] = [];
+
+    for (let tick = 0; tick < 3; tick++) {
+      await startQueuedSessions(db, clock, async (id) => {
+        started.push(id);
+      });
+    }
+
+    expect(started).toHaveLength(CAP);
+    expect(new Set(started).size).toBe(CAP);
+    expect(started.every((id) => ids.includes(id))).toBe(true);
+    // And no session row was started that the sweeper did not report.
+    expect(await runningCount()).toBe(CAP);
+  });
+
+  it("does not book a second starter alongside itself", async () => {
+    // `createSession` used to book a `session.run` job as well; the job's
+    // workflow and the sweeper then both ran the session.
+    const [teamId] = await twelveTeams();
+    const settings = await getSettings(db);
+    await createSession(db, settings, {
+      teamId: teamId!,
+      kind: "weekly_review",
+      trigger: "test",
+      idempotencyKey: "solo",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { week: 10 },
+    });
+    const jobs = await db.select().from(scheduledJobs);
+    expect(jobs.filter((j) => j.type === "session.run")).toHaveLength(0);
+  });
+
+  it("a busy team does not hold the queue up behind it", async () => {
+    // Team A is mid-session; A's next session is the oldest queued row. The
+    // other eleven teams must still start — otherwise one long session idles
+    // five slots for ninety minutes and every lineup check behind it is
+    // skipped at kickoff.
+    const teamIds = await twelveTeams();
+    const deadline = new Date("2026-11-08T18:00:00Z");
+
+    const [busy] = await db
+      .insert(sessions)
+      .values({
+        teamId: teamIds[0]!,
+        kind: "weekly_review",
+        trigger: "t",
+        idempotencyKey: "busy",
+        modelId: "m/1",
+        status: "running",
+        startedAt: clock.now(),
+        context: { deadline_at: deadline.toISOString() },
+      })
+      .returning({ id: sessions.id });
+
+    // A's second session is booked first, so it is at the head of the queue.
+    await db.insert(sessions).values({
+      teamId: teamIds[0]!,
+      kind: "trade_vote",
+      trigger: "t",
+      idempotencyKey: "a-second",
+      modelId: "m/1",
+      status: "queued",
+      context: { deadline_at: deadline.toISOString() },
+    });
+    await bookTwelve(teamIds.slice(1), deadline);
+
+    const started: number[] = [];
+    await startQueuedSessions(db, clock, async (id) => {
+      started.push(id);
+    });
+
+    // Five slots were free beside the running one, and all five were used.
+    expect(started).toHaveLength(CAP - 1);
+    expect(started).not.toContain(busy!.id);
+  });
+
+  it("respects the stagger: a session not yet due waits its turn", async () => {
+    const teamIds = await twelveTeams();
+    const deadline = new Date("2026-11-08T18:00:00Z");
+    await db.insert(sessions).values(
+      teamIds.slice(0, 3).map((teamId, i) => ({
+        teamId,
+        kind: "lineup_check" as const,
+        trigger: "t",
+        idempotencyKey: `s${i}`,
+        modelId: "m/1",
+        status: "queued" as const,
+        context: {
+          deadline_at: deadline.toISOString(),
+          // The first is due now; the others in one and two minutes (§9.1).
+          due_at: new Date(clock.now().getTime() + i * 60_000).toISOString(),
+        },
+      })),
+    );
+
+    const first: number[] = [];
+    await startQueuedSessions(db, clock, async (id) => {
+      first.push(id);
+    });
+    expect(first).toHaveLength(1);
+
+    clock.advance(2 * 60_000);
+    const rest: number[] = [];
+    await startQueuedSessions(db, clock, async (id) => {
+      rest.push(id);
+    });
+    expect(rest).toHaveLength(2);
+  });
+
+  it("skips a session whose deadline passed while it waited", async () => {
+    const [teamId] = await twelveTeams();
+    const [row] = await db
+      .insert(sessions)
+      .values({
+        teamId: teamId!,
+        kind: "lineup_check",
+        trigger: "t",
+        idempotencyKey: "late",
+        modelId: "m/1",
+        status: "queued",
+        context: { deadline_at: new Date(clock.now().getTime() - 60_000).toISOString() },
+      })
+      .returning({ id: sessions.id });
+
+    const started: number[] = [];
+    const result = await startQueuedSessions(db, clock, async (id) => {
+      started.push(id);
+    });
+    expect(started).toEqual([]);
+    expect(result.expired).toBe(1);
+    const after = (await db.select().from(sessions).where(eq(sessions.id, row!.id)))[0]!;
+    expect(after.status).toBe("skipped");
+    expect(after.endedBy).toBe("deadline");
+  });
+
+  it("reclaims a session abandoned mid-run so its slot comes back", async () => {
+    // A function killed between the slot claim and the workflow start leaves a
+    // `running` row nobody owns. Left alone it holds one of the six slots — and
+    // blocks that team entirely — for the rest of the season.
+    const [teamId] = await twelveTeams();
+    const stale = new Date(clock.now().getTime() - 60 * 60_000);
+    const [row] = await db
+      .insert(sessions)
+      .values({
+        teamId: teamId!,
+        kind: "weekly_review",
+        trigger: "t",
+        idempotencyKey: "abandoned",
+        modelId: "m/1",
+        status: "running",
+        startedAt: stale,
+        updatedAt: stale,
+        context: { deadline_at: new Date(clock.now().getTime() - 30 * 60_000).toISOString() },
+      })
+      .returning({ id: sessions.id });
+
+    const result = await startQueuedSessions(db, clock, async () => {});
+    expect(result.reclaimed).toBe(1);
+    const after = (await db.select().from(sessions).where(eq(sessions.id, row!.id)))[0]!;
+    expect(after.status).toBe("failed");
+    expect(await runningCount()).toBe(0);
+  });
+
+  it("leaves a running session alone while it is still working", async () => {
+    const [teamId] = await twelveTeams();
+    await db.insert(sessions).values({
+      teamId: teamId!,
+      kind: "weekly_review",
+      trigger: "t",
+      idempotencyKey: "working",
+      modelId: "m/1",
+      status: "running",
+      startedAt: clock.now(),
+      updatedAt: clock.now(),
+      context: { deadline_at: new Date(clock.now().getTime() + 60 * 60_000).toISOString() },
+    });
+    const result = await startQueuedSessions(db, clock, async () => {});
+    expect(result.reclaimed).toBe(0);
+    expect(await runningCount()).toBe(1);
   });
 });
 
@@ -182,14 +376,11 @@ describe("§15.4 — twelve lineup checks finish inside the window", () => {
         done.push(id);
       }
 
-      // The tick's sweeper: start what it can, stop at the cap.
-      while (pending.length > 0) {
-        const id = pending[0]!;
-        const session = (await db.select().from(sessions).where(eq(sessions.id, id)))[0]!;
-        if (!(await claimSlot(db, id, session.teamId))) break;
-        pending.shift();
+      // The tick's own sweeper, not a copy of it.
+      await startQueuedSessions(db, clock, async (id) => {
+        pending.splice(pending.indexOf(id), 1);
         running.set(id, elapsed + SESSION_MINUTES);
-      }
+      });
       expect(await runningCount(), `over the cap at minute ${elapsed}`).toBeLessThanOrEqual(CAP);
     }
 

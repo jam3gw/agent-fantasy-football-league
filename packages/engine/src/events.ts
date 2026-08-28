@@ -73,7 +73,12 @@ export async function createSession(
       status: "queued",
       createdAt: input.now,
       context: {
+        // Every booking carries the fantasy week it belongs to. The spend
+        // rollups attribute a step to a week through this (§8.7), so a kind
+        // that omitted it dropped out of the week's totals entirely.
+        week: input.context?.week ?? settings.currentWeek,
         ...(input.context ?? {}),
+        due_at: input.dueAt.toISOString(),
         deadline_at: deadlineAt.toISOString(),
         tool_call_ceiling: guard.toolCallCeiling,
       },
@@ -82,15 +87,11 @@ export async function createSession(
     .returning({ id: sessions.id });
   const sessionId = rows[0]?.id;
   if (sessionId === undefined) return null;
-  await db
-    .insert(scheduledJobs)
-    .values({
-      type: "session.run",
-      dueAt: input.dueAt,
-      payload: { sessionId },
-      idempotencyKey: `job:session.run:${input.idempotencyKey}`,
-    })
-    .onConflictDoNothing({ target: scheduledJobs.idempotencyKey });
+  // No `session.run` job: the queued session row *is* the queue, and the
+  // tick's sweeper is its only starter. Booking a job as well meant two
+  // starters for one session — the job's workflow and the sweeper's — and
+  // both ran it, because a session already marked `running` is treated as one
+  // to resume rather than one to refuse.
   return sessionId;
 }
 

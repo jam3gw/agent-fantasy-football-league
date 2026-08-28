@@ -127,11 +127,17 @@ export async function runJob(
       return;
     }
     case "session.run": {
-      // A session can run for many minutes; give it its own durable run so a
-      // function timeout never loses a transcript mid-way (§9.2).
-      const { start } = await import("workflow/api");
-      const { agentSessionWorkflow } = await import("../workflows/agentSession");
-      await start(agentSessionWorkflow, [Number(payload.sessionId)]);
+      // Bring a queued session forward. The tick's sweeper is the only thing
+      // that starts a session (§9.2's wait-for-slot), so "run it now" means
+      // "it is due now" — two starters for one session would run it twice.
+      const { sessions } = await import("@league/engine");
+      const sessionId = Number(payload.sessionId);
+      const row = (await db.select().from(sessions).where(eq(sessions.id, sessionId)))[0];
+      if (!row || row.status !== "queued") return;
+      await db
+        .update(sessions)
+        .set({ context: { ...row.context, due_at: clock.now().toISOString() }, updatedAt: clock.now() })
+        .where(eq(sessions.id, sessionId));
       return;
     }
     case "sessions.book": {

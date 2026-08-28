@@ -13,7 +13,7 @@ Maps each milestone (SPEC.md §16) to the packages, tables, workflows, routes, a
 - **Tests**: §15.1.1, 8, 9, 11; live poll against fixture.
 
 ## M3 — Agent runner (`packages/agent`)
-- Zod tool schemas (§8.4), shared system prompt (App C) + briefs (`briefs/*.md`), `runSession` loop (§8.2) as Vercel Workflow, loop guards (§8.3), context snapshot (§8.5), spend ledger per model step (§8.7), BYOK routing (§8.9), transcripts (`session_events`).
+- Zod tool schemas (§8.4), shared system prompt (App C) + briefs (`briefs/*.md`), `runSession` loop (§8.2) as Vercel Workflow, loop guards (§8.3), context snapshot (§8.5), spend ledger per model step (§8.7), transcripts (`session_events`).
 - **Acceptance**: smoke test per model (needs `AI_GATEWAY_API_KEY` — in Vercel env; run against preview deploy).
 
 ## M4 — Draft
@@ -42,13 +42,11 @@ Maps each milestone (SPEC.md §16) to the packages, tables, workflows, routes, a
 - [x] §5.5 nflverse schedules URL and columns — **done**; the 2026 opener matches §3.7 exactly.
 - [x] §3.6 Sleeper status vocabularies — **done**; IR-eligible defaults extended with the long forms Sleeper uses in `status`.
 - [x] Next.js 16 breaking changes (AGENTS.md) — **done**; async request APIs, `middleware`→`proxy`, `revalidateTag` arity, Turbopack default, `next lint` removed.
-- [x] §8.9 gateway BYOK option shape — **done**; `byok` and `only` confirmed against the installed gateway provider's types.
 - [ ] §5.6 nflverse player-stats release naming — both known names are tried at runtime; confirm which responds for 2026.
 - [ ] §5.7/5.8 FantasyPros free-tier daily cap and truncation counts — needs `FANTASYPROS_API_KEY`.
 - [ ] §5.8 consensus-rankings default `type` behaviour — needs the key.
 - [ ] §8.7 gateway cost field in provider metadata — needs a real gateway call; the code prefers it and falls back to the price table.
 - [ ] §8.1 any provider that requires a max-output field — needs one real call per model.
 - [ ] §13.2 Sleeper game-finished signal — currently 4.5 hours after kickoff plus the nflverse status; confirm in week 1.
-- [ ] §8.9 whether the Google Cloud trial credit covers Anthropic models on Vertex — commissioner console; Sonnet is left on the gateway until then.
 - [ ] App G Neon integration set `DATABASE_URL` in the Vercel project — confirm in Settings → Environment Variables.
 - [x] §12.1 cache windows reach the CDN — **done 2026-08-28**, probed on the deployed preview: only `export const revalidate` works, and a dynamic segment needs `generateStaticParams` to be cached at all. Details in VERIFIED.md.
