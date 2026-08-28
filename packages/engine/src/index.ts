@@ -11,3 +11,7 @@ export * from "./board.ts";
 export * from "./scratchpad.ts";
 export * from "./decisionLog.ts";
 export * from "./teamNames.ts";
+export * from "./lineup.ts";
+export * from "./waivers.ts";
+export * from "./trades.ts";
+export * from "./schedule.ts";
