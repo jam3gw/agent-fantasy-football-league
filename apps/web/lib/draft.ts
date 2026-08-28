@@ -7,7 +7,7 @@ import "server-only";
  * the draft workflow… there is no wait-for-slot step"), because the clock is
  * the only concurrency control that matters.
  */
-import { eq, inArray } from "drizzle-orm";
+import { eq, inArray, like } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import { draftSessionKey } from "@league/shared";
 import type { EngineDb } from "@league/engine";
@@ -163,8 +163,13 @@ async function runDraftPick(
   const team = (await database.select().from(teams).where(eq(teams.id, pick.teamId)))[0];
   if (!team) throw new Error(`team ${pick.teamId} not found`);
 
-  let attempt = 1;
-  for (;;) {
+  // §10.2: a pick resumed after a pause gets a NEW session, so the attempt
+  // number has to step past any session already recorded for this pick —
+  // otherwise the idempotency key collides with the paused one, no session is
+  // created, and the pick falls through to an auto-pick the agent never earned.
+  const attempt = await nextAttemptNumber(database, pick.pickNo);
+
+  {
     const sessionId = await createSession(database, settings, {
       teamId: team.id,
       kind: "draft_pick",
@@ -251,7 +256,6 @@ async function runDraftPick(
         .set({ status: "timed_out", endedAt: clock.now() })
         .where(eq(sessions.id, sessionId));
     }
-    void attempt;
     return "autopick";
   }
 }
@@ -363,3 +367,20 @@ export async function draftState(database: EngineDb, clock: Clock) {
     })),
   };
 }
+
+/** The next `draft:{pick}:{attempt}` number for a pick (§10.2). */
+export async function nextAttemptNumber(database: EngineDb, pickNo: number): Promise<number> {
+  const prior = await database
+    .select({ key: sessions.idempotencyKey })
+    .from(sessions)
+    .where(like(sessions.idempotencyKey, `draft:${pickNo}:%`));
+  let highest = 0;
+  for (const row of prior) {
+    const n = Number(row.key.split(":")[2]);
+    if (Number.isFinite(n) && n > highest) highest = n;
+  }
+  return highest + 1;
+}
+
+/** Exported under a clear name for tests. */
+export { nextAttemptNumber as nextAttemptNumberForTest };
