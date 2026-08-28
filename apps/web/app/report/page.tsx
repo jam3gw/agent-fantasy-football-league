@@ -38,7 +38,12 @@ function when(at: Date): string {
 
 /* ------------------------------------------------------- markdown (subset) */
 
-const INLINE = /(\*\*[^*]+\*\*|__[^_]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`)/g;
+/**
+ * `**bold**`, `*italic*`, `` `code` ``. The underscore forms are deliberately
+ * not supported: player and stat keys carry underscores (`pts_allow_14_20`)
+ * and would be mangled into italics.
+ */
+const INLINE = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`)/g;
 
 /** Inline bold, italic and code. Everything else stays literal text. */
 function inline(text: string, key: string): ReactNode[] {
@@ -49,21 +54,20 @@ function inline(text: string, key: string): ReactNode[] {
     const token = match[0];
     const at = match.index;
     if (at > last) nodes.push(text.slice(last, at));
-    const body = token.slice(token.startsWith("**") || token.startsWith("__") ? 2 : 1, -(token.startsWith("**") || token.startsWith("__") ? 2 : 1));
-    if (token.startsWith("**") || token.startsWith("__")) {
+    if (token.startsWith("**")) {
       nodes.push(
         <strong key={`${key}-b${n}`} className="font-semibold">
-          {body}
+          {token.slice(2, -2)}
         </strong>,
       );
     } else if (token.startsWith("`")) {
       nodes.push(
         <code key={`${key}-c${n}`} className="rounded bg-border/40 px-1 py-0.5 font-mono text-[0.85em]">
-          {body}
+          {token.slice(1, -1)}
         </code>,
       );
     } else {
-      nodes.push(<em key={`${key}-i${n}`}>{body}</em>);
+      nodes.push(<em key={`${key}-i${n}`}>{token.slice(1, -1)}</em>);
     }
     last = at + token.length;
     n += 1;

@@ -8,11 +8,12 @@ import type { Clock } from "@league/shared";
 import { etDay, injurySessionKey, zonedTimeToUtc } from "@league/shared";
 import type { EngineDb } from "./db/index.ts";
 import type { SessionKind } from "./db/schema.ts";
-import { scheduledJobs, sessions, teams } from "./db/schema.ts";
+import { draft, nflGames, players, scheduledJobs, sessions, teams } from "./db/schema.ts";
 import { sessionGuard } from "./guards.ts";
 import { playerKickoff } from "./locks.ts";
 import type { LeagueSettings } from "./settings.ts";
-import { getSettings } from "./settings.ts";
+import { getSettings, updateSettings } from "./settings.ts";
+import { createSeasonSchedule } from "./schedule.ts";
 
 export type EngineEvent =
   | { type: "trade.proposed"; tradeId: number; proposerTeamId: number; counterpartyTeamId: number }
@@ -225,10 +226,15 @@ export async function handleEvent(db: EngineDb, clock: Clock, event: EngineEvent
       return;
     }
 
-    // Handled by their workflows (M4/M6); nothing extra here (§9.3).
+    // Handled by the trade engine itself; nothing extra here (§9.3).
     case "trade.vote_cast":
     case "trade.failed":
-    case "draft.completed":
+    case "draft.completed": {
+      await handleDraftCompleted(db, clock, settings);
+      return;
+    }
+
+    // Handled by their workflows (M6); nothing extra here (§9.3).
     case "week.finalized":
     case "waivers.processed":
       return;
@@ -240,4 +246,90 @@ function etDayStartUtc(now: Date): Date {
   const day = etDay(now); // YYYY-MM-DD
   const [y, m, d] = day.split("-").map(Number);
   return zonedTimeToUtc(y!, m!, d!, 0, 0);
+}
+
+/**
+ * `draft.completed` (§9.3). The busiest handler in the league: it turns a
+ * finished draft into a running season.
+ */
+async function handleDraftCompleted(db: EngineDb, clock: Clock, settings: LeagueSettings): Promise<void> {
+  const now = clock.now();
+
+  // start_week (§3.7): week 1 if the draft ended before week 1's first
+  // kickoff, otherwise the first week whose earliest kickoff is after it.
+  const games = await db
+    .select({ week: nflGames.week, kickoffAt: nflGames.kickoffAt })
+    .from(nflGames)
+    .where(eq(nflGames.season, settings.season));
+  const earliestByWeek = new Map<number, Date>();
+  for (const g of games) {
+    const current = earliestByWeek.get(g.week);
+    if (!current || g.kickoffAt < current) earliestByWeek.set(g.week, g.kickoffAt);
+  }
+  let startWeek = 1;
+  for (const week of [...earliestByWeek.keys()].sort((a, b) => a - b)) {
+    if (earliestByWeek.get(week)! > now) {
+      startWeek = week;
+      break;
+    }
+  }
+
+  await updateSettings(db, { phase: "regular", startWeek, currentWeek: startWeek });
+
+  // Rule 3 of §3.4: after the draft every unrostered player is a free agent.
+  await db.update(players).set({ waiverUntil: null });
+
+  // Initial waiver order = reverse of the draft order (§3.4): the team with
+  // the last first-round pick is first.
+  const draftRow = (await db.select().from(draft).where(eq(draft.id, 1)))[0];
+  const order = draftRow?.order ?? [];
+  const reversed = [...order].reverse();
+  for (const [index, teamId] of reversed.entries()) {
+    await db.update(teams).set({ waiverPriority: index + 1 }).where(eq(teams.id, teamId));
+  }
+
+  // The season schedule.
+  await createSeasonSchedule(db, clock);
+
+  // Every team needs a lineup: a weekly_review 15 minutes after the draft,
+  // staggered so the concurrency cap is respected (§9.3).
+  const allTeams = (await db.select().from(teams)).filter((t) => !t.paused);
+  const fresh = await getSettings(db);
+  let i = 0;
+  for (const team of allTeams) {
+    await createSession(db, fresh, {
+      teamId: team.id,
+      kind: "weekly_review",
+      trigger: "draft.completed",
+      idempotencyKey: `session:${team.id}:weekly_review:${fresh.season}:${startWeek}:post_draft`,
+      modelId: team.modelId,
+      dueAt: new Date(now.getTime() + 15 * 60_000 + i * 60_000),
+      now,
+      context: { week: startWeek, post_draft: true },
+    });
+    i++;
+  }
+
+  // And the reporter grades the draft.
+  await createSession(db, fresh, {
+    teamId: null,
+    kind: "reporter_draft_grades",
+    trigger: "draft.completed",
+    idempotencyKey: `session:reporter:reporter_draft_grades:${fresh.season}:${startWeek}:draft`,
+    modelId: reporterModelId(fresh),
+    dueAt: new Date(now.getTime() + 5 * 60_000),
+    now,
+    context: { week: startWeek },
+  });
+
+  // Finally, plan the first week (the job runner starts weekPlanWorkflow).
+  await db
+    .insert(scheduledJobs)
+    .values({
+      type: "week.plan",
+      dueAt: new Date(now.getTime() + 60_000),
+      payload: { week: startWeek },
+      idempotencyKey: `job:week.plan:${fresh.season}:${startWeek}`,
+    })
+    .onConflictDoNothing({ target: scheduledJobs.idempotencyKey });
 }
