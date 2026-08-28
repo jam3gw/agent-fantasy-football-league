@@ -9,6 +9,38 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET`, `CRON_SECRET`, and BYOK keys are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-28 — Go-live status (SPEC §17)
+
+What is done, what needs Jake, and what needs the season to start. Nothing below is blocked on code.
+
+### Done in this session
+- [x] Migrations applied automatically on every deploy (build script), so production and preview each migrate their own database.
+- [x] Cron tick every minute, protected by `CRON_SECRET`; `/admin/health` shows its last success.
+- [x] Scoring fit verified and recorded (`docs/VERIFIED.md`) — the strongest verification available: all 18 weeks of 2025.
+- [x] All 12 model IDs verified against the live gateway catalog; two corrected. `model_prices` seed captured.
+- [x] Commissioner password login, signed cookie, admin routes guarded in `proxy.ts`, server actions re-check auth themselves.
+- [x] `docs/RUNBOOK.md` written: re-run a job, swap a model, correct a score, recover from a dead feed.
+- [x] Security properties from §15.5 enforced as tests, not just intentions.
+- [x] The app builds with no database reachable, so a database blip cannot fail a deploy.
+
+### Needs Jake (credentials or console access)
+- [ ] **Confirm the environment variables in Vercel** for Production and Preview — every name is in `.env.example`. `DATABASE_URL` should already be there from the Neon integration.
+- [ ] **Attach the custom domain** and set `SITE_DOMAIN` (the agents' web tools block it).
+- [ ] **Enable Neon backups/PITR.**
+- [ ] **Provider accounts for BYOK** (§8.9, §17): OpenAI data sharing on, xAI data-sharing credit visible, Google Cloud trial with a Vertex service account. Then `BYOK_*` in Vercel. The routes are already configured; a model with no credential simply bills the gateway.
+- [ ] **Confirm whether the Google Cloud trial credit covers Anthropic models on Vertex.** Until it does, Sonnet stays on the gateway — deliberately, per §8.9.
+
+### Needs a preview deploy (code is ready; these are runs, not builds)
+- [ ] Smoke test per model (§8.1) — the `smoke` session kind and the admin button exist.
+- [ ] FantasyPros free-tier measurement (§5.7/5.8) — daily cap and truncation counts, recorded in VERIFIED.md before the mock draft.
+- [ ] Rankings pull fresh, ≥ 200 ranked players, no unmatched player in the top 200 — `/admin/rankings` shows the gate and `startDraftAction` refuses below it.
+- [ ] Mock draft on a temporary Neon branch (§15.2), then delete the branch.
+- [ ] One test alarm and one test digest to `ALERT_EMAIL_TO`.
+- [ ] One session per BYOK-routed model showing `billed_to = byok:<provider>` in the ledger.
+
+### Then
+- [ ] Onboarding sessions, draw the order, start the draft — all buttons on `/admin/draft`.
+
 ## 2026-08-28 — M1 through M4 built; M5/M6 in progress
 
 **Test suite: 266 tests green** across 22 files (`pnpm test`), lint and typecheck clean in every package.
