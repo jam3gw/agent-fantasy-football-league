@@ -29,8 +29,8 @@ import {
 } from "@league/engine";
 import type { EngineDb, LeagueSettings, StartingSlot } from "@league/engine";
 import type { LeagueTool, ToolResult } from "./types.ts";
-import { pageRows, toolFailure } from "./types.ts";
-import { defineTool } from "./write.ts";
+import { defineTool, pageRows, toolFailure } from "./types.ts";
+
 
 /* -------------------------------------------------------------------------- */
 /* Roster rules (§10.4)                                                       */

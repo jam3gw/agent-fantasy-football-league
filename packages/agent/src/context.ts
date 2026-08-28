@@ -4,7 +4,7 @@
  */
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { formatEt, nextEtTime } from "@league/shared";
-import type { EngineDb, SessionKind } from "@league/engine";
+import type { SessionKind } from "@league/engine";
 import {
   STARTING_SLOTS,
   boardPosts,
