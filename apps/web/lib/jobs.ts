@@ -32,6 +32,7 @@ import {
   upsertWeekStats,
 } from "@league/data";
 import { reporterModelId } from "@league/engine";
+import { env } from "./env";
 
 /** Book a job unless its idempotency key already exists. */
 export async function bookJob(
@@ -133,33 +134,25 @@ export async function runJob(
     }
     case "ingest.fp_rankings": {
       const { ingestFpRankings } = await import("@league/data");
-      const apiKey = process.env.FANTASYPROS_API_KEY;
-      if (!apiKey) return; // no key configured: skip rather than fail the tick
+      const { fantasyprosApiKey, fantasyprosBaseUrl, fantasyprosDailyCap } = env.toolConfig;
+      if (!fantasyprosApiKey) return; // no key configured: skip rather than fail the tick
       const set = settings.phase === "pre_draft" || settings.phase === "drafting" ? "draft" : "weekly";
       await ingestFpRankings(
         db,
         clock,
-        {
-          apiKey,
-          baseUrl: process.env.FANTASYPROS_BASE_URL,
-          dailyCap: Number(process.env.FANTASYPROS_DAILY_CAP ?? 100),
-        },
+        { apiKey: fantasyprosApiKey, baseUrl: fantasyprosBaseUrl, dailyCap: fantasyprosDailyCap },
         { season, set, week: settings.currentWeek },
       );
       return;
     }
     case "ingest.fp_injuries": {
       const { fpRequest } = await import("@league/data");
-      const apiKey = process.env.FANTASYPROS_API_KEY;
-      if (!apiKey) return;
+      const { fantasyprosApiKey, fantasyprosBaseUrl, fantasyprosDailyCap } = env.toolConfig;
+      if (!fantasyprosApiKey) return;
       await fpRequest(
         db,
         clock,
-        {
-          apiKey,
-          baseUrl: process.env.FANTASYPROS_BASE_URL,
-          dailyCap: Number(process.env.FANTASYPROS_DAILY_CAP ?? 100),
-        },
+        { apiKey: fantasyprosApiKey, baseUrl: fantasyprosBaseUrl, dailyCap: fantasyprosDailyCap },
         { kind: "engine" },
         "/nfl/injuries",
         { year: season, week: settings.currentWeek, include_probabilities: "true" },
