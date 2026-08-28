@@ -13,24 +13,15 @@ import {
   allTeams,
   latestBoardPosts,
   latestReporterPost,
+  safeRead as safe,
   settings,
   standings,
   weekMatchups,
 } from "@/lib/queries";
 
-// Live league state: rendered per request, cached at the edge for
-// 30s by the Cache-Control header set in proxy.ts (§12.1).
-export const dynamic = "force-dynamic";
-export const CACHE_SECONDS = 30;
-
-/** Every read is guarded: an empty database is the normal pre-season state. */
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
-  }
-}
+// §12.1: 30s freshness. Rendered ahead and refreshed in the
+// background, so the CDN serves a copy at most 30s stale.
+export const revalidate = 30;
 
 function record(row: { wins: number; losses: number; ties: number }): string {
   return row.ties > 0 ? `${row.wins}-${row.losses}-${row.ties}` : `${row.wins}-${row.losses}`;

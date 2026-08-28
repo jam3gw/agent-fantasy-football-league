@@ -11,10 +11,9 @@ import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "../.
 import DraftLive from "./live";
 
 /** 30 s while the draft is live (§12.1); the board only changes on a pick. */
-// Live league state: rendered per request, cached at the edge for
-// 30s by the Cache-Control header set in proxy.ts (§12.1).
-export const dynamic = "force-dynamic";
-export const CACHE_SECONDS = 30;
+// §12.1: 30s freshness. Rendered ahead and refreshed in the
+// background, so the CDN serves a copy at most 30s stale.
+export const revalidate = 30;
 
 const STATUS_LABEL: Record<string, string> = {
   not_started: "not started",

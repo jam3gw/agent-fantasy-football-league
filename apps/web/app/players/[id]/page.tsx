@@ -16,20 +16,11 @@ import {
 import { formatEt } from "@league/shared";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel, points } from "@/components/ui";
 import { db } from "@/lib/db";
-import { allTeams, settings } from "@/lib/queries";
+import { allTeams, safeRead as safe, settings } from "@/lib/queries";
 
-// Live league state: rendered per request, cached at the edge for
-// 300s by the Cache-Control header set in proxy.ts (§12.1).
-export const dynamic = "force-dynamic";
-export const CACHE_SECONDS = 300;
-
-async function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
-  try {
-    return await fn();
-  } catch {
-    return fallback;
-  }
-}
+// §12.1: 300s freshness. Rendered ahead and refreshed in the
+// background, so the CDN serves a copy at most 300s stale.
+export const revalidate = 300;
 
 /** Does this transaction payload name the player anywhere? */
 function mentionsPlayer(value: unknown, playerId: string): boolean {

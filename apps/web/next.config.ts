@@ -1,40 +1,21 @@
 import type { NextConfig } from "next";
 import { withWorkflow } from "@workflow/next";
 
-/**
- * §12.1's freshness windows. Pages render per request (they show live,
- * time-dependent state), so the CDN is told how long it may hold a copy and
- * to serve the stale one while it refreshes.
- *
- * These are declared here rather than in `proxy.ts` because a proxy's response
- * headers are overwritten by the page's own `Cache-Control`, which Next sets to
- * `no-store` for a `force-dynamic` page.
- */
-const LIVE = "public, s-maxage=30, stale-while-revalidate=120";
-const DEFAULT = "public, s-maxage=300, stale-while-revalidate=1200";
-
 const nextConfig: NextConfig = {
   // The engine and its Postgres driver are server-only Node code.
   serverExternalPackages: ["postgres", "drizzle-orm"],
+  /**
+   * §12.1's freshness windows are set by each page's own `export const
+   * revalidate`, which is what makes the CDN hold a copy for that long — a
+   * header declared here cannot do it, because a page's own `Cache-Control`
+   * (Next writes `no-store` for anything rendered per request) wins over
+   * anything config or `proxy.ts` adds to the response.
+   *
+   * What is left here is the one direction that needs forcing: nothing behind
+   * the commissioner login may ever be stored, by any cache.
+   */
   async headers() {
     return [
-      { source: "/", headers: [{ key: "Cache-Control", value: LIVE }] },
-      { source: "/matchups/:week", headers: [{ key: "Cache-Control", value: LIVE }] },
-      { source: "/draft", headers: [{ key: "Cache-Control", value: LIVE }] },
-      { source: "/standings", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/board", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/transactions", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/waivers", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/trades", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/report", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/benchmark", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/about", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/teams/:slug", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/players/:id", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/sessions/:id", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/spend", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      { source: "/spend/:slug", headers: [{ key: "Cache-Control", value: DEFAULT }] },
-      // Nothing behind the commissioner login is ever cached.
       { source: "/admin/:path*", headers: [{ key: "Cache-Control", value: "private, no-store" }] },
       { source: "/api/admin/:path*", headers: [{ key: "Cache-Control", value: "private, no-store" }] },
     ];

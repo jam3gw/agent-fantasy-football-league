@@ -127,18 +127,58 @@ export async function teamBench(teamId: number, week: number, season: number): P
 }
 
 /**
- * Run a page query, degrading to a fallback instead of throwing.
- *
  * Pages use ISR (§12.1: revalidate 30 s live, 5 min otherwise), so Next
  * prerenders them at build time. A database that is unreachable or empty
  * during a build must not fail the deploy, and a blip at request time must not
  * 500 a public page — an empty section is the right degradation for a site
- * whose whole job is showing league state.
+ * whose whole job is showing league state. `safeRead` runs one page query and
+ * degrades to a fallback instead of throwing.
+ *
+ * Once one read has proved the database unreachable, the rest of the page's
+ * reads would each wait out their own connect timeout — a page with a dozen
+ * of them can blow past the 60 seconds Next allows a prerender and fail the
+ * deploy. So the first connection failure opens a breaker: reads return their
+ * fallback immediately until it lapses, and the page renders its empty state
+ * at once. It closes on its own, so the next revalidation tries again.
  */
+const BREAKER_MS = 5_000;
+let unreachableUntil = 0;
+
+const CONNECTION_CODES = new Set([
+  "CONNECT_TIMEOUT",
+  "CONNECTION_CLOSED",
+  "CONNECTION_ENDED",
+  "CONNECTION_DESTROYED",
+  "CONNECTION_REFUSED",
+  "ECONNREFUSED",
+  "ECONNRESET",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+]);
+
+/** Is this "the database is not answering" rather than "that query is wrong"? */
+function isConnectionFailure(error: unknown): boolean {
+  for (let cause: unknown = error, depth = 0; cause && depth < 5; depth++) {
+    const code = (cause as { code?: unknown }).code;
+    if (typeof code === "string" && CONNECTION_CODES.has(code)) return true;
+    cause = (cause as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/** Test seam: forget that the database was unreachable. */
+export function resetDatabaseBreaker(): void {
+  unreachableUntil = 0;
+}
+
 export async function safeRead<T>(read: () => Promise<T>, fallback: T): Promise<T> {
+  if (Date.now() < unreachableUntil) return fallback;
   try {
     return await read();
   } catch (error) {
+    if (isConnectionFailure(error)) unreachableUntil = Date.now() + BREAKER_MS;
     // Surfaced in the function logs and on /admin/health via the health table;
     // the page itself just renders empty.
     console.error("[page query failed]", error instanceof Error ? error.message : error);
