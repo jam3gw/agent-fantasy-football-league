@@ -218,8 +218,12 @@ describe("§15.5 — public surface", () => {
     // Only the login page and its action are exempt.
     expect(proxySource).toContain('pathname === "/admin/login"');
     expect(proxySource).toContain('pathname === "/api/admin/login"');
-    // Nothing behind the login is cacheable.
-    expect(proxySource).toContain('"private, no-store"');
+    // Nothing behind the login is cacheable. The header is declared in
+    // next.config rather than the proxy, because a page's own Cache-Control
+    // overrides anything a proxy sets on the response.
+    const nextConfig = readFileSync(fileURLToPath(new URL("../next.config.ts", import.meta.url)), "utf8");
+    expect(nextConfig).toContain('"private, no-store"');
+    expect(nextConfig).toContain("/admin/:path*");
   });
 
   it("the cron route requires CRON_SECRET", () => {
@@ -227,8 +231,11 @@ describe("§15.5 — public surface", () => {
       fileURLToPath(new URL("../app/api/cron/tick/route.ts", import.meta.url)),
       "utf8",
     );
-    expect(source).toContain("env.cronSecret");
+    expect(source).toContain("CRON_SECRET");
     expect(source).toContain("401");
+    // Constant-time, and a missing secret is "not authorized", never a 500.
+    expect(source).toContain("timingSafeEqual");
+    expect(source).toContain("if (!secret) return false;");
   });
 
   it("no page or API route reads a secret from the environment directly", () => {
@@ -245,6 +252,10 @@ describe("§15.5 — public surface", () => {
         }
         if (!/\.tsx?$/.test(entry.name)) continue;
         if (full.endsWith(join("lib", "env.ts"))) continue;
+        // The cron route reads CRON_SECRET directly and deliberately: an
+        // unauthenticated endpoint must answer 401 for a missing secret, not
+        // throw the 500 that env.cronSecret would raise.
+        if (full.endsWith(join("cron", "tick", "route.ts"))) continue;
         const text = readFileSync(full, "utf8");
         for (const secret of [
           "FANTASYPROS_API_KEY",
