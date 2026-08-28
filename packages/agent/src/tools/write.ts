@@ -140,7 +140,8 @@ export const setTeamNameTool = defineTool({
 /** Each of the 9 starting slots and IR: a player_id string, or null for empty. */
 const slotValue = z.string().min(1).nullable();
 
-const lineupSlotsSchema = z.object({
+/** Strict: an unknown key is a mistake worth telling the model about (§8.8). */
+const lineupSlotsSchema = z.strictObject({
   QB: slotValue.optional(),
   RB1: slotValue.optional(),
   RB2: slotValue.optional(),
