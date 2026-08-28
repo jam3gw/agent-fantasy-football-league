@@ -10,6 +10,16 @@ import { db } from "../../../lib/db";
 // background, so the CDN serves a copy at most 300s stale.
 export const revalidate = 300;
 
+/**
+ * The thirteen agents are known only from the database, so none is
+ * prerendered. Declaring the list anyway is what makes Next treat the route as
+ * static-with-revalidation: without it the segment is server-rendered per
+ * request and answers `no-store`, so §12.1's window never reaches the CDN.
+ */
+export function generateStaticParams() {
+  return [];
+}
+
 const etDaySql = sql<string>`to_char(${spendLedger.createdAt} at time zone 'America/New_York', 'YYYY-MM-DD')`;
 
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {

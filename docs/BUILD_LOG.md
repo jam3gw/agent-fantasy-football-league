@@ -9,6 +9,46 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET`, `CRON_SECRET`, and BYOK keys are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-28 — §12.1 cache windows: the third attempt is the one that works
+
+Probing the live preview showed every public page answering
+
+    cache-control: private, no-cache, no-store, max-age=0, must-revalidate
+
+after two attempts at setting the windows elsewhere. The rule, verified on the
+deploy rather than reasoned about: **a page's own `Cache-Control` wins over
+both `proxy.ts` response headers and `next.config` `headers()`**, and Next
+writes `no-store` itself for any page rendered per request. So neither of the
+first two places could ever have worked. `export const revalidate` — what
+§12.1 asks for — is the only thing that makes the CDN hold a copy.
+
+Going back to ISR means `next build` prerenders the pages, so an unreachable
+database has to degrade fast instead of failing the deploy. Three things were
+needed, and the first was the real culprit:
+
+- **`backoff: () => 0` on the pool.** postgres-js backs off exponentially
+  between reconnect attempts (`3^retries/100` seconds, capped at 20) and keeps
+  the retry count *shared across the pool*, never resetting it until a
+  connection succeeds. A page issuing a dozen reads therefore waited minutes,
+  not seconds: `/`, `/spend` and `/standings` each blew through Next's
+  60-second per-page budget and failed the build three attempts running.
+- **A breaker in `safeRead`**: the first connection failure short-circuits the
+  rest of that page's reads for five seconds, then closes on its own. The seven
+  pages that each carried their own copy of the guard now share this one.
+- **`DB_CONNECT_TIMEOUT_SECONDS`** so an environment with no database at all
+  (CI) fails in a second rather than eight.
+
+`next build` with no database now finishes in 23 s with every page rendering
+its empty state, and the freshness windows are asserted in
+`apps/web/test/caching.test.ts` so a future `force-dynamic` cannot silently
+remove them.
+
+**Deliberate deviation from §12.1**: `/transactions` and `/teams/[slug]` read
+`searchParams` (type/team filters; the week selector) and so render per
+request and are not shared-cached. A filtered view cannot be cached by path
+alone, and moving the filters client-side would mean shipping the full
+transaction list to the browser. Every other public page carries its window.
+
 ## 2026-08-28 — Preview deploys were failing; fixed
 
 Every preview build of the branch errored with:
