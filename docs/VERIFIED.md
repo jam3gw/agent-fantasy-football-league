@@ -39,3 +39,28 @@ Notes:
 - `https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv` → 206 on ranged GET (URL current, §5.5).
 - `https://api.fantasypros.com/public/v2/json/nfl/players` → 403 without key (base URL live; key required — §14 `FANTASYPROS_BASE_URL` consistent with the OpenAPI document).
 - `https://api.tavily.com` / `https://api.resend.com` → reachable.
+
+## 2026-08-28 — Sleeper weekly stats shape (§5.3)
+
+Request: `GET https://api.sleeper.com/stats/nfl/2025/{1..18}?season_type=regular&position[]=QB&...&position[]=DEF` — 200 for all 18 weeks; ~600–780 entries per week; team defenses included (`player_id` = team abbreviation). Entry keys: `player_id`, `week`, `season`, `team`, `opponent`, `game_id`, `updated_at`, `last_modified`, `stats`, plus `player` (embedded metadata object), `date`, `status` (null in final data), `category`, `company` ("sportradar"). Zero-valued keys omitted as documented. Cached at `fixtures/sleeper/stats_2025_w{1..18}.json`; season totals at `stats_2025_season.json`; projections shape confirmed (`projections_2025_w1.json`, same shape with projected `pts_ppr`). Re-verify against 2026 Week 1 in season.
+
+## 2026-08-28 — scoring_settings fit (§3.2, Appendix A)
+
+Method per Appendix A: dot product of candidate coefficients vs Sleeper `pts_ppr` over ALL 18 weeks of 2025 (6,057 scored entries — stronger than the required W1–3), residual analysis on mismatches. Result: **Appendix A is correct except two changes**:
+
+1. `pts_allow_14_20` = **0**, not 1 (25 of 26 W1–3 mismatches were DEF rows off by exactly +1, all with 14–20 points allowed; JAX W16 corroborates).
+2. Add `idp_blk_kick` = **2** (an individual player's blocked kick, e.g. FB 6202 W2 with `pts_ppr` 2.0 from `idp_blk_kick: 1` alone).
+
+All Appendix A uncertains resolved: `pass_int` −1, `fgmiss` −1, `xpmiss` −1, `ff` 1, `def_st_*` {td 6, ff 1, fum_rec 1}, `st_*` {td 6, ff 1, fum_rec 1}, no plain `fum` penalty, `fum_rec_td` 6 (confirmed by W15 player 12474). `xp_blkd` scores 0.
+
+Final fit: **6,053 / 6,057 exact (±0.01)**. The 4 exceptions are Sleeper-side inconsistencies where their own `pts_ppr` does not match their own stats object (e.g. W5 WR 2374: `pts_ppr` 1.6 ignores a recorded `fum_rec_td`; W5 TEN DEF: `pts_ppr` 15.0 includes a TD the stats object lacks — no `def_td` key, while W7 HOU / W12 PIT identical situations carry it). These are exactly the rows §3.2's `scoring_discrepancy` log handles at runtime (log, show on health page, use `pts_ppr`).
+
+Engine default updated in `packages/engine/src/settings.ts`. The M2 TS test (15.1.1) replays this fit from the fixtures.
+
+## 2026-08-28 — nflverse schedule (§5.5) and 2026 opener (§3.7)
+
+`https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv` → 200. Columns confirmed: `game_id, season, game_type, week, gameday, weekday, gametime, away_team, away_score, home_team, home_score, ...`. 2026 season present (272 regular-season games). **2026 Week 1 earliest kickoff: 2026-09-09 20:20 ET, NE @ SEA — matches §3.7's "Wednesday, September 9, 2026, Seahawks host Patriots" exactly.** Fixture (2024+) at `fixtures/nflverse/games.csv`.
+
+## 2026-08-28 — Sleeper player statuses (§3.6)
+
+`GET https://api.sleeper.app/v1/players/nfl` (12,225 players; active fantasy subset cached at `fixtures/sleeper/players_active.json`). `injury_status` uses short forms (`IR`, `PUP`, `Sus`, `Doubtful`, `Questionable`, `NA`, `DNR`); `status` uses long forms (`Active`, `Injured Reserve`, `Inactive`, `Physically Unable to Perform`, `Practice Squad`, `Non Football Injury`). The IR-eligible default now includes the long forms so the §3.6 "injury_status or status" check works against real data.

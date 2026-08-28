@@ -3,7 +3,12 @@ import type { EngineDb } from "./db/index.ts";
 import type { RosterSlots } from "./db/schema.ts";
 import { leagueSettings } from "./db/schema.ts";
 
-/** Sleeper default PPR expected values (Appendix A). Final values come from the M2 fit. */
+/**
+ * Sleeper default PPR scoring, VERIFIED by fit against all 18 weeks of 2025
+ * Sleeper stats (docs/VERIFIED.md 2026-08-28): Appendix A with two corrections
+ * — pts_allow_14_20 is 0 (not 1) and idp_blk_kick (player blocked kick) is 2.
+ * 6053/6057 entries exact; the 4 exceptions are Sleeper-side stale pts_ppr.
+ */
 export const DEFAULT_SCORING_SETTINGS: Record<string, number> = {
   pass_yd: 0.04,
   pass_td: 4,
@@ -26,6 +31,7 @@ export const DEFAULT_SCORING_SETTINGS: Record<string, number> = {
   fgm_40_49: 4,
   fgm_50p: 5,
   fgmiss: -1,
+  idp_blk_kick: 2,
   sack: 1,
   int: 2,
   ff: 1,
@@ -42,7 +48,7 @@ export const DEFAULT_SCORING_SETTINGS: Record<string, number> = {
   pts_allow_0: 10,
   pts_allow_1_6: 7,
   pts_allow_7_13: 4,
-  pts_allow_14_20: 1,
+  pts_allow_14_20: 0,
   pts_allow_21_27: 0,
   pts_allow_28_34: -1,
   pts_allow_35p: -4,
@@ -60,8 +66,22 @@ export const DEFAULT_ROSTER_SLOTS: RosterSlots = {
   IR: 1,
 };
 
-/** IR-eligible statuses (§3.6, default; editable in settings). */
-export const DEFAULT_IR_ELIGIBLE_STATUSES = ["IR", "PUP", "NFI", "Out", "Sus"];
+/**
+ * §3.6 default plus the long-form equivalents Sleeper uses in `status`
+ * (verified 2026-08-28: injury_status carries short forms, status carries
+ * "Injured Reserve", "Physically Unable to Perform", "Non Football Injury").
+ */
+export const DEFAULT_IR_ELIGIBLE_STATUSES = [
+  "IR",
+  "PUP",
+  "NFI",
+  "Out",
+  "Sus",
+  "Injured Reserve",
+  "Physically Unable to Perform",
+  "Non Football Injury",
+  "Suspended",
+];
 
 export type LeagueSettings = typeof leagueSettings.$inferSelect;
 
