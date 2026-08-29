@@ -12,3 +12,4 @@ export * from "./tools/write.ts";
 export * from "./tools/draft.ts";
 export * from "./tools/reporter.ts";
 export * from "./modelStep.ts";
+export * from "./debug.ts";

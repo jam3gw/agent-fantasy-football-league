@@ -126,6 +126,15 @@ export async function GET(request: Request): Promise<Response> {
         return Response.json({ ok: true, booked: ["ingest.rankings", "draft.run"] });
       }
 
+      case "validate": {
+        // Rebuild a session's messages from its transcript and validate them
+        // on THIS runtime — separates a bundle that validates differently
+        // from live objects holding what JSON cannot record.
+        const sessionId = Number(new URL(request.url).searchParams.get("session"));
+        const { debugValidateSession } = await import("@league/agent");
+        return Response.json(await debugValidateSession(database, sessionId));
+      }
+
       case "tick": {
         const summary = await runTick();
         return Response.json({ ok: true, ...summary });

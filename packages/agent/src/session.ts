@@ -702,20 +702,29 @@ function errorDetail(err: unknown): Record<string, unknown> {
   }
   if (!cause || typeof cause !== "object") return {};
   if (Array.isArray(issues)) {
-    return {
-      cause_issues: issues.slice(0, 5).map((i) => {
-        const issue = i as { code?: unknown; path?: unknown; message?: unknown; expected?: unknown; received?: unknown };
-        return {
-          code: issue.code,
-          path: issue.path,
-          message: issue.message,
-          ...(issue.expected !== undefined ? { expected: issue.expected } : {}),
-          ...(issue.received !== undefined ? { received: issue.received } : {}),
-        };
-      }),
-    };
+    return { cause_issues: flattenIssues(issues).slice(0, 20) };
   }
   return { cause: String(cause).slice(0, 500) };
+}
+
+/**
+ * A union failure's real reason hides in its sub-errors — zod v4 nests them
+ * under `errors`, v3 under `unionErrors` — and the top-level issue alone reads
+ * "Invalid input" with a path and nothing else.
+ */
+export function flattenIssues(issues: unknown, depth = 0): unknown[] {
+  if (!Array.isArray(issues) || depth > 3) return [];
+  return issues.slice(0, 5).flatMap((raw) => {
+    const issue = raw as Record<string, unknown>;
+    const base = { code: issue.code, path: issue.path, message: issue.message };
+    const nested = [
+      ...(Array.isArray(issue.errors) ? (issue.errors as unknown[][]).flat() : []),
+      ...(Array.isArray(issue.unionErrors)
+        ? (issue.unionErrors as Array<{ issues?: unknown[] }>).flatMap((e) => e.issues ?? [])
+        : []),
+    ];
+    return [base, ...flattenIssues(nested, depth + 1)];
+  });
 }
 
 /**
