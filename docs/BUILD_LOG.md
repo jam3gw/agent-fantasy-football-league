@@ -114,6 +114,23 @@ minor; all addressed):
    partial whose step an arrived event actually supersedes (events without
    step_no — recorded before it existed — suppress conservatively).
 
+**Review round 3**: fresh context verified the four round-2 fixes against the
+installed swr@2.5.1 and postgres@3.4.9 sources (onSuccess fires per fetch;
+numeric epoch arrives as a string, so the stamp is lossless; step_no
+arithmetic matches the sink's stepNo; resume can never regress it). No
+findings — loop closed.
+
+**Preview deploys were failing before any build ran** ("Resource provisioning
+failed", no build logs): the Neon free plan allows 10 branches and the
+Vercel integration provisions `preview/<git branch>` per preview, so this
+branch's would have been the 11th. Deleted the preview database branches of
+three git branches fully merged into main (`fe0inf`, `redesign-league-
+broadcast`, `speed-insights-integration`) — derived preview data only,
+recreated automatically on a future push; production (`main`) and the
+`backup-pre-smoke-cleanup` branch untouched. 7/10 slots used now. Worth
+knowing for future sessions: stale preview branches accumulate toward this
+limit and the failure mode looks like a Vercel build error.
+
 **Verified here.** Full suite green (510 tests, 6 new: streaming/partial-sink
 lifecycle, pulse stamp movement). `pnpm build` run against the Neon `dev`
 branch — migration 0003 applied there and the build prerendered every page.
