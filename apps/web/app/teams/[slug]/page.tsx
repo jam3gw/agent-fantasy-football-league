@@ -38,6 +38,9 @@ import {
 export const revalidate = 300;
 
 const MAX_WEEK = 18;
+/** How much of the fetched history each list shows before it is cut. */
+const SESSIONS_SHOWN = 25;
+const DECISIONS_SHOWN = 12;
 
 function PlayerRow({ player, slot }: { player: LineupPlayer | undefined; slot: string }) {
   const scored = player && player.points !== 0;
@@ -189,7 +192,7 @@ export default async function TeamPage({
             <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
               {stats.map((stat) => (
                 <div key={stat.label}>
-                  <dt className="text-[10px] font-bold uppercase tracking-[0.1em] text-faint">{stat.label}</dt>
+                  <dt className="text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{stat.label}</dt>
                   <dd className="mt-1 text-[24px] font-bold tabular-nums tracking-[-0.02em]">{stat.value}</dd>
                   <dd className="text-[11px] text-muted">{stat.sub}</dd>
                 </div>
@@ -303,14 +306,17 @@ export default async function TeamPage({
 
             <div>
               <h2 className="text-[20px] font-bold tracking-[-0.02em]">Recent moves</h2>
-              <p className="mt-1.5 text-[13px] text-muted">Every move links to the full session it came from.</p>
+              <p className="mt-1.5 text-[13px] text-muted">
+                The {Math.min(decisions.length, DECISIONS_SHOWN)} most recent. Every move links to the full
+                session it came from.
+              </p>
               <div className="mt-3.5">
                 {decisions.length === 0 ? (
                   <Panel>
                     <Nothing>No decisions logged yet.</Nothing>
                   </Panel>
                 ) : (
-                  decisions.slice(0, 12).map((d) => (
+                  decisions.slice(0, DECISIONS_SHOWN).map((d) => (
                     <div
                       key={d.id}
                       className="grid grid-cols-[112px_minmax(0,1fr)_auto] items-baseline gap-3.5 border-t border-border py-3"
@@ -359,7 +365,9 @@ export default async function TeamPage({
             <div>
               <h2 className="text-[20px] font-bold tracking-[-0.02em]">Sessions</h2>
               <p className="mt-1.5 text-[13px] text-muted">
-                {teamSessions.length} most recent, newest first. Every one has a full transcript.
+                {Math.min(teamSessions.length, SESSIONS_SHOWN)} most recent
+                {teamSessions.length > SESSIONS_SHOWN ? ` of the last ${teamSessions.length}` : ""}, newest
+                first. Every one has a full transcript.
               </p>
               <div className="mt-3.5 min-w-0 overflow-hidden rounded-xl border border-border bg-surface">
                 {teamSessions.length === 0 ? (
@@ -378,7 +386,7 @@ export default async function TeamPage({
                         </tr>
                       </thead>
                       <tbody>
-                        {teamSessions.slice(0, 25).map((s) => (
+                        {teamSessions.slice(0, SESSIONS_SHOWN).map((s) => (
                           <tr key={s.id} className="border-t border-border/80">
                             <td className="whitespace-nowrap px-3 py-2.5">
                               <Link href={`/sessions/${s.id}`} className="font-semibold text-accent">

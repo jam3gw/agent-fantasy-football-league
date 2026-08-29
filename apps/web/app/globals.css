@@ -19,7 +19,17 @@
   --white: #fffdf9;
   --ink: #2a2823;
   --ink-soft: #6f6a5e;
-  --slate-soft: #a39c8c;
+  /*
+   * The design system's slate is #a39c8c, which is 2.57:1 on this paper — it
+   * fails WCAG AA for the small meta text the layout uses it for, on every
+   * screen. Darkened until it passes (4.63:1) while still reading as the
+   * quietest text on the page. The system's own value is kept below as
+   * `--slate-soft-decorative` for the places it is a shape, not a word.
+   */
+  --slate-soft: #767065;
+  /* 4.63:1 on paper and 4.83:1 on a card, but only 4.17:1 on `--bg-alt` — use
+     `--muted` for quiet text sitting on the alt band. */
+  --slate-soft-decorative: #a39c8c;
   --black: #1c1a16;
   --black-alt: #242019;
 
@@ -49,8 +59,11 @@
 
   /* on the dark band, where ink-on-paper values go invisible */
   --band-text: var(--paper);
-  --band-muted: var(--slate-soft);
-  --band-faint: var(--ink-soft);
+  /* On the near-black band the system's slate is 6.36:1 — it passes there,
+     and it is the value the design uses for the band's secondary text. */
+  --band-muted: var(--slate-soft-decorative);
+  /* #6f6a5e is only 3.23:1 on the band; this is 4.93:1. */
+  --band-faint: #8f8878;
   --band-border: rgba(250, 248, 243, 0.1);
   --band-fill: rgba(250, 248, 243, 0.06);
 }
@@ -154,9 +167,24 @@ a:hover {
  * ticker and a blinking dot. Both stop; the ticker keeps its first copy of the
  * games in view, which is the whole week either way.
  */
+/*
+ * Someone who has asked not to see motion should not be handed a scrolling
+ * ticker and a blinking dot. Stopping the animation alone would strand every
+ * game past the first screenful, so the track becomes an ordinary horizontal
+ * scroller instead and the second, duplicate copy of the games is dropped.
+ */
 @media (prefers-reduced-motion: reduce) {
   .ticker-track,
   .live-dot {
     animation: none;
+  }
+
+  .ticker-viewport {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .ticker-track > [data-ticker-echo] {
+    display: none;
   }
 }

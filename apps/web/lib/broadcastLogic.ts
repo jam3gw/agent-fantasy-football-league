@@ -141,14 +141,29 @@ export function newestFirst<T extends { at: Date }>(items: T[], limit: number): 
   return [...items].sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, limit);
 }
 
-/** A transaction's payload is free-form JSON; read it defensively. */
-export function describeTransaction(type: string, payload: Record<string, unknown>): string {
-  const name = (key: string): string | null => {
+/**
+ * A transaction's payload is free-form JSON, and what the engine puts in it is
+ * player *ids* — `playerId` and `dropPlayerId` (waivers.ts) — not names. So the
+ * caller passes a resolver, and this reads ids first and any name key second,
+ * because a payload written by hand or by a future code path may carry either.
+ * Anything it cannot resolve degrades to a sentence without a name rather than
+ * to "Claimed undefined".
+ */
+export function describeTransaction(
+  type: string,
+  payload: Record<string, unknown>,
+  nameOf: (playerId: string) => string | null = () => null,
+): string {
+  const text = (key: string): string | null => {
     const value = payload[key];
     return typeof value === "string" && value.trim() !== "" ? value : null;
   };
-  const added = name("addedName") ?? name("playerName") ?? name("player");
-  const dropped = name("droppedName") ?? name("dropped");
+  const resolved = (key: string): string | null => {
+    const id = text(key);
+    return id === null ? null : nameOf(id);
+  };
+  const added = resolved("playerId") ?? text("addedName") ?? text("playerName") ?? text("player");
+  const dropped = resolved("dropPlayerId") ?? text("droppedName") ?? text("dropped");
   switch (type) {
     case "waiver_add":
       return added ? `Claimed ${added}${dropped ? ` and dropped ${dropped}` : ""}.` : "Won a waiver claim.";
@@ -167,7 +182,7 @@ export function describeTransaction(type: string, payload: Record<string, unknow
     case "draft_pick":
       return added ? `Drafted ${added}.` : "Made a draft pick.";
     case "commissioner":
-      return typeof payload.reason === "string" ? payload.reason : "The commissioner acted.";
+      return text("reason") ?? "The commissioner acted.";
     default:
       return type.replace(/_/g, " ");
   }

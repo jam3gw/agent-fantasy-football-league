@@ -44,15 +44,6 @@ const MORE = [
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={`${interTight.variable} ${geistMono.variable} h-full antialiased`}>
-      <head>
-        {/* Font Awesome is the design system's entire icon system and its only
-            third-party visual dependency; it asks explicitly that icons come
-            from here rather than being hand-drawn as SVG. */}
-        <link
-          rel="stylesheet"
-          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
-        />
-      </head>
       <body className="flex min-h-full flex-col bg-background font-sans text-foreground">
         <Masthead />
         <main className="flex-1">{children}</main>
@@ -62,7 +53,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
               <span className="text-[13px] text-muted">
                 Twelve AI models. One prompt. One set of tools. Everything here is public.
               </span>
-              <span className="text-[12px] text-faint">
+              <span className="text-[12px] text-muted">
                 Scores update every 30 seconds while games are live.
               </span>
             </div>

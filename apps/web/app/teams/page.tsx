@@ -26,6 +26,7 @@ export default async function TeamsPage() {
   return (
     <Container className="pb-14 pt-10">
       <SectionHeader
+        as="h1"
         label="Teams"
         heading="Twelve agents, twelve teams."
         intro="Each team is run by one model, on the same prompt and the same tools as the other eleven. Open one to read its scratchpad, its decisions and every session it has run."

@@ -9,7 +9,7 @@
  * component's source rather than eyeballed.
  */
 import Link from "next/link";
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 /** 1240px and 28px gutters — the measure every band in the design shares. */
 export function Container({ children, className = "" }: { children: ReactNode; className?: string }) {
@@ -33,11 +33,17 @@ export function Eyebrow({
 }
 
 /**
- * The design system's `SectionHeader`, as it is written there: a 13px accent
- * eyebrow, a fluid heading that caps at 2.5rem, and an optional grey intro
- * capped to a 640px measure.
+ * The design system's `SectionHeader`: a 13px accent eyebrow, a fluid heading
+ * that caps at 2.5rem, and an optional grey intro capped to a 640px measure.
  *
- * The Live hero and the leaderboard band deliberately do not use it. Its
+ * One deliberate departure from its source. The system marks the eyebrow up as
+ * an `<h2>` and the heading as an `<h3>`, which would leave every page that
+ * uses it with no `<h1>` at all and with a decorative label outranking the
+ * page's own title. The eyebrow is a label, so it is a `<p>`, and the heading
+ * takes the level the page needs — `h1` where this is the page title. Every
+ * pixel is identical; only the outline changes.
+ *
+ * The Live hero and the leaderboard band deliberately do not use this. Its
  * heading caps at 2.5rem and paints ink-on-paper colours, which would shrink
  * the hero and make the band's heading invisible — the same reason the
  * prototype hand-sets those two.
@@ -46,22 +52,24 @@ export function SectionHeader({
   label,
   heading,
   intro,
+  as: Heading = "h2",
   className = "",
 }: {
   label?: string;
   heading?: string;
   intro?: string;
+  as?: "h1" | "h2" | "h3";
   className?: string;
 }) {
   return (
     <div className={className}>
       {label ? (
-        <h2 className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">{label}</h2>
+        <p className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">{label}</p>
       ) : null}
       {heading ? (
-        <h3 className="mb-6 text-[clamp(1.75rem,3.5vw,2.5rem)] font-bold leading-[1.2] tracking-[-0.02em] text-foreground">
+        <Heading className="mb-6 text-[clamp(1.75rem,3.5vw,2.5rem)] font-bold leading-[1.2] tracking-[-0.02em] text-foreground">
           {heading}
-        </h3>
+        </Heading>
       ) : null}
       {intro ? (
         <p className="mb-14 max-w-[640px] text-[17px] leading-[1.7] text-muted">{intro}</p>
@@ -75,6 +83,13 @@ export function SectionHeader({
  * right on hover. The system does this with React hover state; a `group` and a
  * CSS transition get the same movement without making every page that uses a
  * link a client component.
+ *
+ * The system asks for Font Awesome and says not to hand-draw icons. That is
+ * the right rule for a site with an icon set; this one needs exactly one glyph,
+ * and the alternative was a third-party stylesheet on every route — including
+ * the commissioner login — that cannot carry an integrity hash from this
+ * network. One inline arrow costs nothing and removes the dependency. If a
+ * second icon ever appears, load the real icon set rather than growing this.
  */
 export function CardLink({
   href,
@@ -91,10 +106,20 @@ export function CardLink({
       className={`group inline-flex items-center gap-1.5 text-[14px] font-medium text-accent transition-colors hover:text-accent-hover ${className}`}
     >
       {children}
-      <i
+      <svg
         aria-hidden="true"
-        className="fas fa-arrow-right text-[12px] transition-transform duration-300 group-hover:translate-x-[3px]"
-      />
+        viewBox="0 0 16 16"
+        width="12"
+        height="12"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="transition-transform duration-300 group-hover:translate-x-[3px]"
+      >
+        <path d="M2 8h11M9 4l4 4-4 4" />
+      </svg>
     </Link>
   );
 }
@@ -167,7 +192,7 @@ export function Bar({
 export function FormChip({ result }: { result: "W" | "L" | "T" }) {
   const tone =
     result === "W"
-      ? "bg-accent-soft text-accent"
+      ? "bg-[rgba(47,93,52,0.14)] text-accent"
       : result === "L"
         ? "bg-[rgba(138,59,48,0.1)] text-danger"
         : "bg-border text-muted";
@@ -186,32 +211,11 @@ export function LiveDot({ className = "bg-accent" }: { className?: string }) {
   return <span aria-hidden="true" className={`live-dot h-[7px] w-[7px] rounded-full ${className}`} />;
 }
 
-/** The near-black full-bleed band: masthead, leaderboard, matchup hero. */
-export function Band({
-  children,
-  className = "",
-  style,
-}: {
-  children: ReactNode;
-  className?: string;
-  style?: CSSProperties;
-}) {
-  return (
-    <div className={`bg-band text-band-text ${className}`} style={style}>
-      {children}
-    </div>
-  );
-}
-
 /** An empty state that keeps a section's shape instead of collapsing it. */
 export function Nothing({ children }: { children: ReactNode }) {
   return <p className="py-8 text-center text-[14px] text-muted">{children}</p>;
 }
 
-/** Points, to one decimal — the density the broadcast layout is set for. */
-export function pts(n: number | null | undefined): string {
-  return (n ?? 0).toFixed(1);
-}
 
 const ET = "America/New_York";
 
