@@ -11,6 +11,7 @@ import { describe, expect, it } from "vitest";
 
 const appRoot = fileURLToPath(new URL("..", import.meta.url));
 const ui = readFileSync(join(appRoot, "components/ui.tsx"), "utf8");
+const sessionSteps = readFileSync(join(appRoot, "components/session-steps.tsx"), "utf8");
 const css = readFileSync(join(appRoot, "app/globals.css"), "utf8");
 
 describe("a wide table scrolls instead of squashing", () => {
@@ -69,5 +70,25 @@ describe("no layout forces three columns onto a phone", () => {
     walk(join(appRoot, "app"));
     walk(join(appRoot, "components"));
     expect(offenders).toEqual([]);
+  });
+});
+
+describe("the session transcript's own tables scroll", () => {
+  // These are hand-rolled rather than built from `Table`, because a roster and
+  // a free-agent pool need slot chips, injury flags and per-column alignment
+  // that the generic component does not carry. They still have to obey the
+  // same rule: a real minimum width, so the table overflows its scroller
+  // instead of wrapping every player's name onto three lines.
+  it("every table inside a step sits in a scroller", () => {
+    const tables = sessionSteps.match(/<table/g) ?? [];
+    const scrollers = sessionSteps.match(/className="table-scroll"/g) ?? [];
+    expect(tables.length).toBeGreaterThan(0);
+    expect(scrollers).toHaveLength(tables.length);
+  });
+
+  it("every table has a minimum width so it scrolls rather than squashes", () => {
+    const tables = sessionSteps.match(/<table className="[^"]*"/g) ?? [];
+    expect(tables.length).toBeGreaterThan(0);
+    for (const table of tables) expect(table).toMatch(/min-w-\[/);
   });
 });
