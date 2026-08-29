@@ -10,7 +10,15 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
-import { createSession, getSettings, initLeagueSettings, scheduledJobs, sessions, teams } from "@league/engine";
+import {
+  createSession,
+  getSettings,
+  initLeagueSettings,
+  scheduledJobs,
+  sessionEvents,
+  sessions,
+  teams,
+} from "@league/engine";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
 import { claimSlot } from "../lib/runSession";
 import { startQueuedSessions } from "../lib/tick";
@@ -357,25 +365,83 @@ describe("the tick's sweeper is the only thing that starts a session", () => {
   });
 
   it("reclaims an idle session even while it is still inside its window", async () => {
-    // The other half: idle for fifteen minutes is dead whatever the deadline
-    // says, and failing it (rather than skipping it) is what lets §8.8 retry.
+    // The other half: long enough without writing anything is dead whatever the
+    // deadline says, and failing it (rather than skipping it) is what lets §8.8
+    // retry. It has written a transcript row, so this is the idle cutoff and
+    // not the never-started one.
     const [teamId] = await twelveTeams();
-    await db.insert(sessions).values({
-      teamId: teamId!,
-      kind: "weekly_review",
-      trigger: "t",
-      idempotencyKey: "idle",
-      modelId: "m/1",
-      status: "running",
-      startedAt: new Date(clock.now().getTime() - 30 * 60_000),
-      updatedAt: new Date(clock.now().getTime() - 30 * 60_000),
-      context: { deadline_at: new Date(clock.now().getTime() + 60 * 60_000).toISOString() },
-    });
+    const idle = new Date(clock.now().getTime() - 45 * 60_000);
+    const [row] = await db
+      .insert(sessions)
+      .values({
+        teamId: teamId!,
+        kind: "weekly_review",
+        trigger: "t",
+        idempotencyKey: "idle",
+        modelId: "m/1",
+        status: "running",
+        startedAt: idle,
+        updatedAt: idle,
+        context: { deadline_at: new Date(clock.now().getTime() + 60 * 60_000).toISOString() },
+      })
+      .returning({ id: sessions.id });
+    await db.insert(sessionEvents).values({ sessionId: row!.id, seq: 0, type: "system", content: {} });
+
     const result = await startQueuedSessions(db, clock, async () => {});
     expect(result.reclaimed).toBe(1);
     const rows = await db.select().from(sessions).where(eq(sessions.status, "failed"));
     expect(rows).toHaveLength(1);
     expect(rows[0]!.error).toContain("no progress");
+  });
+
+  it("returns the slot quickly when the workflow was never started at all", async () => {
+    // `startRun` throwing leaves the row `running` on purpose — requeueing it
+    // would give a workflow that *was* accepted a second runner. What makes
+    // that safe is the short cutoff for a claimed row that has written no
+    // transcript row at all: without it, a start outage burns one of the six
+    // slots per tick and stalls the whole league.
+    const [teamId] = await twelveTeams();
+    await db.insert(sessions).values({
+      teamId: teamId!,
+      kind: "weekly_review",
+      trigger: "t",
+      idempotencyKey: "never-started",
+      modelId: "m/1",
+      status: "running",
+      startedAt: new Date(clock.now().getTime() - 6 * 60_000),
+      updatedAt: new Date(clock.now().getTime() - 6 * 60_000),
+      context: { deadline_at: new Date(clock.now().getTime() + 60 * 60_000).toISOString() },
+    });
+    const result = await startQueuedSessions(db, clock, async () => {});
+    expect(result.reclaimed).toBe(1);
+    expect(await runningCount()).toBe(0);
+  });
+
+  it("does not touch a session that started and is simply between model calls", async () => {
+    // The same six minutes, but it has written something. A model call is the
+    // one span that writes nothing and §8.1 forbids capping it, so this row
+    // gets the long cutoff, not the never-started one.
+    const [teamId] = await twelveTeams();
+    const quiet = new Date(clock.now().getTime() - 6 * 60_000);
+    const [row] = await db
+      .insert(sessions)
+      .values({
+        teamId: teamId!,
+        kind: "weekly_review",
+        trigger: "t",
+        idempotencyKey: "mid-call",
+        modelId: "m/1",
+        status: "running",
+        startedAt: quiet,
+        updatedAt: quiet,
+        context: { deadline_at: new Date(clock.now().getTime() + 60 * 60_000).toISOString() },
+      })
+      .returning({ id: sessions.id });
+    await db.insert(sessionEvents).values({ sessionId: row!.id, seq: 0, type: "system", content: {} });
+
+    const result = await startQueuedSessions(db, clock, async () => {});
+    expect(result.reclaimed).toBe(0);
+    expect(await runningCount()).toBe(1);
   });
 
   it("never starts a draft pick: the draft workflow runs those inline", async () => {
@@ -398,6 +464,27 @@ describe("the tick's sweeper is the only thing that starts a session", () => {
     });
     expect(started).toEqual([]);
     expect(await runningCount()).toBe(0);
+  });
+
+  it("still expires a queued draft pick whose clock has run out", async () => {
+    // The exclusion is on the start decision, not on the query. This branch is
+    // the only place a queued session is ever retired, so a draft pick the
+    // draft workflow never got to — killed between `createSession`'s commit and
+    // `runSession` — would otherwise sit `queued` for the rest of the season.
+    const [teamId] = await twelveTeams();
+    await db.insert(sessions).values({
+      teamId: teamId!,
+      kind: "draft_pick",
+      trigger: "draft",
+      idempotencyKey: "pick-48",
+      modelId: "m/1",
+      status: "queued",
+      context: { deadline_at: new Date(clock.now().getTime() - 1_000).toISOString() },
+    });
+    const result = await startQueuedSessions(db, clock, async () => {});
+    expect(result.expired).toBe(1);
+    const rows = await db.select().from(sessions).where(eq(sessions.status, "skipped"));
+    expect(rows).toHaveLength(1);
   });
 
   it("leaves a running session alone while it is still working", async () => {

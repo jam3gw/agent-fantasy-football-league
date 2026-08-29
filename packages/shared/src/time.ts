@@ -122,6 +122,19 @@ export function etDay(utc: Date): string {
   return `${p.y}-${String(p.m).padStart(2, "0")}-${String(p.d).padStart(2, "0")}`;
 }
 
+/**
+ * A timestamp out of a JSON blob, or null if it is not one. Session contexts
+ * carry `due_at`/`deadline_at` as ISO strings, and an unparseable value has to
+ * come back as null rather than an Invalid Date: `formatEt` below throws
+ * `RangeError` on one, and every `getTime()` comparison against NaN is false,
+ * so an Invalid Date reads as "not yet due" instead of failing loudly.
+ */
+export function parseDate(raw: unknown): Date | null {
+  if (typeof raw !== "string") return null;
+  const at = new Date(raw);
+  return Number.isNaN(at.getTime()) ? null : at;
+}
+
 /** Format a UTC instant as a readable ET string, e.g. "Tue Sep 8, 2026, 4:00 AM ET". */
 export function formatEt(utc: Date): string {
   const s = new Intl.DateTimeFormat("en-US", {

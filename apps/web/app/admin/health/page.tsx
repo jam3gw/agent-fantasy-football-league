@@ -1,5 +1,5 @@
-import { and, desc, eq, gte, isNull } from "drizzle-orm";
-import { formatEt } from "@league/shared";
+import { and, desc, eq, gte, inArray, isNull } from "drizzle-orm";
+import { formatEt, parseDate } from "@league/shared";
 import {
   costAlarms,
   costAlarmRules,
@@ -14,6 +14,7 @@ import {
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel, money } from "../../../components/ui";
 import { db, leagueClock } from "../../../lib/db";
 import { weekScoringSource } from "../../../lib/finalize";
+import { MAX_CONCURRENT_SESSIONS } from "../../../lib/runSession";
 import { acknowledgeAlarmAction, fpUsageToday, sendDigestNowAction } from "../../../lib/adminActions";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,8 @@ export const metadata = { title: "Health" };
 const WEEK_MS = 7 * 24 * 3600_000;
 /** §13.4: the live feed is "delayed" once Sleeper has been silent for 10 minutes. */
 const LIVE_STALE_MS = 10 * 60_000;
+/** Rows in the queue card. Comfortably over the cap plus a full booking sweep. */
+const SESSION_QUEUE_LIMIT = 60;
 
 export default async function AdminHealthPage({
   searchParams,
@@ -38,7 +41,7 @@ export default async function AdminHealthPage({
   const season = settings?.season ?? 0;
   const week = settings?.currentWeek ?? 0;
 
-  const [feeds, allTeams, failed, discrepancies, dueJobs, alarms, rules, liveGames, recentSessions, fp, queuedSessions, runningSessions] =
+  const [feeds, allTeams, failed, discrepancies, dueJobs, alarms, rules, liveGames, recentSessions, fp, liveQueue] =
     await Promise.all([
       database.select().from(health).catch(() => []),
       database.select().from(teams).catch(() => []),
@@ -71,18 +74,15 @@ export default async function AdminHealthPage({
       database.select().from(sessions).orderBy(desc(sessions.createdAt)).limit(400).catch(() => []),
       fpUsageToday().catch(() => ({ day: "—", total: 0, byTeam: {} as Record<string, number> })),
       // The session queue: since sessions are no longer represented by a job
-      // row, this is the only place the queue is visible (§9.2).
+      // row, this is the only place the queue is visible (§9.2). One query for
+      // both states, so a session that changes status mid-render cannot appear
+      // in two lists (a duplicate React key) or in neither.
       database
         .select()
         .from(sessions)
-        .where(eq(sessions.status, "queued"))
+        .where(inArray(sessions.status, ["queued", "running"]))
         .orderBy(sessions.createdAt)
-        .catch(() => []),
-      database
-        .select()
-        .from(sessions)
-        .where(eq(sessions.status, "running"))
-        .orderBy(sessions.startedAt)
+        .limit(SESSION_QUEUE_LIMIT)
         .catch(() => []),
     ]);
 
@@ -99,15 +99,15 @@ export default async function AdminHealthPage({
 
   // §9.2: six at once, one per team. A session whose due time has passed and
   // that is still queued is waiting for a slot — normal for a minute or two,
-  // a problem if it persists.
-  const dueSince = (session: { context: Record<string, unknown> }) => {
-    const raw = session.context.due_at;
-    return typeof raw === "string" ? new Date(raw) : null;
-  };
-  const waiting = queuedSessions.filter((s) => {
-    const at = dueSince(s);
+  // a problem if it persists. One predicate, used for both the count in the
+  // title and the badge in the table, so the two cannot disagree.
+  const runningSessions = liveQueue.filter((s) => s.status === "running");
+  const queuedSessions = liveQueue.filter((s) => s.status === "queued");
+  const isWaitingForSlot = (session: { context: Record<string, unknown> }) => {
+    const at = parseDate(session.context.due_at);
     return at === null || at.getTime() <= now.getTime();
-  });
+  };
+  const waiting = queuedSessions.filter(isWaitingForSlot);
   const streaks = failureStreaks(recentSessions);
   const brokenModels = streaks.filter((s) => s.streak >= 3);
   const scoringSource = settings ? await weekScoringSource(database, Math.max(1, week - 1)).catch(() => null) : null;
@@ -250,16 +250,15 @@ export default async function AdminHealthPage({
         </Card>
 
         <Card
-          title={`Sessions — ${runningSessions.length}/6 running, ${queuedSessions.length} queued (${waiting.length} waiting for a slot)`}
+          title={`Sessions — ${runningSessions.length}/${MAX_CONCURRENT_SESSIONS} running, ${queuedSessions.length} queued (${waiting.length} waiting for a slot)`}
         >
-          {queuedSessions.length === 0 && runningSessions.length === 0 ? (
+          {liveQueue.length === 0 ? (
             <Empty>Nothing queued or running. The tick starts sessions as they come due.</Empty>
           ) : (
             <Table head={["Team", "Kind", "State", "Due", "Deadline"]}>
-              {[...runningSessions, ...queuedSessions].slice(0, 30).map((s) => {
-                const due = dueSince(s);
-                const deadlineRaw = s.context.deadline_at;
-                const deadline = typeof deadlineRaw === "string" ? new Date(deadlineRaw) : null;
+              {[...runningSessions, ...queuedSessions].map((s) => {
+                const due = parseDate(s.context.due_at);
+                const deadline = parseDate(s.context.deadline_at);
                 return (
                   <Row key={s.id}>
                     <Cell>{teamName(s.teamId)}</Cell>
@@ -269,7 +268,7 @@ export default async function AdminHealthPage({
                     <Cell>
                       {s.status === "running" ? (
                         <Badge tone="accent">running</Badge>
-                      ) : due === null || due.getTime() <= now.getTime() ? (
+                      ) : isWaitingForSlot(s) ? (
                         <Badge tone="warn">waiting for a slot</Badge>
                       ) : (
                         <Badge>queued</Badge>

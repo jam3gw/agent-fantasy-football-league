@@ -9,7 +9,7 @@
  * temperature. Provider defaults. The only guards are the tool-call ceiling
  * and the deadline (§8.3).
  */
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
 import { getSettings, modelPrices, sessionGuard, sessionEvents, sessions, teams } from "@league/engine";
@@ -108,10 +108,25 @@ async function recordEvent(
     content,
     createdAt: clock.now(),
   });
-  // Every transcript row is a heartbeat. The tick reclaims a session that has
-  // written nothing for a while, and a turn spent on free tools writes no
-  // ledger row — so without this a live session looks abandoned.
-  await db.update(sessions).set({ updatedAt: clock.now() }).where(eq(sessions.id, sessionId));
+}
+
+/**
+ * Tell the tick this session is still alive (§9.2). `reclaimStuckSessions`
+ * fails a `running` row that has gone quiet, and a turn spent on free tool
+ * calls writes no ledger row, so `recordSpend`'s bump is not enough on its own.
+ *
+ * Once per model step, not once per transcript row: the reclaim's cutoff is
+ * measured in tens of minutes, and a 120-call session writes ~285 rows, so a
+ * per-row bump would be several hundred extra round trips and row versions on
+ * the hottest tuple in the schema to move a timestamp nobody reads that often.
+ * The status predicate means a session the tick already reclaimed is not
+ * quietly made to look fresh.
+ */
+async function heartbeat(db: EngineDb, clock: Clock, sessionId: number): Promise<void> {
+  await db
+    .update(sessions)
+    .set({ updatedAt: clock.now() })
+    .where(and(eq(sessions.id, sessionId), eq(sessions.status, "running")));
 }
 
 
@@ -328,17 +343,33 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
     await db
       .update(sessions)
       .set({ status: "skipped", endedAt: clock.now(), updatedAt: clock.now() })
-      .where(eq(sessions.id, sessionId));
+      .where(and(eq(sessions.id, sessionId), inArray(sessions.status, ["queued", "running"])));
     return { status: "skipped", endedBy: "deadline", toolCalls: 0, invalidToolCalls: 0, steps: 0 };
   }
 
   // The caller may already have claimed a slot and marked the row running
   // (apps/web `claimSlot`); this is a no-op then, and the start for a direct
   // caller that has no concurrency to manage.
-  await db
+  //
+  // The status predicate is what keeps the tick's reclaim authoritative: if
+  // `reclaimStuckSessions` has already declared this row dead and handed its
+  // team's slot to another session, an unguarded write here would put it back
+  // to `running` and give the team two live runners (§9.2).
+  const claimed = await db
     .update(sessions)
     .set({ status: "running", startedAt: session.startedAt ?? clock.now(), updatedAt: clock.now() })
-    .where(eq(sessions.id, sessionId));
+    .where(and(eq(sessions.id, sessionId), inArray(sessions.status, ["queued", "running"])))
+    .returning({ id: sessions.id });
+  if (claimed.length === 0) {
+    const current = (await db.select().from(sessions).where(eq(sessions.id, sessionId)))[0];
+    return {
+      status: (current?.status as RunSessionResult["status"]) ?? "failed",
+      endedBy: null,
+      toolCalls: 0,
+      invalidToolCalls: 0,
+      steps: 0,
+    };
+  }
 
   const ctx: ToolContext = {
     db,
@@ -417,6 +448,9 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
         }
       }
 
+      // Before the call, not after: a model call is the one span of a live
+      // session that writes nothing, and §8.1 forbids capping its length.
+      await heartbeat(db, clock, sessionId);
       const result = await deps.modelStep(
         { modelId: session.modelId, messages, tools: deps.tools },
         steps,
@@ -587,6 +621,9 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
         ? "timed_out"
         : "succeeded";
 
+    // Only a row this invocation still owns. A session the tick reclaimed while
+    // this one was quiet is `failed` and its slot has been handed on; writing
+    // `succeeded` over it would erase the reclaim and hide the duplicate run.
     await db
       .update(sessions)
       .set({
@@ -598,7 +635,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
         error: closing.error ?? null,
         updatedAt: clock.now(),
       })
-      .where(eq(sessions.id, sessionId));
+      .where(and(eq(sessions.id, sessionId), eq(sessions.status, "running")));
 
     return {
       status,
@@ -620,7 +657,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
         error: String(err),
         updatedAt: clock.now(),
       })
-      .where(eq(sessions.id, sessionId));
+      .where(and(eq(sessions.id, sessionId), eq(sessions.status, "running")));
     return { status: "failed", endedBy, toolCalls, invalidToolCalls, steps, error: String(err) };
   }
 }

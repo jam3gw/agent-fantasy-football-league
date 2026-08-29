@@ -19,11 +19,9 @@ export const MAX_SESSION_RETRIES = 2;
 const RETRY_DELAYS_MS = [10 * 60_000, 30 * 60_000];
 
 /** Sessions whose failure should not be retried because their moment has passed. */
-function windowPassed(kind: string, deadlineAt: Date, now: Date): boolean {
-  // A lineup check is pointless once the games have started (§8.8).
-  if (kind === "lineup_check" || kind === "draft_pick" || kind === "trade_vote") {
-    return now >= deadlineAt;
-  }
+function windowPassed(_kind: string, deadlineAt: Date, now: Date): boolean {
+  // A lineup check is pointless once the games have started (§8.8), and the
+  // same rule turns out to hold for every kind: the deadline is the moment.
   return now >= deadlineAt;
 }
 
@@ -59,6 +57,15 @@ export async function requeueFailedSessions(db: EngineDb, clock: Clock): Promise
   let abandoned = 0;
 
   for (const session of failed) {
+    // The draft owns its own retries: `runDraftPick` takes the next attempt
+    // number and re-runs the pick inline, or auto-picks (§10.2, §10.4). A
+    // retry booked here would be a queued `draft_pick` the tick refuses to
+    // start, so it would sit in the queue for the rest of the season.
+    if (session.kind === "draft_pick") {
+      abandoned++;
+      continue;
+    }
+
     const attempt = retryAttemptOf(session.idempotencyKey);
     if (attempt >= MAX_SESSION_RETRIES) {
       abandoned++;

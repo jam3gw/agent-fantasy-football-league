@@ -1,7 +1,16 @@
 import Link from "next/link";
 import { isNull, sql } from "drizzle-orm";
 import { etDay } from "@league/shared";
-import { computeStandings, costAlarms, getSettings, sessions, spendLedger, spendRollups, teams } from "@league/engine";
+import {
+  PRE_SEASON_KINDS,
+  computeStandings,
+  costAlarms,
+  getSettings,
+  sessions,
+  spendLedger,
+  spendRollups,
+  teams,
+} from "@league/engine";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, money } from "../../components/ui";
 import { db, leagueClock } from "../../lib/db";
 
@@ -131,8 +140,10 @@ export default async function SpendPage() {
     rollups.find((r) => r.scope === "league" && r.period === "week" && r.periodStart === weekKey)?.costUsd ?? 0,
   ) || rows.reduce((s, r) => s + r.week, 0);
 
+  // The same set `createSession` uses to decide which kinds carry no week
+  // (§8.7), so "plus the draft" here and the week rollups cannot disagree.
   const draftCost = kindTotals
-    .filter((k) => k.kind === "draft_pick" || k.kind === "onboarding")
+    .filter((k) => PRE_SEASON_KINDS.has(k.kind))
     .reduce((s, k) => s + Number(k.list), 0);
   const weeksElapsed = Math.max(1, (settings?.currentWeek ?? 1) - (settings?.startWeek ?? 1) + 1);
   const inSeasonSpend = Math.max(0, leagueSeason - draftCost);

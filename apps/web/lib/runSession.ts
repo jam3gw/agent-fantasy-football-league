@@ -24,7 +24,8 @@ import { env } from "./env";
 import { notifyAlarms } from "./alarms";
 import { readBrief } from "./briefs";
 
-const MAX_CONCURRENT_SESSIONS = 6;
+/** §9.2's cap. Exported so `/admin/health` reports the cap it actually enforces. */
+export const MAX_CONCURRENT_SESSIONS = 6;
 
 /**
  * Advisory lock key for the slot check. Counting running sessions and then

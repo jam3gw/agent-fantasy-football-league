@@ -11,6 +11,101 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Fourth review round (max effort, ten finder angles)
+
+Round 4 read round 3's own fixes. Four of them were wrong or incomplete, and
+two of those reopened the very bug round 3 was written to close. All fixed;
+384 tests green.
+
+**The reclaim had no counterpart on the runner side.** Round 3 made idleness
+the only test for a stuck session, but every status write in `runSession`
+still keyed on `sessions.id` alone. So the tick could fail a session, hand its
+team's slot to the next one, and the original invocation would then write
+`succeeded` straight over the reclaimed row — the reclaim erased, the duplicate
+run invisible, exactly the "overwrites the row seconds later leaving no trace"
+outcome round 3 described and believed it had fixed. The three status writes
+(`running`, terminal, catch) now carry a status predicate, and a session whose
+row was reclaimed returns without a single model call.
+
+**Fifteen minutes was under the platform's own step cap.** The step budget is
+9 minutes and is only checked *between* model calls, so a call starting at 8:59
+runs to the 800-second kill — and §8.1 forbids capping a call. That left ~100
+seconds before the reclaim fired, and nothing at all for the workflow runtime's
+retry backoff. The idle cutoff is now 30 minutes.
+
+**And the per-row heartbeat that bought those fifteen minutes was too
+expensive.** Round 3 bumped `updated_at` after every transcript row: a 120-call
+weekly review writes ~285 rows, so ~285 extra round trips and row versions on
+the hottest tuple in the schema, and ~90 of them inside a draft pick's
+180-second clock. The bump is now once per model step, immediately *before* the
+call — which is the only span that writes nothing, and therefore the only span
+the reclaim needs covered.
+
+**A failed `start()` no longer stalls the league.** Round 3 was right that
+requeueing is unsafe, but leaving the row `running` for the full idle window
+meant a systematic start outage burned one of the six slots per tick: six
+minutes of outage, then nothing in the league starts for the rest of the
+window. The reclaim now has a second, short cutoff for a claimed row that has
+written no transcript row at all — a workflow that was accepted writes its
+first row in seconds, so five minutes cleanly separates "never started" from
+"mid model call".
+
+**The draft-pick exclusion was on the query, not the decision.** It therefore
+also removed draft picks from the deadline-expiry branch — the only place in
+the repo that retires a queued session. An orphan queued pick (the workflow
+dying in the exact window round 3 described) would have sat `queued` for the
+season. The `continue` moved to the start decision. `requeueFailedSessions`
+also stopped minting queued `draft_pick` retries the tick refuses to start: the
+draft owns its own retries through `nextAttemptNumber` and auto-pick.
+
+**The pre-season week exclusion never fired for onboarding.** The caller's
+context was spread *after* the conditional, and `runOnboardingAction` passes
+`week` explicitly — so twelve onboarding sessions still landed in week 1, which
+is what the change existed to prevent. Only `draft_pick` was actually excluded,
+by the accident of its caller not passing a week. The exclusion now runs last,
+`PRE_SEASON_KINDS` is typed `Set<SessionKind>` (a renamed kind is a compile
+error, not a silent regression) and exported, and `/spend`'s "plus the draft"
+line reads it instead of repeating the two kind names.
+
+**Un-stamping the draft broke the reporter's week filter.** `list_sessions`
+treated a missing week as "matches every week", which was harmless only while
+every session had one. All 168 draft picks were matching every week query.
+
+Also: `parseDate` lifted to `@league/shared` — `/admin/health`'s new queue card
+had its own copy without the NaN guard, and `formatEt` throws `RangeError` on
+an Invalid Date, so one malformed context timestamp would have 500'd the page
+whose job is reporting outages. The card's two racing queries became one
+(`inArray`), which also removes the duplicate React key when a session changes
+status mid-render; the waiting predicate is written once instead of twice; the
+cap in the title is `MAX_CONCURRENT_SESSIONS` rather than a literal `6`; and
+the orphaned `createSession` docblock that still promised "the job that starts
+it" is back on its function with that clause gone.
+
+**Tests.** Eight new: both reclaim cutoffs separately, the never-started slot
+release, draft-pick expiry, the no-draft-pick-retry rule, the pre-season week
+rule (caller-supplied week included), and the reclaimed-row guard. Each was
+checked against the un-fixed code.
+
+Two of round 3's own new assertions were vacuous and were rewritten. The "sets
+no provider options at all" test called the step with `messages: []`, so nothing
+is emitted per message and the check passed whatever the code did — and
+`billedTo: "gateway"` has been a hardcoded literal in `modelStep.ts` since
+before round 3, so both of its gateway tests passed unchanged against the
+un-fixed tree, contrary to what round 3 recorded. They now run against real
+messages, and prompt caching (§8.1, "Prompt caching on") has its first test at
+all: `withCaching` must put an Anthropic breakpoint on the system prompt and the
+brief and on nothing after them. The ledger-level `billed_to` assertion round 3
+deleted is back alongside the step-level one — `recordSpend` is what writes the
+column that `/spend`, `/spend/[slug]` and `/benchmark` all filter on.
+
+**Questions for Jake.** None blocking.
+
+**Open, not fixed here.** `docs/VERIFIED.md` (BYOK notes) and `docs/SPEC.md`
+§1175's go-live checklist still describe `byok_routes` and a `billed_to =
+byok:<provider>` check, which the 2026-08-28 gateway-only decision made
+unsatisfiable. That is a docs edit against a fixed §2 decision, so it is queued
+for the M8 doc pass rather than done mid-review.
+
 ## 2026-08-29 — Third review round
 
 Round 3 read only round 2's fixes and the two commissioner changes. It found
