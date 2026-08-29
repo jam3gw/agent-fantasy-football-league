@@ -167,6 +167,53 @@ test is the only thing in the system that would ever have caught it, which is
 exactly what §8's checklist puts it there for — and it caught it four days
 before the draft rather than on the day.
 
+### Second bug, found by re-running: the tool-result shape
+
+With the system prompt fixed, the re-run got further and failed differently —
+`tool_calls: 1`, a real cost recorded, and then:
+
+```
+AI_InvalidPromptError: Invalid prompt: The messages do not match the
+ModelMessage[] schema.
+```
+
+The first model call now worked; the second died carrying the first's tool
+result back. `ToolResultPart.output` is a discriminated union in the SDK —
+`{type: 'json', value}`, `{type: 'text', value}`, and so on — and the loop was
+passing the result object bare. Read off `@ai-sdk/provider-utils@5.0.33`'s
+declarations, not guessed.
+
+Three sites built it: the live loop, the resume path's `not_executed` stub, and
+`stubOldestToolResults`' context-trimming stub. All three now go through
+`toolOutput()`. The trimming stub also had to change how it detects an
+already-stubbed part, which now lives one level down under `value`.
+
+A failed tool result is tagged `json`, not `error-json`: §8.4 defines
+`{ok: false, error, message, hint}` as data the agent is meant to read and act
+on, so it is an ordinary turn rather than a transport failure, and `error-json`
+would let providers present it as the latter.
+
+**This one was only reachable on a session's second step**, which is why the
+first smoke run could not have found it: those twelve died before any model call
+succeeded. Two bugs stacked, and only running the thing end to end got past the
+first to see the second.
+
+### The test that closes the class, not just the two bugs
+
+Both bugs share a cause: **every test of the model call passes a stub, and a
+stub accepts whatever it is handed.** 452 tests were green through two errors
+that made every session on production fail.
+
+`ai` exports `modelMessageSchema` — the same validator `generateText` runs
+internally. `packages/agent/test/messageShape.test.ts` drives a real two-step
+session and validates every message the loop builds against it: no network, no
+key, and it fails on exactly what production failed on. The resume path gets the
+same check in `session.test.ts`.
+
+The lesson worth keeping is narrower than "add tests": a stub at a boundary
+tests our side of the contract and nothing of theirs. Where the other side has a
+published validator, run it.
+
 ### A second, smaller finding from the same run
 
 Queueing all twelve at once nearly retired half of them unrun. Smoke sessions
