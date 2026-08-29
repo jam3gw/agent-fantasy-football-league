@@ -242,16 +242,32 @@ describe("transaction descriptions", () => {
     ).toBe("Drafted Bijan Robinson (RB, ATL) at pick 5 (round 1). “Best back on the board.”");
   });
 
-  it("resolves an autopick through the id, since the workflow writes no name", () => {
-    // The auto-pick path (apps/web/lib/draft.ts) records only `player_id`.
+  it("translates an autopick's marker reason instead of quoting it as agent prose", () => {
+    // The auto-pick path (apps/web/lib/draft.ts) records `player_id`, no name,
+    // and a marker reason — "auto-pick: deadline" et al. — which must never
+    // render inside quotation marks as though the agent wrote it.
     const names: Record<string, string> = { p9: "Tank Bigsby" };
+    const payload = (reason: string) => ({
+      pick_no: 47,
+      round: 4,
+      player_id: "p9",
+      made_by: "autopick",
+      reason,
+    });
+    const nameOf = (id: string) => names[id] ?? null;
+    expect(describeTransaction("draft_pick", payload("auto-pick: deadline"), nameOf)).toBe(
+      "Auto-picked Tank Bigsby at pick 47 (round 4) when the clock ran out.",
+    );
     expect(
-      describeTransaction(
-        "draft_pick",
-        { pick_no: 47, round: 4, player_id: "p9", made_by: "autopick" },
-        (id) => names[id] ?? null,
-      ),
-    ).toBe("Auto-picked Tank Bigsby at pick 47 (round 4) when the clock ran out.");
+      describeTransaction("draft_pick", payload("auto-pick: session ended without a pick"), nameOf),
+    ).toBe("Auto-picked Tank Bigsby at pick 47 (round 4) after its session ended without a pick.");
+    expect(describeTransaction("draft_pick", payload("auto-pick: commissioner"), nameOf)).toBe(
+      "Auto-picked Tank Bigsby at pick 47 (round 4) on the commissioner's flag.",
+    );
+    // An unknown marker states the pick and claims nothing about why.
+    expect(describeTransaction("draft_pick", payload("auto-pick: ???"), nameOf)).toBe(
+      "Auto-picked Tank Bigsby at pick 47 (round 4).",
+    );
   });
 
   it("names both sides of a trade from the id arrays trades.ts writes", () => {
@@ -263,6 +279,18 @@ describe("transaction descriptions", () => {
         (id) => names[id] ?? null,
       ),
     ).toBe("Traded away Cade Otton, Rome Odunze for Jake Ferguson.");
+  });
+
+  it("never renders raw ids when a trade's players cannot all be named", () => {
+    // The rail's name lookup degrades to an empty map on a failed read; the
+    // sentence degrades with it rather than showing Sleeper ids.
+    expect(describeTransaction("trade", { givePlayerIds: ["4034"], getPlayerIds: ["7523"] }, () => null)).toBe(
+      "A trade went through.",
+    );
+    const names: Record<string, string> = { p1: "Cade Otton" };
+    expect(
+      describeTransaction("trade", { givePlayerIds: ["p1"], getPlayerIds: ["gone"] }, (id) => names[id] ?? null),
+    ).toBe("Traded away Cade Otton.");
   });
 
   it("describes a lineup change from its diff and caps the list", () => {

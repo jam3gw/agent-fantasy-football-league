@@ -11,6 +11,25 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
+
+Jake flagged that the rail read "Made a draft pick." for every pick. Cause:
+`describeTransaction` read only camelCase payload keys while the draft paths
+write snake_case (`player_id`, `name`, `pick_no`, `reason`). Fixed on
+`claude/draft-pick-action-details-guubgr`: picks now name the player,
+position, slot and quote the agent's reason; trades name both sides from
+`givePlayerIds`/`getPlayerIds`; lineup diffs say who came in for whom (capped
+at two slots); autopicks translate the engine's marker reason ("auto-pick:
+deadline" et al.) into prose instead of quoting it as if the agent wrote it.
+Reviewer ran twice (fresh context); round one found the autopick-marker
+quoting bug and a raw-id fallback in the trade sentence — both fixed.
+
+Known cosmetic double-report, not fixed here: an add-with-drop records both a
+`drop` transaction (via `applyDrop`) and an `add` carrying `dropPlayerId`, so
+the rail shows "Added X … and dropped Y." next to "Dropped Y." at the same
+timestamp. Pre-existing engine behavior; changing what the engine records is
+not worth it for a feed cosmetic. Revisit only if it confuses readers.
+
 ## 2026-08-29 — v1.10 merged to main; production deploy verified
 
 Jake said "merge to main". Fast-forward 9755d94 → ae8cc5c (main had not
