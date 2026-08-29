@@ -17,15 +17,13 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 the end of `<body>` in `app/layout.tsx`, beside `<SpeedInsights />` — the App
 Router placement from Vercel's quickstart. The `/next` entry is the one used:
 it reads the router's params, so the eighteen weeks of `/matchups/[week]` are
-one row in the dashboard rather than eighteen rows. The component is `"use client"`
-and wraps itself in `Suspense` (it calls `useSearchParams`), so the root layout
-stays a server component and no page loses static rendering.
+one row in the dashboard rather than eighteen rows. The component is
+`"use client"` and wraps itself in `Suspense` (it calls `useSearchParams`), so
+the root layout stays a server component and no page loses static rendering.
 
 - No new environment variable and no CSP to widen — the site sets none — and
   the beacon is same-origin under `/_vercel/insights/*`, which Vercel adds at
-  the edge. Web Analytics is already enabled on the project: that route answers
-  200 with a 2,495-byte script on `league.jake-moses.com` today, and it only
-  exists once the project has it switched on.
+  the edge.
 - **Unlike Speed Insights, this package does not no-op in development.** With
   `NODE_ENV` `development` or `test` it injects
   `https://va.vercel-scripts.com/v1/script.debug.js` instead of the same-origin
@@ -33,12 +31,36 @@ stays a server component and no page loses static rendering.
   project. So `next dev` makes one third-party request per page that production
   does not; nothing is recorded either way. The test suite never renders the
   layout, so it makes no request at all.
-- Like Speed Insights, the script Vercel actually serves in production is at a
-  per-project obfuscated path, injected into the page config at build time
-  (`NEXT_PUBLIC_VERCEL_OBSERVABILITY_CLIENT_CONFIG`, key `analytics`) and
-  preferred over `/_vercel/insights/script.js` — it is unguessable so that
-  blocklists keyed on the literal string cannot match it. Anything that greps a
-  deploy for "insights" will conclude, wrongly, that this is not installed.
+- **Verified on the branch preview**, not assumed. Web Analytics was already
+  enabled on the project — Vercel's build injected the `analytics` key beside
+  the `speedInsights` one the last session found, and it only writes that key
+  when the feature is switched on:
+
+  ```
+  {"analytics":{"scriptSrc":"d90aa5d90e4aa1f2/script.js",
+                "viewEndpoint":"d90aa5d90e4aa1f2/view",
+                "eventEndpoint":"d90aa5d90e4aa1f2/event",
+                "sessionEndpoint":"d90aa5d90e4aa1f2/session"},
+   "speedInsights":{"scriptSrc":"c03b0126f6fa88a8/script.js",
+                    "endpoint":"c03b0126f6fa88a8/vitals"}}
+  ```
+
+  That literal is inlined into the client chunk that carries the package
+  (`139e764of_sum.js`), the RSC payload lists `"Analytics"` as a client
+  reference exactly as it lists `"SpeedInsights"`, and on
+  `league.jake-moses.com` both `/d90aa5d90e4aa1f2/script.js` and
+  `/_vercel/insights/script.js` answer 200 with the same 2,495-byte script.
+- So this has the same trap Speed Insights has: the path actually used is the
+  obfuscated one, unguessable so that blocklists keyed on the literal string
+  cannot match it, and it is appended after hydration rather than served in the
+  HTML. Anything that greps a deploy's markup for "insights" will conclude,
+  wrongly, that this is not installed.
+- Reading the preview needed the deployment-protection bypass: the branch host
+  302s to Vercel SSO, and `?_vercel_share=<token>` (the token is in that
+  redirect's `location`) authenticates the first request and sets the
+  `_vercel_jwt` cookie the `/_next/static/*` fetches then need. Without the
+  cookie every chunk comes back as the 341 KB SSO page with a 200 — which reads
+  as a successful download and greps as an empty result.
 - `apps/web/test/analytics.test.ts` guards the import path and the
   render-once-inside-`<body>` placement, the same two silent failures the
   Speed Insights test guards: mounted deeper it misses pages, mounted twice it
@@ -46,7 +68,8 @@ stays a server component and no page loses static rendering.
 - Lint, typecheck and the full suite (455 tests) green.
 - Data starts when this reaches production. Nothing is backfilled, so the
   dashboard stays empty until then — as of today it reports 0 visitors and
-  0 pageviews.
+  0 pageviews. The routes have been live on production all along; nothing was
+  calling them.
 
 ## 2026-08-29 — Vercel Speed Insights on the public site
 
