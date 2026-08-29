@@ -87,6 +87,14 @@ const pingTool: LeagueTool = defineTool({
     return { week: 2, teams: 12 };
   },
 });
+const dateTool: LeagueTool = defineTool({
+  name: "player_research",
+  description: "returns a live Date, the way a drizzle timestamp column arrives",
+  schema: z.object({}),
+  async execute() {
+    return { items: [], updated_at: new Date("2026-08-29T16:28:34.909Z"), nested: { at: new Date() } };
+  },
+});
 const failingTool: LeagueTool = defineTool({
   name: "set_lineup",
   description: "fails on purpose",
@@ -96,6 +104,25 @@ const failingTool: LeagueTool = defineTool({
     return { ok: false, error: "invalid_args", message: "nope", hint: "try again" };
   },
 });
+const unserializableTool: LeagueTool = defineTool({
+  name: "player_research",
+  description: "returns values JSON.stringify would silently rewrite",
+  schema: z.object({}),
+  async execute() {
+    // The mock draft's onboarding failures: a live Date in a result meta
+    // passed every recorded-transcript check (stringify renders it as an ISO
+    // string) and failed the SDK's strict JSON validation on the next step.
+    // NaN and Infinity record as null, and an undefined disappears — all
+    // legal-looking in the transcript, all fatal live.
+    return {
+      ok: true,
+      items: [{ when: new Date("2026-08-29T12:00:00Z"), nan: NaN, inf: Infinity }],
+      missing: undefined,
+      meta: { updated_at: new Date("2026-08-29T12:00:00Z") },
+    };
+  },
+});
+
 const logTool: LeagueTool = defineTool({
   name: "write_decision_log",
   description: "end the session",
@@ -124,7 +151,7 @@ function capturingDeps(script: ModelStepResult[], seen: ModelMessage[][]): RunSe
   return {
     db,
     clock,
-    tools: [pingTool, failingTool, logTool],
+    tools: [pingTool, failingTool, unserializableTool, logTool],
     toolConfig: {},
     buildSystemPrompt: async () => "system prompt",
     buildContext: async (_ctx: ToolContext) => ({ brief: "brief", snapshot: { week: 2 } }),
@@ -174,6 +201,32 @@ describe("every message handed to the model is a valid ModelMessage", () => {
     expect((part.output as { value: { week: number } }).value.week).toBe(2);
   });
 
+  it("holds when a tool returns a live Date — the session-869 failure, caught before the model sees it", async () => {
+    // A drizzle timestamp column arrives as a Date instance; the SDK's
+    // JSON-value schema rejects it on the NEXT step's replay. The transcript's
+    // JSONB storage serialized it, which is why a resumed session never saw
+    // the bug — only live second steps died. toolOutput now normalizes.
+    const id = await makeSession();
+    const seen: ModelMessage[][] = [];
+    const deps = capturingDeps(
+      [
+        step({ toolCalls: [{ toolCallId: "c1", toolName: "player_research", args: {} }] }),
+        step({ toolCalls: [{ toolCallId: "c2", toolName: "write_decision_log", args: { summary: "done" } }] }),
+      ],
+      seen,
+    );
+    deps.tools = [...deps.tools, dateTool];
+    const result = await runSession(id, deps);
+    expect(result.status).toBe("succeeded");
+    expect(seen.length).toBeGreaterThanOrEqual(2);
+    seen.forEach((messages, i) => expectValid(messages, `step ${i + 1}`));
+
+    // The Date reached the model as its JSON form, identical to the transcript.
+    const part = (seen[1]!.find((m) => m.role === "tool")!.content as Array<Record<string, unknown>>)[0]!;
+    const value = (part.output as { value: { updated_at: unknown } }).value;
+    expect(value.updated_at).toBe("2026-08-29T16:28:34.909Z");
+  });
+
   it("holds for a failed tool result, which is data the agent reads, not a transport error", async () => {
     const id = await makeSession();
     const seen: ModelMessage[][] = [];
@@ -195,6 +248,44 @@ describe("every message handed to the model is a valid ModelMessage", () => {
     // transport failure instead.
     expect((part.output as { type: string }).type).toBe("json");
     expect((part.output as { value: { error: string } }).value.error).toBe("invalid_args");
+  });
+
+  it("holds when a tool returns a Date, NaN, Infinity, or undefined", async () => {
+    const id = await makeSession();
+    const seen: ModelMessage[][] = [];
+    await runSession(
+      id,
+      capturingDeps(
+        [
+          step({ toolCalls: [{ toolCallId: "c1", toolName: "player_research", args: {} }] }),
+          step({ toolCalls: [{ toolCallId: "c2", toolName: "write_decision_log", args: { summary: "done" } }] }),
+        ],
+        seen,
+      ),
+    );
+    seen.forEach((messages, step) => expectValid(messages, `step ${step + 1}`));
+
+    // The model sees exactly what the transcript records: the JSON image.
+    const part = (seen[1]!.find((m) => m.role === "tool")!.content as Array<Record<string, unknown>>)[0]!;
+    const value = (part.output as { value: Record<string, unknown> }).value;
+    expect(value).toEqual({
+      ok: true,
+      items: [{ when: "2026-08-29T12:00:00.000Z", nan: null, inf: null }],
+      meta: { updated_at: "2026-08-29T12:00:00.000Z" },
+    });
+  });
+
+  it("degrades an unserializable result to a failure instead of killing the session", () => {
+    // BigInt and circular references cannot serialize at all; the outer catch
+    // would fail the whole session, so toolOutput degrades to a §8.4 failure.
+    const out = toolOutput({ big: BigInt(7) });
+    expect(out.type).toBe("json");
+    expect(out.value).toMatchObject({ ok: false, error: "unserializable_result" });
+    const parsed = modelMessageSchema.safeParse({
+      role: "tool",
+      content: [{ type: "tool-result", toolCallId: "c", toolName: "t", output: out }],
+    });
+    expect(parsed.success).toBe(true);
   });
 
   it("holds after context trimming replaces an old tool result", () => {

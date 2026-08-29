@@ -272,3 +272,44 @@ export async function setLineup(
     return ok({ starters, bench, ir: input.IR });
   });
 }
+
+/**
+ * Deterministic draft-time slotting (commissioner, 2026-08-29). A drafted
+ * player fills his team's first open eligible starting slot for the coming
+ * week, in STARTING_SLOTS order — QB, RB1, RB2, WR1, WR2, TE, FLEX, DST, K —
+ * and arrives on the bench only when nothing eligible is open.
+ *
+ * This is the one carve-out to §3.1's "the engine never picks a starter":
+ * placement by arrival order, not judgment. Before it, every drafted player
+ * sat on the bench and a team whose model missed week 1 fielded nobody
+ * (SETUP.md known gap); now the draft itself produces a full legal lineup,
+ * which agents rearrange freely with set_lineup.
+ *
+ * Returns the slot filled, or null for a bench arrival. Runs inside the same
+ * transaction that records the pick.
+ */
+export async function autofillDraftLineupSlot(
+  tx: EngineDb,
+  teamId: number,
+  player: { playerId: string; position: string | null; fantasyPositions: string[] | null },
+  week: number,
+): Promise<StartingSlot | null> {
+  const taken = await tx
+    .select({ slot: lineupEntries.slot })
+    .from(lineupEntries)
+    .where(and(eq(lineupEntries.teamId, teamId), eq(lineupEntries.week, week)));
+  const filled = new Set(taken.map((r) => r.slot));
+  const positions =
+    player.fantasyPositions && player.fantasyPositions.length > 0
+      ? player.fantasyPositions
+      : player.position
+        ? [player.position]
+        : null;
+  for (const slot of STARTING_SLOTS) {
+    if (filled.has(slot)) continue;
+    if (!eligibleForSlot(slot, positions)) continue;
+    await tx.insert(lineupEntries).values({ teamId, week, playerId: player.playerId, slot });
+    return slot;
+  }
+  return null;
+}

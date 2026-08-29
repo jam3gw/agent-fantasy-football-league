@@ -48,6 +48,17 @@ export interface ModelToolCall {
 
 export interface ModelStepResult {
   text: string;
+  /**
+   * Reasoning text streamed by this step, as far as the provider shows it
+   * (§12.1). Optional: providers without visible reasoning produce none.
+   */
+  reasoning?: string;
+  /**
+   * Set when the step's reasoning-visibility provider option was rejected
+   * before any output and the step succeeded on a retry without it. Holds the
+   * rejection error text; the loop records it so the degradation is visible.
+   */
+  visibilityOptionDropped?: string;
   toolCalls: ModelToolCall[];
   usage: UsageTokens;
   /** Gateway-reported cost when present in provider metadata (§8.7). */
@@ -170,10 +181,33 @@ export function contextSafetyMargin(contextWindow: number): number {
  * `{ok: false, error, message, hint}` as data the agent is meant to read and
  * act on, which is an ordinary turn in the conversation rather than a
  * transport-level error.
+ *
+ * The value is JSON-normalized: the SDK validates it against its JSON-value
+ * schema, which a live `Date` instance fails — that killed session 869 on its
+ * second step, while the identical bytes replayed fine after the transcript's
+ * JSONB storage had serialized them. Normalizing here makes the live step see
+ * exactly what the transcript records, so a live session and a resumed one
+ * cannot diverge on the same result.
  */
 export function toolOutput(value: unknown): { type: "json"; value: unknown } {
-  return { type: "json", value };
-}
+  // Serialized the same way the transcript stores it, so the model can never
+  // be handed a value the transcript cannot show: a Date collapses to its ISO
+  // string, NaN and Infinity to null, an undefined disappears. The SDK
+  // validates the prompt against a strict JSON schema, and one live Date in a
+  // result meta failed every session that touched it (mock draft, 2026-08-29)
+  // while every stored copy of the same prompt validated clean.
+  if (value === undefined) return { type: "json", value: null };
+  try {
+    return { type: "json", value: JSON.parse(JSON.stringify(value)) as unknown };
+  } catch (err) {
+    // A BigInt or a circular reference cannot serialize at all. Failing one
+    // tool result beats failing the whole session from outside the per-tool
+    // catch — the agent reads this like any other §8.4 failure and moves on.
+    return {
+      type: "json",
+      value: { ok: false, error: "unserializable_result", message: String(err).slice(0, 200) },
+    };
+  }}
 
 /**
  * Stub the oldest tool results in place. Returns how many were stubbed, so a
@@ -512,6 +546,10 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
 
       await recordEvent(db, clock, sessionId, seq++, "assistant", {
         text: result.text,
+        // The thinking log (§12.1): durable, unlike the session_stream partial,
+        // which is deleted the moment this event lands. Only recorded when the
+        // provider actually surfaced reasoning text.
+        ...(result.reasoning ? { reasoning: result.reasoning } : {}),
         // The 0-based step this message came from — what the live view compares
         // against `session_stream.step_no` to tell a superseded partial from
         // the next step's genuinely new thinking.
@@ -524,6 +562,15 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
         // be replayed exactly as the model saw it (§4.1, §9.2).
         raw: result.assistantMessage as unknown as Record<string, unknown>,
       });
+      // A dropped visibility option is a degradation worth seeing in the
+      // transcript: without this, "the gateway rejects the option on every
+      // step" reads exactly like "this model shows no reasoning".
+      if (result.visibilityOptionDropped) {
+        await recordEvent(db, clock, sessionId, seq++, "info", {
+          visibility_option_dropped: result.visibilityOptionDropped,
+          model_id: session.modelId,
+        });
+      }
       // The staged partial (§12.1) is superseded the moment the full assistant
       // event above is durable; leaving it would show the step twice.
       await clearPartial(db, sessionId);
@@ -683,7 +730,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       ...(closing.error ? { error: closing.error } : {}),
     };
   } catch (err) {
-    await recordEvent(db, clock, sessionId, seq++, "error", { error: String(err) });
+    await recordEvent(db, clock, sessionId, seq++, "error", { error: String(err), ...errorDetail(err) });
     // A failed session must not leave a stale "thinking" preview.
     await clearPartial(db, sessionId);
     await db
@@ -699,6 +746,52 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       .where(and(eq(sessions.id, sessionId), eq(sessions.status, "running")));
     return { status: "failed", endedBy, toolCalls, invalidToolCalls, steps, error: String(err) };
   }
+}
+
+/**
+ * The one string `AI_InvalidPromptError` shows names the schema but not the
+ * field: the zod error rides in `cause`, and its issue paths say exactly which
+ * message and part failed. Losing that cost a day of guessing once (mock
+ * draft, 2026-08-29), so the transcript keeps the first few issues.
+ */
+function errorDetail(err: unknown): Record<string, unknown> {
+  // The zod error may sit one or two causes deep (InvalidPromptError wraps
+  // TypeValidationError wraps ZodError), so follow the chain to the issues.
+  let cause: unknown = err;
+  let issues: unknown;
+  for (let depth = 0; depth < 3; depth++) {
+    if (!cause || typeof cause !== "object" || !("cause" in cause)) break;
+    cause = (cause as { cause?: unknown }).cause;
+    if (cause && typeof cause === "object" && Array.isArray((cause as { issues?: unknown }).issues) ) {
+      issues = (cause as { issues: unknown }).issues;
+      break;
+    }
+  }
+  if (!cause || typeof cause !== "object") return {};
+  if (Array.isArray(issues)) {
+    return { cause_issues: flattenIssues(issues).slice(0, 20) };
+  }
+  return { cause: String(cause).slice(0, 500) };
+}
+
+/**
+ * A union failure's real reason hides in its sub-errors — zod v4 nests them
+ * under `errors`, v3 under `unionErrors` — and the top-level issue alone reads
+ * "Invalid input" with a path and nothing else.
+ */
+export function flattenIssues(issues: unknown, depth = 0): unknown[] {
+  if (!Array.isArray(issues) || depth > 3) return [];
+  return issues.slice(0, 5).flatMap((raw) => {
+    const issue = raw as Record<string, unknown>;
+    const base = { code: issue.code, path: issue.path, message: issue.message };
+    const nested = [
+      ...(Array.isArray(issue.errors) ? (issue.errors as unknown[][]).flat() : []),
+      ...(Array.isArray(issue.unionErrors)
+        ? (issue.unionErrors as Array<{ issues?: unknown[] }>).flatMap((e) => e.issues ?? [])
+        : []),
+    ];
+    return [base, ...flattenIssues(nested, depth + 1)];
+  });
 }
 
 /**
@@ -742,8 +835,15 @@ async function closeSession(
     );
     await recordEvent(db, clock, args.sessionId, seq++, "assistant", {
       text: extra.text,
+      ...(extra.reasoning ? { reasoning: extra.reasoning } : {}),
       closing_step: true,
     });
+    if (extra.visibilityOptionDropped) {
+      await recordEvent(db, clock, args.sessionId, seq++, "info", {
+        visibility_option_dropped: extra.visibilityOptionDropped,
+        model_id: session.modelId,
+      });
+    }
     for (const call of extra.toolCalls) {
       const tool = deps.tools.find((t) => t.name === call.toolName);
       if (!tool) continue;

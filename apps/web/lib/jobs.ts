@@ -194,6 +194,12 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
     const at = (hh: number, mm: number) => zonedTimeToUtc(y!, m!, d!, hh, mm);
 
     await book("ingest.schedule", at(5, 0));
+    // Last season's totals feed get_player_stats.last_season and the §10.4
+    // auto-pick fallback. The job type existed but nothing ever booked it, so
+    // production drafted with last_season null for every player (found in the
+    // mock draft, 2026-08-29). Daily is deliberate: Sleeper republishes stat
+    // corrections, and the upsert is idempotent.
+    await book("ingest.season_stats", at(5, 10));
     await book("ingest.rankings", at(5, 30));
     // §7.2: the daily waiver run time is a setting, not a constant. Booking it
     // at a hardcoded 4:30 meant changing it on /admin/settings moved the clear

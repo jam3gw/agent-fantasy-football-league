@@ -45,7 +45,11 @@ export async function computeStepCost(
   usage: UsageTokens,
   gatewayCost: number | null,
 ): Promise<ModelStepCost> {
-  if (gatewayCost !== null && Number.isFinite(gatewayCost)) {
+  // A gateway cost of 0 against real tokens means the gateway did not bill
+  // the call — a BYOK provider (models.ts) — not that it was free. Trusting
+  // the 0 recorded six teams' entire spend as $0.00 (mock draft, 2026-08-29).
+  const tokensUsed = usage.inputTokens + usage.outputTokens + usage.reasoningTokens > 0;
+  if (gatewayCost !== null && Number.isFinite(gatewayCost) && (gatewayCost > 0 || !tokensUsed)) {
     return { costUsd: round6(gatewayCost), source: "gateway" };
   }
   const rows = await db.select().from(modelPrices).where(eq(modelPrices.modelId, modelId));

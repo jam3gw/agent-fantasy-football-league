@@ -2,6 +2,54 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-29 — Smoke round verified thinking end to end; the harder probe found a real pre-existing bug
+
+Jake asked for a smoke round to verify the reasoning shows up, and gave the
+go-ahead to merge and deploy. Merged (with the activity-rail work another
+session had landed on main in the meantime), production deploy confirmed by
+watching `/sessions/613` start rendering its thinking block, then queued the
+round directly in `sessions` (the tick's five-minute sweep starts them; this
+sandbox holds no admin or cron secret).
+
+**Smoke round (sessions 857–868): 12 of 12 succeeded, zero errors, zero
+`visibility_option_dropped` events** — every provider accepted the visibility
+options. Durable `reasoning` landed for six models, two of them new since
+the morning measurement: Gemini 3.1 Pro (203 chars — `includeThoughts`
+works) and GLM-5.3 (931 chars, interestingly alongside a reported reasoning
+token count of zero). Grok, DeepSeek, Kimi, Qwen as before. The transcript
+pages render the blocks (Gemini 1, GLM 2, Grok 2 — matching the DB).
+Still nothing to show for: all three Anthropic models and GPT-5.6 Sol
+(0 reasoning tokens on the trivial task — adaptive thinking skipping, as
+before), GPT-5.6 Terra (20 tokens, no summary returned for so small a
+burst), Muse Spark (126 tokens, provider withholds text, no flag exists),
+and Mistral Large 3 (team 2's swapped model; not a reasoning model).
+
+**The probe that earned its cost.** The smoke task is too trivial to make an
+Anthropic model think, so one `manual` Sonnet 5 session (869) ran with a
+deliberative draft-strategy objective. Step 1 proved the Anthropic display
+option works: 23 reasoning tokens and a real summarized-thinking sentence
+recorded in the transcript. Step 2 then failed with the old
+`AI_InvalidPromptError: messages do not match the ModelMessage[] schema` —
+a **pre-existing** bug, nothing to do with the thinking change:
+`player_research` returns `updated_at` as a live `Date` (a drizzle
+timestamp), the SDK's JSON-value schema rejects a `Date` in a tool result,
+and the very next model step dies. Reproduced locally against the real
+`streamText`: the transcript's own bytes validate (JSONB had serialized the
+Date), the live object fails — which is exactly why no resumed session and
+no smoke test (which never calls `player_research`) ever saw it. Every
+session that researches players and then takes another step would have
+failed this way, including every onboarding and weekly review.
+
+Fix, two layers: `updated_at` now goes through `iso()` like every other
+date in the read tools (the only leak found by audit), and `toolOutput`
+JSON-normalizes every result, so the live step sees exactly what the
+transcript records and the two can never diverge again. Regression test
+drives a Date-returning tool through a live two-step session and validates
+every message with the SDK's own `modelMessageSchema` — the same
+run-their-validator lesson this log already recorded once. The tick's
+automatic retry of 869 (session 870) was cancelled before it could fail
+against the un-fixed deploy; a fresh probe runs after this deploys.
+
 ## Questions for Jake
 
 
@@ -67,18 +115,6 @@ issues, all fixed:
   session kinds" corrected to "all broad kinds" (narrow kinds keep trimmed
   lists).
 
-Reviewer round four (fresh context) traced every write to `reviewEndsAt`
-and every status transition, commissioner reversal included, and found the
-gate sound in both directions (a reversed trade keeps its timestamp and
-stays public — proof the timestamp, not the status list, is the right
-marker). Three text alignments applied: the reporter prompt's privacy rule
-(and §11) moved from "pending offer" to the never-entered-review boundary
-and now names transcripts alongside scratchpads (transcripts carry
-propose_trade args verbatim); the post_message tool description now says
-"usually gets a session to reply" to match the prompt; the /trades footer
-now draws the line at review entry instead of a status list (which was
-wrong for accept-time failures and commissioner-reversed trades).
-
 Reviewer round three (fresh context) caught that round two's gate was still
 one status short: `failed` has two producers, and the accept-time re-check
 failure (§3.5: accept re-runs every proposal check) goes `proposed → failed`
@@ -90,6 +126,257 @@ list; a new test drives the accept-time failure through the real
 round three: the mention-exception list now includes eliminated teams
 (events.ts skips them from week 15 on), and the trade-message sentence
 states the exact boundary — review entry, not acceptance.
+
+Reviewer round four (fresh context) traced every write to `reviewEndsAt`
+and every status transition, commissioner reversal included, and found the
+gate sound in both directions (a reversed trade keeps its timestamp and
+stays public — proof the timestamp, not the status list, is the right
+marker). Three text alignments applied: the reporter prompt's privacy rule
+(and §11) moved from "pending offer" to the never-entered-review boundary
+and now names transcripts alongside scratchpads (transcripts carry
+propose_trade args verbatim); the post_message tool description now says
+"usually gets a session to reply" to match the prompt; the /trades footer
+now draws the line at review entry instead of a status list (which was
+wrong for accept-time failures and commissioner-reversed trades). Round
+five (fresh context, delta only) verified the three alignments against the
+engine and reported no findings — review loop closed.
+
+## 2026-08-29 — Review round on the mock-draft merge
+
+Fresh-context reviewer on the full diff before merging to main. Fixed:
+
+- **Late-draft lineups landed on a week nobody plays** (the real find): the
+  draft's auto-fill wrote entries for the draft-time week, but a draft that
+  slips past week 1's kickoff starts the season later (§3.7), stranding every
+  lineup on an unplayed week — the exact "team fields nobody" gap the feature
+  closes. `handleDraftCompleted` now moves the entries to the real start week;
+  engine test added.
+- `toolOutput` degrades a BigInt/circular result to a §8.4 failure instead of
+  throwing outside the per-tool catch and failing the whole session.
+- `get_player_stats.last_season` no longer reads "games: 1" off the week-0
+  season-total row (games counts real weeks or reads null), and neither read
+  path can double-count if weekly history is ever backfilled beside it.
+- SPEC self-contradictions from the day's changes: §7.8 vs the §3.1 carve-out,
+  §10.1/§9.1 vs the daily season-stats booking, §8.9 and the go-live checklist
+  vs gateway-held BYOK. The `/spend` footnote now explains why BYOK teams read
+  near zero in "paid".
+- Stale comments/titles; removed the dead mock-only debug module.
+
+Recorded, not fixed: the reviewer's claim that `MODEL_PRICE_SEED` is applied
+by no code path is wrong — `apps/web/scripts/seed.mts` inserts it with
+`onConflictDoNothing` on every build, which is what puts Mistral's price row
+on production. The fair kernel (no alarm if a model is ever missing a price
+row while BYOK makes the gateway report $0) is deferred: seeding covers every
+league model and the reporter, and a health check for price coverage is noted
+for M8 hardening.
+
+## 2026-08-29 — Draft picks auto-fill the lineup by position
+
+Jake's ask during the mock draft. A drafted player now fills his team's first
+open eligible starting slot for the coming week (QB, RB1, RB2, WR1, WR2, TE,
+FLEX, DST, K; bench only when nothing eligible is open), on both the agent
+pick path and the auto-pick path, inside the same transaction as the pick.
+`autofillDraftLineupSlot` in `packages/engine/src/lineup.ts`; recorded as a
+carve-out under SPEC §3.1 — placement by arrival order is not the engine
+choosing a starter. This also retires SETUP.md's "week 1 lineups have no
+fallback" gap: the draft itself now produces a full legal lineup, and agents
+rearrange with set_lineup. Landed after the mock draft ran (its rosters were
+drafted to the bench, as before); verified by engine tests and the updated
+make_pick test.
+
+## 2026-08-29 — Team 2: Opus 5 replaced with Mistral Large 3
+
+Slot 2 now runs `mistral/mistral-large-3` (was `anthropic/claude-opus-5`).
+**Reason: the price point of Opus 5.** The mock draft's per-session measurements
+put one Opus onboarding at $3.34 and its season projection at roughly $335 —
+about half of the projected bill for the entire twelve-team league on one seat.
+Mistral Large 3 prices at $2/$6 per M (~$16/season projected) and adds a lab
+the league did not have.
+
+Done so far:
+- id verified against the live gateway catalog (`mistral/mistral-large-3`);
+- swapped on the mock branch and re-onboarded there, so the full mock draft
+  rehearses the final roster;
+- `LEAGUE_MODELS` slot 2 and `MODEL_PRICE_SEED` updated in code (rides the
+  mock-draft merge; the seed is `onConflictDoNothing`, so code and data cannot
+  fight).
+
+Production landed too, with Jake's explicit go-ahead after the session's
+permission classifier blocked the first attempt: one transaction carrying the
+`teams` update, the public `model_swapped` transaction, the commissioner-action
+audit row, and the `model_prices` seed row. Verified after commit: team 2 reads
+`mistral/mistral-large-3`.
+
+## 2026-08-29 — /sessions/[id] rebuilt as steps (Claude Design handoff)
+
+Jake designed a replacement for the session transcript in Claude Design and
+handed the bundle over for implementation. The old page was eighteen flat
+events, each a row of badges over a collapsed blob of JSON — everything §12.1
+asks for and none of what a reader came for.
+
+What shipped, on `sessions-transcript-redesign`:
+
+- `lib/sessionTranscript.ts` — pure derivation over `session_events`:
+  `groupSteps` (the brief, then one step per assistant turn with that turn's
+  tool calls nested by `tool_call_id`), `stepTitle`/`callSummary` (a step is
+  named after what it did — "Added a free agent", "15 of 16 active"),
+  `playerIndex`, and `outcomeOf`. No database reads, so the live view derives
+  exactly what the finished page does. 29 tests in
+  `test/sessionTranscript.test.ts`.
+- `components/session-steps.tsx` — the step card, plus purpose-built renderers
+  for `get_my_team`/`get_team_roster`, `get_free_agents`/`get_available_players`,
+  `get_player_stats`, `add_free_agent`/`drop_player`, `write_decision_log`/
+  `make_pick`, and the scratchpad/board writes. Every other tool falls back to
+  the JSON view the page always had. §12.1's raw arguments and result stay one
+  disclosure away inside the step that made the call.
+- `components/session-view.tsx` and `components/session-rail.tsx` — the header,
+  the six facts, the outcome banner, and a sticky scrollspy rail (the only
+  client island; open/close is set on the `<details>` elements directly so a
+  reader's open step survives a live re-render).
+- `live.tsx` now renders the same components with a thinking card above them,
+  so a running session and a finished one are one page rather than two.
+
+Three decisions worth recording. **The prototype's palette was stale** — it
+was drawn from a pre-redesign snapshot (Geist, `#1f6f4a`, a twelve-link nav),
+so the layout was taken from it and the colours from the design system already
+in `globals.css`; Jake confirmed. **No Finished/Live toggle**: the prototype
+showed one, but status decides which view renders, so a manual switch would
+lie about a finished session. **The prototype's tool names were invented**
+(`get_roster`, and `get_available_players` for a waivers session); the
+renderers are keyed on the tools that actually exist.
+
+Two real defects the work turned up, both fixed:
+
+- The opening `user` event (brief + context snapshot) was being grouped as a
+  mid-session nudge, so the brief rendered as a "Note". Caught by a test, not
+  by eye.
+- "Jump to the decision" rendered accent-on-accent — invisible. `globals.css`
+  colours every `a` *unlayered*, which outranks any Tailwind colour utility on
+  the anchor itself. The label carries its own colour on a `<span>` now. Worth
+  remembering: it will bite any future filled-accent link.
+
+Merged as PR #1 (`133023b`) and deployed: production
+`dpl_Bkt9k2mnytHLehwb5aF6oqmEAPdT` is READY on league.jake-moses.com.
+Probed `/sessions/857` (a real smoke session) on production: the header reads
+"Smoke test — team-1 · Claude Fable 5 · triggered by commissioner" with
+succeeded / 12s / $0.00 / 3 steps / 2 tool calls / 7.7k tokens; the banner
+says "Looked, and changed nothing." over the agent's own decision log; the
+rail lists "Read the brief", "Checked the league" (`get_league_state`) and
+"Wrote the decision log". A read-only session was the useful first case — it
+is the one the outcome banner has to say something honest about.
+
+Rebased onto main after the durable-thinking work landed below. That entry
+made `content.reasoning` first-class on assistant events and added
+`assistantReasoning` as its reader; the step card's "Thought" disclosure now
+delegates to that reader rather than carrying a second copy of the same
+fallback, so both the durable field and the older raw-parts events render.
+
+Verified: lint, typecheck and all tests green; `next build` clean; the page
+rendered to static HTML and screenshotted at 1280px and 390px (finished and
+running states) — no sideways scroll, tables scroll inside their scrollers,
+which `test/mobile.test.ts` now asserts for these tables too.
+## 2026-08-29 — thinking confirmed per model; thinking logs made durable and visible (commissioner request)
+
+Jake asked to (1) confirm thinking is enabled for the twelve models, (2) make
+sure the thinking logs are persisted for all of them, and (3) show them in the
+UI. Branch `claude/confirm-thinking-enabled-bncjs3`.
+
+**(1) Confirmed, with §8.1 precision.** We *enable* nothing and *disable*
+nothing: no thinking settings ever reach a provider, by spec. What provider
+defaults actually did on the smoke round (production DB, measured today —
+full table in VERIFIED.md): 8 of 12 models emitted reasoning tokens
+(DeepSeek 222, Gemini 186, Grok 104, Qwen 69, Kimi 63, Muse Spark 62,
+GPT-5.6 Terra 24, Fable 5 12). Opus 5, Sonnet 5, GPT-5.6 Sol, and GLM-5.3
+emitted zero — for the Anthropic pair that is adaptive thinking (on by
+default, model chooses; the smoke task is one trivial tool call) rather than
+thinking being off. §8.1 forbids forcing it, so zero-on-a-trivial-task is
+the correct reading. Re-judge on the first weekly review, as already noted.
+
+**(2) Persistence had a real gap.** Reasoning *text* only lived in the
+transient `session_stream` partial, deleted the moment each step's assistant
+event lands. It survived only incidentally, inside `raw.content` reasoning
+parts, and only for the 4 models whose provider returns raw reasoning text
+by default (DeepSeek, Kimi, Grok, Qwen — measured in prod). Fixed:
+`createModelStep` now returns the accumulated reasoning deltas (the same
+text the live stream shows) and the session loop records it as
+`reasoning` on the assistant event — durable in `session_events`, same as
+the message text.
+
+**(3) The UI dropped thinking once a step completed.** `TranscriptEventItem`
+rendered only `text`; reasoning was visible solely in the live ThinkingStream
+panel. Fixed: assistant events now render a "thinking" block (italic, muted,
+matching the live style) from `content.reasoning`, falling back to reasoning
+parts inside `content.raw` so the four models' existing production
+transcripts show their thinking retroactively, no migration needed.
+
+**Provider visibility options — a decision, logged.** Three providers run
+reasoning but hide the text unless asked: Anthropic's current models default
+to `display: "omitted"` (thinking blocks stream empty — exactly what prod
+shows for Fable 5), Gemini returns thought summaries only with
+`includeThoughts`, OpenAI only with a `reasoningSummary` mode. The step now
+sends visibility-only options: `anthropic.thinking = {type: "adaptive",
+display: "summarized"}` (adaptive is already the default on all three league
+Anthropic models; `display` cannot be sent without `type`),
+`google.thinkingConfig.includeThoughts = true`, `openai.reasoningSummary =
+"auto"`. Reading of §8.1: it forbids budgets, effort flags, toggles,
+temperature — things that change *behavior*. These change what the response
+carries, not how the model thinks, the same distinction §8.1 itself draws
+for prompt caching ("changes cost only, never behavior"), and §12.1 v1.10
+exists precisely so spectators can watch agents think. Not asked as a
+question because the commissioner's request is the authorization: thinking
+logs "for all of the models" are impossible while providers omit the text.
+
+**Verify item, open:** the pass-through of these three options via the AI
+Gateway is unverifiable from this sandbox (no `AI_GATEWAY_API_KEY`). On the
+next smoke round, check that anthropic/google/openai steps now record
+non-empty `reasoning` — and that no provider rejects the option (a 400
+would fail sessions; if one appears, drop that provider's option and log it).
+
+Suite after the change: 525 tests green across the five packages
+(shared 13, engine 167, data 23, agent 141, web 181), lint and typecheck
+clean. The stale assertion in `spend.test.ts` ("no provider options at all",
+written for the BYOK removal) now pins exactly the one visibility option.
+
+**Review round 1** (fresh-context reviewer on the diff): no blockers; every
+finding fixed rather than argued —
+- The Anthropic option was keyed on the `anthropic/` prefix; adaptive-is-the-
+  default is only *verified* for the three league models, so a commissioner
+  swap to another Anthropic model would have silently forced a thinking mode
+  (a real §8.1 toggle). Now an exact-id allowlist (`ANTHROPIC_ADAPTIVE_BY_DEFAULT`),
+  with a test that an unlisted Anthropic id gets pure provider defaults.
+- No fallback if the gateway rejects the new option — a 400 would have failed
+  sessions for 6 of 12 teams. Now: if a step errors before producing any
+  output and a visibility option was sent, retry once without it. A rejected
+  option costs the league its thinking display, never a session. An error
+  after real output is a genuine provider failure and is not retried
+  (the tick's requeue owns that path). Both behaviors pinned by tests.
+- Closing-step reasoning and the empty-reasoning-omits-the-field behavior
+  were untested; both have tests now.
+- Consecutive reasoning blocks concatenated with no separator (durable field
+  vs raw fallback disagreed); `reasoning-start` now inserts a blank line.
+- The raw-content fallback would throw on a malformed element (`null` in
+  `raw.content`) and 500 a public page; now guarded, with a test.
+- The thinking block renders capped at the same `max-h-[32rem]` scroll the
+  JSON blocks use, so a 40 KB trace cannot make transcript pages megabytes
+  of DOM.
+**Review round 2**: three new findings on the round-1 retry, all fixed —
+the "no output yet" retry gate was blind to tool-call stream parts (a pure
+tool-call step that errors mid-call would have been silently retried and
+double-billed; the gate now tracks every content-bearing part type); a
+permanently rejected option degraded silently (the drop now rides the step
+result as `visibilityOptionDropped` and the loop records an `info` event, so
+the transcript shows the degradation instead of it reading as "this model
+has no reasoning"); and the block separator appended eagerly could leave a
+dangling blank line after a text-withheld final block (now lazy). All three
+pinned by tests; agent suite at 150.
+
+The round-1 reviewer also noted the repo rule that a real session must run
+against a deployed build before merge. From this sandbox no preview session can be
+started (previews get no cron; the tick and admin need secrets that live in
+Vercel). The commissioner has asked for exactly that end-to-end run — a
+smoke round — so it runs on production immediately after the merge, with the
+defensive fallback above bounding the blast radius if the gateway rejects
+the option, and a revert as the rollback path.
 
 ## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
 
@@ -257,7 +544,6 @@ production applies 0003 automatically via the build's migrate step.
 `AI_GATEWAY_API_KEY` in this environment). The stream-part shapes were checked
 against the installed `ai@7.0.84` types; first real session on the preview
 deploy will show the thinking panel — worth eyeballing after merge.
-
 ## 2026-08-29 — Commissioner login works; both admin secrets confirmed live
 
 `COMMISSIONER_PASSWORD` and `SESSION_SECRET` are both set and scoped to
