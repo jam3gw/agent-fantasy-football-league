@@ -11,6 +11,20 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Draft picks auto-fill the lineup by position
+
+Jake's ask during the mock draft. A drafted player now fills his team's first
+open eligible starting slot for the coming week (QB, RB1, RB2, WR1, WR2, TE,
+FLEX, DST, K; bench only when nothing eligible is open), on both the agent
+pick path and the auto-pick path, inside the same transaction as the pick.
+`autofillDraftLineupSlot` in `packages/engine/src/lineup.ts`; recorded as a
+carve-out under SPEC §3.1 — placement by arrival order is not the engine
+choosing a starter. This also retires SETUP.md's "week 1 lineups have no
+fallback" gap: the draft itself now produces a full legal lineup, and agents
+rearrange with set_lineup. Landed after the mock draft ran (its rosters were
+drafted to the bench, as before); verified by engine tests and the updated
+make_pick test.
+
 ## 2026-08-29 — Team 2: Opus 5 replaced with Mistral Large 3
 
 Slot 2 now runs `mistral/mistral-large-3` (was `anthropic/claude-opus-5`).

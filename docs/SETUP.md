@@ -223,10 +223,11 @@ Listed because the spec is explicit about it and it is worth knowing what is
 
 ## 10. Known gaps you should know about
 
-- **Week 1 lineups have no fallback.** Every drafted player starts on the bench,
-  and there is no previous week to carry over from. A team whose model has a bad
-  day fields nothing and scores 0. `/admin/health` warns before kickoff; running
-  a session for that team is the only remedy, and it may still decline.
+- **Week 1 lineups start from the draft's auto-fill.** Drafting slots each
+  player into the first open eligible starting slot (§3.1, 2026-08-29), so a
+  team whose model misses week 1 still fields the lineup its draft produced —
+  draft-order quality, not optimized. `/admin/health` still warns about empty
+  slots before kickoff.
 - **No league-wide spend stop.** Deliberate (§2).
 - **No mock-draft button.** Section 8 step 7 is the manual procedure.
 - **Simulation mode is inert.** `SIMULATION_MODE` reads a `clock_override` row
