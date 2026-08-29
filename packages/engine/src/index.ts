@@ -1,5 +1,6 @@
 export * from "./db/index.ts";
 export * from "./db/schema.ts";
+export * from "./db/sqlTime.ts";
 export * from "./errors.ts";
 export * from "./settings.ts";
 export * from "./guards.ts";
