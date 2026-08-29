@@ -5,22 +5,20 @@
  * accumulates transcript events as the runner writes them, and shows the
  * in-flight partial output — what the agent is thinking while it thinks it.
  *
- * Rendering is shared with the static page via `components/transcript`, so a
- * live event looks exactly like the same event after the session ends. When
- * the session reaches a terminal status the poll stops and the accumulated
- * transcript stands as the complete record.
+ * Rendering is shared with the static page via `components/session-view`, so a
+ * step looks exactly like the same step after the session ends: the reader
+ * watches the transcript being built, rather than watching a different page
+ * that is replaced by the real one when the session finishes. When the session
+ * reaches a terminal status the poll stops and the accumulated transcript
+ * stands as the complete record.
  */
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import useSWR from "swr";
-import { Badge, Card, Empty } from "@/components/ui";
-import {
-  Json,
-  SessionSummaryCard,
-  TranscriptEventItem,
-  type SessionSummaryData,
-  type SessionTeamData,
-  type TranscriptEvent,
-} from "@/components/transcript";
+import { LiveDot } from "@/components/broadcast";
+import { SessionFacts, SessionHeader, SessionTranscript } from "@/components/session-view";
+import { Empty, money } from "@/components/ui";
+import type { SessionSummaryData, SessionTeamData, TranscriptEvent } from "@/components/transcript";
+import { compactTokens, formatSeconds, groupSteps, toDate } from "@/lib/sessionTranscript";
 
 interface LiveResponse {
   session: SessionSummaryData;
@@ -34,26 +32,77 @@ const POLL_MS = 2_500;
 
 const ACTIVE_STATUSES = new Set(["queued", "running"]);
 
-function ThinkingStream({ stream }: { stream: NonNullable<LiveResponse["stream"]> }) {
-  if (stream.reasoning === "" && stream.text === "") return null;
+/**
+ * The elapsed clock. The poll is every 2.5 seconds but a stopped timer reads
+ * as a stalled session, so the seconds are counted locally from the session's
+ * own start time and corrected by every poll that carries a new one.
+ */
+function useElapsed(startedAt: string | Date | null, active: boolean): string | null {
+  const startMs = toDate(startedAt)?.getTime() ?? null;
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!active || startMs === null) return;
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [active, startMs]);
+
+  if (startMs === null) return null;
+  return formatSeconds(Math.max(0, Math.round((now - startMs) / 1000)));
+}
+
+/**
+ * The in-flight step: the partial reasoning and text the runner stages while
+ * `streamText` streams, under a pulsing dot and the counters that are moving.
+ * This is the whole point of the live view — an agent thinking in public — so
+ * it sits above the steps it is about to become.
+ */
+function ThinkingCard({
+  stream,
+  elapsed,
+  costUsd,
+  tokens,
+}: {
+  stream: NonNullable<LiveResponse["stream"]>;
+  elapsed: string | null;
+  costUsd: number;
+  tokens: number;
+}) {
   return (
-    <li className="rounded border border-accent/40 p-3">
-      <div className="flex flex-wrap items-baseline gap-2">
-        <Badge tone="accent">thinking</Badge>
-        <span className="text-xs text-muted">
-          streaming live
-          <span className="ml-1 inline-block animate-pulse">●</span>
+    <section className="min-w-0 rounded-xl border border-accent/50 bg-surface p-4">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <LiveDot />
+        <span className="text-[14px] font-semibold text-accent">Thinking</span>
+        {elapsed ? <span className="text-[13px] tabular-nums text-muted">{elapsed}</span> : null}
+        <span className="ml-auto text-[12px] tabular-nums text-muted">
+          {money(costUsd)} · {compactTokens(tokens)} tokens
         </span>
       </div>
       {stream.reasoning !== "" ? (
-        <p className="mt-2 whitespace-pre-wrap break-words text-sm italic leading-relaxed text-muted">
+        <p className="mt-3 whitespace-pre-wrap border-l-2 border-border pl-3 text-[13px] leading-[1.7] text-muted">
           {stream.reasoning}
         </p>
       ) : null}
       {stream.text !== "" ? (
-        <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">{stream.text}</p>
+        <p className="mt-3 whitespace-pre-wrap text-[14px] leading-[1.7] text-foreground">{stream.text}</p>
       ) : null}
-    </li>
+    </section>
+  );
+}
+
+/** Queued, or running before the first token: say which, and keep the shape. */
+function WaitingCard({ status }: { status: string }) {
+  return (
+    <section className="min-w-0 rounded-xl border border-border bg-surface p-4">
+      <div className="flex items-center gap-2.5">
+        <LiveDot />
+        <span className="text-[14px] font-medium text-muted">
+          {status === "queued"
+            ? "Queued — waiting for a slot. The transcript starts the moment it gets one."
+            : "Connecting to the live transcript…"}
+        </span>
+      </div>
+    </section>
   );
 }
 
@@ -75,6 +124,7 @@ export default function LiveSession({
   const after = useRef(-1);
 
   const active = ACTIVE_STATUSES.has(summary.status);
+  const elapsed = useElapsed(summary.startedAt, active);
 
   const fetchLive = useCallback(async (): Promise<LiveResponse> => {
     const res = await fetch(`/api/public/sessions/${sessionId}/live?after=${after.current}`, {
@@ -120,59 +170,51 @@ export default function LiveSession({
     },
   });
 
-  const errors = events.filter((e) => e.type === "error");
+  const thinking =
+    active && stream !== null && (stream.reasoning !== "" || stream.text !== "") ? (
+      <ThinkingCard
+        stream={stream}
+        elapsed={elapsed}
+        costUsd={summary.costUsd}
+        tokens={summary.inputTokens + summary.outputTokens}
+      />
+    ) : active ? (
+      <WaitingCard status={summary.status} />
+    ) : null;
 
   return (
-    <div className="space-y-6">
-      <SessionSummaryCard
+    <div className="flex flex-col gap-5">
+      <SessionHeader
         session={summary}
         team={team}
         action={
           active ? (
             error ? (
-              <Badge tone="danger">reconnecting</Badge>
+              <span className="rounded-md border border-danger/40 px-2.5 py-1 text-[12px] font-medium text-danger">
+                reconnecting
+              </span>
             ) : (
-              <span className="text-xs text-muted">
+              <span className="inline-flex items-center gap-2 rounded-md border border-accent/40 bg-accent-soft px-2.5 py-1 text-[12px] font-medium text-accent">
+                <LiveDot />
                 live — updates every {Math.round(POLL_MS / 1000)}s
-                <span className="ml-1 inline-block animate-pulse text-accent">●</span>
               </span>
             )
           ) : (
-            <span className="text-xs text-muted">session finished</span>
+            <span className="text-[12px] text-muted">session finished</span>
           )
         }
       />
+      <SessionFacts
+        session={summary}
+        steps={groupSteps(events).length}
+        elapsedLabel={active ? elapsed : null}
+      />
 
-      {errors.length > 0 ? (
-        <Card title={`Errors (${errors.length})`}>
-          {errors.map((e) => (
-            <Json key={e.seq} value={e.content} />
-          ))}
-        </Card>
-      ) : null}
-
-      <Card title={`Transcript (${events.length} events${active ? ", live" : ""})`}>
-        {events.length === 0 && stream === null ? (
-          <Empty>
-            {summary.status === "queued"
-              ? "Session is queued — waiting for a slot. The transcript starts here the moment it does."
-              : active
-                ? "Connecting to the live transcript…"
-                : "No transcript events were recorded for this session."}
-          </Empty>
-        ) : (
-          <ol className="space-y-4">
-            {events.map((event) => (
-              <TranscriptEventItem key={event.seq} event={event} />
-            ))}
-            {active && stream !== null ? <ThinkingStream stream={stream} /> : null}
-          </ol>
-        )}
-      </Card>
-
-      <p className="text-xs text-muted">
-        Every session is public: the same prompt, the same tools, and the same information go to all twelve models.
-      </p>
+      {events.length === 0 && thinking === null ? (
+        <Empty>No transcript events were recorded for this session.</Empty>
+      ) : (
+        <SessionTranscript events={events} session={summary} team={team} live={thinking} />
+      )}
     </div>
   );
 }
