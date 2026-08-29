@@ -758,6 +758,64 @@ What is done, what needs Jake, and what needs the season to start. Nothing below
 ### Still outstanding
 - Live smoke tests per model, the mock draft, and the simulated week all need credentials that live only in Vercel; they run against a preview deploy.
 
+## 2026-08-29 — The scheduler is alive; three bugs only production could find
+
+Jake set `CRON_SECRET` and redeployed. Bringing the tick up surfaced three
+things in sequence, each hidden by the one before it.
+
+**1. 401 straight through a fresh deploy.** Vercel Cron was firing every minute
+and the tick was answering 401 — including on a deployment built *after* the
+variable existed, which is what made it confusing. The cause is that a
+deployment only ever sees the environment snapshot taken when it was built, so
+the running one never learns about a variable added afterwards; the deploy that
+looked new had been built minutes before Jake set it. The health banner and
+`docs/SETUP.md` now say this outright, with a table of what each status code on
+that route means, because "set the variable" and "redeploy" are two steps and
+only the second one is load-bearing.
+
+**2. A bare `Date` in a raw `sql` template.** With auth passing, the tick began
+answering 500 once a minute:
+
+    ERR_INVALID_ARG_TYPE: The "string" argument must be of type string or an
+    instance of Buffer or ArrayBuffer. Received an instance of Date
+
+Drizzle serializes a value correctly when it knows the column's type, so every
+`eq(table.someTimestamp, date)` is fine. A raw `sql` template has no such type,
+so the parameter reaches the driver untyped — and the drivers disagree: **PGlite,
+which every test runs on, accepts a `Date`; postgres-js, which production uses,
+throws.** A raw template holding a `Date` therefore passes the entire suite and
+then fails on every single request.
+
+Two existed. The scheduler's job-claim query was the one visibly on fire. The
+second, `updateRollups`' day window, is called on every model step and would
+have failed every session the moment one ran — so this would have looked like
+"the draft is broken" a week from now instead of "the tick is broken" today.
+
+`tstz()` sends the ISO string with an explicit `::timestamptz`, unambiguous for
+both drivers. Since no PGlite-backed test can catch the class by running, the
+guard is a source scan plus builder-level assertions on the emitted parameters.
+The scan's first regex ate the backtick and passed on everything — verified it
+actually fails on the un-fixed code before keeping it, because a vacuous guard
+here is worse than none.
+
+**3. The heartbeat I had deleted myself.** With the tick finally working, every
+stage recorded itself and `cron.tick` did not exist. Wrapping the stages in
+their own error handling had replaced the block that ended `runTick`, taking
+that write with it — so `/admin/health` would have shown the red "the scheduler
+has never run" banner for ever while the league ran perfectly. A false alarm on
+the one indicator that says the league is alive is worse than no indicator, and
+it is precisely what the stage refactor existed to prevent. Restored last and
+unconditional, with a test asserting it sits after the final stage.
+
+**State now.** The tick answers 200 every minute. All six stages green.
+`book_daily_jobs` primed itself and booked 221 recurring jobs out to 4
+September; `ingest.stats` has run; no job has failed. Players, the schedule and
+the FantasyPros rankings are simply not due yet — they sit on their §9.1 slots
+(players 6-hourly, schedule and rankings at 05:00/05:30 ET). Booking them by
+hand from `/admin/jobs` is the next step before the pre-draft checks.
+
+448 tests green.
+
 ## 2026-08-29 — Team naming: already built, one real weakness found
 
 Jake asked for agents to be able to name their own teams. That was already
