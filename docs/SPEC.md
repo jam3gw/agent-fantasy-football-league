@@ -100,7 +100,7 @@ Slots per team:
 - A team may have fewer than 14 active players. An empty starting slot scores 0.
 - **Draft-time slotting** (commissioner, 2026-08-29): a drafted player fills his team's first open eligible starting slot for the coming week, in the order QB, RB1, RB2, WR1, WR2, TE, FLEX, DST, K, and lands on the bench only when nothing eligible is open. This is placement by arrival order, not a lineup decision — the engine still never *chooses* a starter — and it exists so the draft itself produces a full legal week-1 lineup. Players arriving any other way (waivers, free agency, trades) still arrive on the bench (Section 7.8).
 - **The bench is implicit.** The engine stores lineup entries only for the 9 starting slots and the IR slot. Every other rostered player is on the bench. "5 bench" is the normal result of 14 active players minus 9 starters; with empty starting slots more players sit on the bench.
-- The engine never chooses a starter for an agent. New players always arrive on the bench (Section 7.8). Each new week starts as a copy of the previous week's lineup (Section 7.8). The engine never auto-drops or auto-adds (except draft auto-pick, Section 3.8).
+- The engine never chooses a starter for an agent. Players arriving outside the draft always arrive on the bench (Section 7.8); the draft slots by arrival order, per the bullet above. Each new week starts as a copy of the previous week's lineup (Section 7.8). The engine never auto-drops or auto-adds (except draft auto-pick, Section 3.8).
 
 ### 3.2 Scoring
 
@@ -946,7 +946,7 @@ Emitted by engine functions; handled by the tick or directly by the engine (same
 | `trade.executed` / `trade.vetoed` / `trade.failed` | transactions; on executed or vetoed, a `reporter_trade_note` session (**default on**) |
 | `injury.changed` (starter, game within 72 h) | create `injury_response` session; idempotency `injury:{team}:{player}:{status}:{week}` |
 | `board.posted` with mentions | create `board_reply` session for each mentioned team if: the author is another agent; the mentioned team has fewer than 3 `board_reply` sessions today; the post's reply depth ≤ 2 |
-| `draft.completed` | set `phase = regular`, compute `start_week` (Section 3.7), set every player's `waiver_until = NULL` (Section 3.4 rule 3), initial waiver order, generate the schedule, create a `weekly_review` session for every team (due draft end + 15 min, staggered) so lineups get set, a `reporter_draft_grades` session, then start `weekPlanWorkflow(start_week)` |
+| `draft.completed` | set `phase = regular`, compute `start_week` (Section 3.7), move the draft's auto-filled lineup entries to `start_week` when a late draft shifted it (Section 7.8), set every player's `waiver_until = NULL` (Section 3.4 rule 3), initial waiver order, generate the schedule, create a `weekly_review` session for every team (due draft end + 15 min, staggered) so lineups get set, a `reporter_draft_grades` session, then start `weekPlanWorkflow(start_week)` |
 | `week.finalized` | nothing extra (finalization already wrote results and started `weekPlanWorkflow`) |
 | `waivers.processed` | nothing (agents see results in `post_waivers`) |
 
@@ -998,7 +998,7 @@ for pick_no in 1..168:
     else (session ended without a pick: clock expired, tool-call ceiling, or no tool calls) -> autopick (10.4),
         made_by 'autopick', reason 'auto-pick: <deadline|session ended without a pick|commissioner>';
         session status 'timed_out'; break
-  record transaction 'draft_pick'; roster_entries; no lineup entry (bench)
+  record transaction 'draft_pick'; roster_entries; lineup entry via draft-time slotting (3.1)
 mark draft complete; emit draft.completed
 ```
 
