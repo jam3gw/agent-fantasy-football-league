@@ -10,8 +10,28 @@ import { WRITE_TOOLS } from "./tools/write.ts";
 import { DRAFT_TOOLS } from "./tools/draft.ts";
 import { REPORTER_TOOLS } from "./tools/reporter.ts";
 
+/**
+ * Index every tool by name, refusing duplicates.
+ *
+ * A `Map` built from entries keeps the *last* of any repeated key, so a second
+ * tool defined with a name the read table already uses silently replaced it
+ * for every session kind, team kinds included. That is exactly what happened
+ * to `get_team_week_results`: the reporter's thinner copy — no paging, so no
+ * §8.2 character cap, and no `model` or `lineup_efficiency` — was what all
+ * twelve agents actually got. Throwing here makes the next one a failed build
+ * instead of a quiet substitution.
+ */
+function indexByName(tools: LeagueTool[]): Map<string, LeagueTool> {
+  const index = new Map<string, LeagueTool>();
+  for (const t of tools) {
+    if (index.has(t.name)) throw new Error(`two tools are defined with the name ${t.name}`);
+    index.set(t.name, t);
+  }
+  return index;
+}
+
 function byName(tools: LeagueTool[], names: string[]): LeagueTool[] {
-  const index = new Map(tools.map((t) => [t.name, t]));
+  const index = indexByName(tools);
   const out: LeagueTool[] = [];
   for (const n of names) {
     const t = index.get(n);
@@ -38,7 +58,8 @@ const CHECK_IN = ["schedule_check_in", "cancel_check_in", "list_check_ins"];
 /** Read tools minus the scratchpad reader, which the scratchpad group re-adds. */
 const READ_ONLY_NO_PAD = READ.filter((n) => n !== "read_scratchpad");
 
-const SETS: Record<SessionKind, string[]> = {
+/** The tool set for each session kind. Exported so tests can walk every kind. */
+export const SETS: Record<SessionKind, string[]> = {
   onboarding: [
     ...READ_ONLY_NO_PAD,
     ...CHECK_IN,
@@ -152,9 +173,7 @@ const SETS: Record<SessionKind, string[]> = {
   // and naming, which belong to their own kinds (§8.6).
   manual: [
     ...READ_ONLY_NO_PAD,
-    ...WRITE_TOOLS.map((t) => t.name).filter(
-      (n) => n !== "vote_on_trade" && n !== "set_team_name" && n !== "read_scratchpad",
-    ),
+    ...WRITE_TOOLS.map((t) => t.name).filter((n) => n !== "vote_on_trade" && n !== "set_team_name"),
     "read_scratchpad",
   ],
   smoke: ["get_league_state", ...LOG],
@@ -168,8 +187,8 @@ const SETS: Record<SessionKind, string[]> = {
 export function toolsForKind(kind: SessionKind): LeagueTool[] {
   const names = SETS[kind];
   if (!names) throw new Error(`no tool set defined for session kind ${kind}`);
-  // De-duplicate while preserving order (get_team_week_results appears in both
-  // the read table and the reporter table).
+  // A kind can name the same tool twice (a group plus an explicit entry);
+  // de-duplicate, preserving order.
   return byName(ALL, [...new Set(names)]);
 }
 

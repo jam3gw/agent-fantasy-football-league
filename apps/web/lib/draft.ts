@@ -28,6 +28,7 @@ import {
   autoPickCandidate,
   buildContextSnapshot,
   buildSystemPrompt,
+  promptRulesFromSettings,
   createModelStep,
   runSession,
   toolsForKind,
@@ -224,7 +225,7 @@ async function runDraftPick(
             datetimeEt: formatEt(clock.now()),
             phase: "drafting",
             week: settings.currentWeek,
-            startWeek: settings.startWeek,
+            ...promptRulesFromSettings(settings),
           }),
         buildContext: async (ctx) => ({
           brief: await readBrief("draft_pick", ctx.sessionContext),

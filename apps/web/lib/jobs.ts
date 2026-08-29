@@ -172,7 +172,12 @@ export async function runJob(
     }
     case "digest.weekly": {
       const { sendWeeklyDigest } = await import("./digest");
-      await sendWeeklyDigest(db, clock);
+      // The post-draft digest names its own week and reason (§12.3); the
+      // Tuesday one carries no payload and reports the week just finalized.
+      await sendWeeklyDigest(db, clock, {
+        week: payload.week === undefined ? undefined : Number(payload.week),
+        reason: payload.reason === "draft" ? "draft" : "week",
+      });
       return;
     }
     default:
@@ -203,7 +208,11 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
     await book("ingest.schedule", at(5, 0));
     await book("ingest.fp_rankings", at(5, 30));
     await book("ingest.fp_injuries", at(5, 35));
-    await book("waivers.run", at(4, 30));
+    // §7.2: the daily waiver run time is a setting, not a constant. Booking it
+    // at a hardcoded 4:30 meant changing it on /admin/settings moved the clear
+    // window and what all twelve agents were told, but not when waivers ran.
+    const [waiverHh, waiverMm] = settings.waiverRunTimeEt.split(":").map(Number);
+    await book("waivers.run", at(waiverHh ?? 4, waiverMm ?? 30));
     await book("book_daily_jobs", at(0, 5));
     await book("ingest.projections", at(6, 0));
 
@@ -225,10 +234,15 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
     // §9.1: stats every 30 minutes on game days. The tick polls per minute
     // while a game is live, so these fill the gaps between games — a game that
     // finished at 4 PM is final long before the next kickoff.
+    // The week is deliberately NOT baked into the payload: these are booked two
+    // days ahead, and Tuesday's finalization advances `current_week` in
+    // between. A stale week here would re-upsert the finalized week's rows with
+    // `final = false` and overwrite the source that scored it. `runJob`
+    // resolves `payload.week ?? settings.currentWeek` when it runs.
     if (gameDay) {
       for (let hour = 0; hour < 24; hour++) {
-        await book("ingest.stats", at(hour, 15), { week: settings.currentWeek });
-        await book("ingest.stats", at(hour, 45), { week: settings.currentWeek });
+        await book("ingest.stats", at(hour, 15));
+        await book("ingest.stats", at(hour, 45));
       }
     }
 

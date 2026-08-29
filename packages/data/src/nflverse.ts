@@ -91,7 +91,31 @@ const STAT_COLUMNS: Record<string, string> = {
   rushing_fumbles_lost: "fum_lost",
   receiving_fumbles_lost: "fum_lost",
   sack_fumbles_lost: "fum_lost",
+  // Kicking (§13.4). Without these every kicker scored 0 on a week finalized
+  // from nflverse — a silent 8–12 point hole in nine of twelve lineups on the
+  // one path taken when both Sleeper and FantasyPros are unavailable.
+  pat_made: "xpm",
+  pat_missed: "xpmiss",
+  fg_made_0_19: "fgm_0_19",
+  fg_made_20_29: "fgm_20_29",
+  fg_made_30_39: "fgm_30_39",
+  fg_made_40_49: "fgm_40_49",
+  // Sleeper's scoring has one bucket from 50 yards up; nflverse splits it.
+  fg_made_50_59: "fgm_50p",
+  fg_made_60_: "fgm_50p",
+  fg_missed: "fgmiss",
 };
+
+/**
+ * The distance buckets above are only in the newer release files. When a file
+ * has plain `fg_made` and no buckets, credit each make at the 30–39 rate —
+ * the value Sleeper gives every field goal under 40 yards, and the modal
+ * distance. It under-credits long kicks by 1–2 points each. That is the price
+ * of the last rung of the ladder being reachable at all, and the week records
+ * its source so the approximation is never invisible.
+ */
+const FG_BUCKET_COLUMNS = Object.keys(STAT_COLUMNS).filter((c) => c.startsWith("fg_made_"));
+const FG_FALLBACK_KEY = "fgm_30_39";
 
 export function parseNflverseWeeklyStats(csvText: string, season: number): NflverseWeeklyStat[] {
   const out: NflverseWeeklyStat[] = [];
@@ -107,6 +131,10 @@ export function parseNflverseWeeklyStats(csvText: string, season: number): Nflve
       const n = Number(raw);
       if (!Number.isFinite(n) || n === 0) continue;
       stats[key] = (stats[key] ?? 0) + n;
+    }
+    if (!FG_BUCKET_COLUMNS.some((c) => c in r)) {
+      const made = Number(r.fg_made);
+      if (Number.isFinite(made) && made > 0) stats[FG_FALLBACK_KEY] = (stats[FG_FALLBACK_KEY] ?? 0) + made;
     }
     out.push({ gsisId, week: Number(r.week), season, stats });
   }
