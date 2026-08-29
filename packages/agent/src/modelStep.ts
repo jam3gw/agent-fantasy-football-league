@@ -21,7 +21,7 @@ import { generateText, dynamicTool, jsonSchema } from "ai";
 import { z } from "zod";
 import type { EngineDb } from "@league/engine";
 import type { ModelStepRequest, ModelStepResult, ModelMessage } from "./session.ts";
-import { supportsExplicitCaching } from "./models.ts";
+import { supportsExplicitCaching, billedToFor } from "./models.ts";
 import type { UsageTokens } from "./spend.ts";
 
 export interface ModelStepConfig {
@@ -155,8 +155,7 @@ export function createModelStep(
       toolCalls,
       usage: usageOf(result.usage ?? {}),
       gatewayCostUsd: gatewayCostFrom(result.providerMetadata),
-      // Every call bills the gateway (commissioner's decision, 2026-08-28).
-      billedTo: "gateway",
+      billedTo: billedToFor(req.modelId),
       assistantMessage: { role: "assistant", content: result.content ?? result.text ?? "" },
       finishReason: result.finishReason,
     };
