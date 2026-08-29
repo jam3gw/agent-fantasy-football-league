@@ -48,6 +48,17 @@ export interface ModelToolCall {
 
 export interface ModelStepResult {
   text: string;
+  /**
+   * Reasoning text streamed by this step, as far as the provider shows it
+   * (§12.1). Optional: providers without visible reasoning produce none.
+   */
+  reasoning?: string;
+  /**
+   * Set when the step's reasoning-visibility provider option was rejected
+   * before any output and the step succeeded on a retry without it. Holds the
+   * rejection error text; the loop records it so the degradation is visible.
+   */
+  visibilityOptionDropped?: string;
   toolCalls: ModelToolCall[];
   usage: UsageTokens;
   /** Gateway-reported cost when present in provider metadata (§8.7). */
@@ -512,6 +523,10 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
 
       await recordEvent(db, clock, sessionId, seq++, "assistant", {
         text: result.text,
+        // The thinking log (§12.1): durable, unlike the session_stream partial,
+        // which is deleted the moment this event lands. Only recorded when the
+        // provider actually surfaced reasoning text.
+        ...(result.reasoning ? { reasoning: result.reasoning } : {}),
         // The 0-based step this message came from — what the live view compares
         // against `session_stream.step_no` to tell a superseded partial from
         // the next step's genuinely new thinking.
@@ -524,6 +539,15 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
         // be replayed exactly as the model saw it (§4.1, §9.2).
         raw: result.assistantMessage as unknown as Record<string, unknown>,
       });
+      // A dropped visibility option is a degradation worth seeing in the
+      // transcript: without this, "the gateway rejects the option on every
+      // step" reads exactly like "this model shows no reasoning".
+      if (result.visibilityOptionDropped) {
+        await recordEvent(db, clock, sessionId, seq++, "info", {
+          visibility_option_dropped: result.visibilityOptionDropped,
+          model_id: session.modelId,
+        });
+      }
       // The staged partial (§12.1) is superseded the moment the full assistant
       // event above is durable; leaving it would show the step twice.
       await clearPartial(db, sessionId);
@@ -742,8 +766,15 @@ async function closeSession(
     );
     await recordEvent(db, clock, args.sessionId, seq++, "assistant", {
       text: extra.text,
+      ...(extra.reasoning ? { reasoning: extra.reasoning } : {}),
       closing_step: true,
     });
+    if (extra.visibilityOptionDropped) {
+      await recordEvent(db, clock, args.sessionId, seq++, "info", {
+        visibility_option_dropped: extra.visibilityOptionDropped,
+        model_id: session.modelId,
+      });
+    }
     for (const call of extra.toolCalls) {
       const tool = deps.tools.find((t) => t.name === call.toolName);
       if (!tool) continue;
