@@ -11,7 +11,7 @@
 import { eq, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
-import { fpPlayerMap, players, rankings, rankingsUnmatched } from "@league/engine";
+import { fpPlayerMap, health, players, rankings, rankingsUnmatched } from "@league/engine";
 import type { FpConfig } from "../fantasypros.ts";
 import { fpRequest } from "../fantasypros.ts";
 import type { FpPlayer, MatchIndex, SleeperCandidate } from "../playerMatch.ts";
@@ -99,6 +99,39 @@ export async function loadMatchIndex(db: EngineDb): Promise<MatchIndex> {
 }
 
 /**
+ * Record what FantasyPros said about its own limits, under the `fp.rankings`
+ * health key. An error only when the plan makes the draft gate unreachable —
+ * otherwise a plain success, so the row doubles as "the rankings pull worked".
+ */
+async function recordTruncation(db: EngineDb, clock: Clock, body: unknown): Promise<void> {
+  const meta = (body ?? {}) as { tier?: unknown; limit?: unknown; count?: unknown };
+  const limit = Number(meta.limit);
+  const count = Number(meta.count);
+  const tier = typeof meta.tier === "string" ? meta.tier : "unknown";
+  const at = clock.now();
+  const truncated = Number.isFinite(limit) && Number.isFinite(count) && limit < count;
+
+  const message = truncated
+    ? `FantasyPros is on the '${tier}' plan, which returns at most ${limit} players per request ` +
+      `out of ${count} available. Every request is capped the same way, so the per-position calls ` +
+      `cannot get past it either: about ${limit * 7} ranked players is the ceiling, and §5.7's draft ` +
+      `gate needs 200. The draft cannot start until the FantasyPros plan is upgraded.`
+    : null;
+
+  await db
+    .insert(health)
+    .values({
+      key: "fp.rankings",
+      lastSuccessAt: at,
+      ...(message ? { lastError: message, lastErrorAt: at } : {}),
+    })
+    .onConflictDoUpdate({
+      target: health.key,
+      set: message ? { lastSuccessAt: at, lastError: message, lastErrorAt: at } : { lastSuccessAt: at },
+    });
+}
+
+/**
  * Pull one ranking set and store it. `week` 0 with set `draft` is the
  * preseason board; in season pass the current week for the weekly set.
  */
@@ -163,6 +196,14 @@ export async function ingestFpRankings(
     const body = overallRes.body as { players?: FpRankingRow[] };
     const rows = body.players ?? [];
     sourceCounts["overall"] = rows.length;
+    // FantasyPros states its own truncation in the response: `tier`, the
+    // per-response `limit`, and `count`, the number actually available. On the
+    // free tier that is limit 10 against a count in the hundreds, and no number
+    // of per-position calls can get past it — so §5.7's 200-player gate is
+    // simply unreachable until the plan changes. Recording it turns "68 ranked,
+    // need 200" with a working key and no errors into something a person can
+    // act on.
+    await recordTruncation(db, clock, overallRes.body);
     for (const r of rows) {
       const fpId = asString(r.player_id);
       if (!fpId) continue;

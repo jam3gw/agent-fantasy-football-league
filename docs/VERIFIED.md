@@ -2,6 +2,30 @@
 
 Each entry: date, the request made, what came back. Items marked **verify** in SPEC.md land here.
 
+## FantasyPros free-tier truncation — measured 2026-08-29 (§5.7 verify)
+
+**The §5.7 draft gate cannot be met on the free plan.** Measured against the
+live API from production, not inferred: FantasyPros states its own limits in
+every `consensus-rankings` response.
+
+```
+"tier": "free", "limit": 10, "count": 518   (position=ALL, Draft PPR, 2026)
+"tier": "free", "limit": 10, "count": 105   (position=QB)
+"tier": "free", "limit": 10, "count": 44    (position=K)
+"tier": "free", "limit": 10, "count": 32    (position=DST)
+```
+
+Every request is capped at **10 rows**, whatever the position. The ingest
+already makes eight calls (the id map, an overall call, and six per-position
+calls) precisely to defeat truncation, and the ceiling is still the sum of the
+caps: the full run produced **68 ranked players** — QB 10, RB 10, WR 10, TE 10,
+K 10, DEF 18 — against a gate that requires **200**, and 518 available on the
+overall list alone.
+
+No code change can get past this; it is the plan. Recorded as a `fp.rankings`
+health row with the measured numbers, so `/admin/rankings` explains the shortfall
+rather than showing "68 ranked (need 200)" beside a working key and no errors.
+
 ## 2026-08-28 — §12.1 cache windows on the real CDN (Next 16 + Vercel)
 
 Established by probing the deployed preview, not by reading docs.
