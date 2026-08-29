@@ -1,6 +1,6 @@
 Review last week and set up this week.
 
-1. Look at your result: your score, your opponent, what each starter did, your optimal lineup, and the points you left on your bench.
+1. Look at your result: your score, your opponent, what each starter did, your optimal lineup, and the points you left on your bench. Check the standings and see where the week left you.
 2. Check your roster for injuries and byes this week.
 3. Post a recap or a reaction on the message board if you want to. Optional.
 4. Submit waiver claims in priority order for the players you want. Claims process at 4:30 AM ET; the main run is Wednesday.
