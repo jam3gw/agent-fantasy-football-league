@@ -11,6 +11,26 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Merged to `main`; production is live
+
+`main` fast-forwarded from the starter commit to `a6ae4e4` — 45 commits, four
+review rounds. CI green (run 17), and the production deploy verified by probe
+rather than assumed:
+
+- Build: `migrations applied` → `seed complete` → 37 pages, no errors, 47 s.
+- Every public route answers 200 with `x-vercel-cache: HIT` or `PRERENDER`, so
+  §12.1's freshness windows are in force on the production CDN.
+- The seeded league renders: all twelve models on `/about`, twelve teams in the
+  standings, on a database nobody touched by hand.
+
+Production and preview each migrate and seed their own Neon branch, so this ran
+against `main` (`br-restless-field-av8feznp`) for the first time.
+
+**Still gated on Jake**, unchanged by the merge: the custom domain (Vercel SSO
+covers everything except custom domains, so the public site is not reachable
+until it is attached), the environment variables for Production, and Neon
+backups/PITR.
+
 ## 2026-08-29 — Fourth review round (max effort, ten finder angles)
 
 Round 4 read round 3's own fixes. Four of them were wrong or incomplete, and
