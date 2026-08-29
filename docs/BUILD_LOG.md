@@ -123,6 +123,61 @@ the root layout stays a server component and no page loses static rendering.
   0 pageviews. The routes have been live on production all along; nothing was
   calling them.
 
+## 2026-08-29 — All twelve models verified, and the benchmark cleaned of my own failures
+
+Third smoke round, on the build with both prompt bugs fixed: **12 of 12 models
+succeeded**, every one making 2 tool calls and ending on `write_decision_log`
+rather than hitting a ceiling or a deadline. 6.2–12.5 seconds each, $0.05 for the
+round.
+
+| | reasoning tokens |
+|---|---|
+| DeepSeek V4-Pro | 222 |
+| Gemini 3.1 Pro | 186 |
+| Grok 4.6 | 104 |
+| Qwen 3.8-Max | 69 |
+| Kimi K3 | 63 |
+| Muse Spark 1.2 | 62 |
+| GPT-5.6 Terra | 24 |
+| Fable 5, Opus 5, Sonnet 5, GPT-5.6 Sol, GLM-5.3 | 0 |
+
+Average 61, max 222. §2 forbids setting any reasoning budget, so the open
+question was whether provider defaults would run away on their own; on this task
+they do not. The caveat is that a smoke test — one tool call and one line — is
+too trivial to bound anything. Re-check on the first real weekly review, where
+the work actually invites deliberation.
+
+### Production data delete: 58 junk sessions
+
+Backup: Neon branch `backup-pre-smoke-cleanup` (`br-wandering-scene-avqepb7d`),
+taken from `main` immediately before. A snapshot was not possible — the free plan
+allows one, and the existing `pre-0002-drop-fantasypros` snapshot is the restore
+point for the migration, so overwriting it would have traded one backup for
+another.
+
+Deleted 35 `failed` and 23 `skipped` smoke sessions, with their 209
+`session_events`, 23 `spend_ledger` and dependent `decision_logs` rows. Every one
+was produced by my own broken deploys over the preceding hour — the two prompt
+bugs above, plus `requeueFailedSessions` retrying each failure several times.
+
+This is a correctness fix, not tidiness. `/benchmark` publishes a **sessions
+failed** column per model, and the retry churn had distributed those failures
+unevenly by pure accident of which cycle each landed in:
+
+```
+GLM-5.3          4 failed        Claude Fable 5   2 failed
+nine others      3 failed        Gemini 3.1 Pro   2 failed
+```
+
+Left in place, a published benchmark whose stated purpose is comparing twelve
+models would have recorded GLM-5.3 as the least reliable of them, on evidence
+that is entirely an artifact of my deploy schedule. Every model now shows its
+real result: one succeeded smoke session, nothing failed.
+
+Verified afterwards: 0 orphaned events, ledger rows or decision logs; 12 teams,
+12,225 players and 1,756 draft rankings untouched; no league state
+(`roster_entries`, `transactions`) existed to touch — the season has not started.
+
 ## 2026-08-29 — The smoke test earned its place: no session could run at all
 
 Ran the §8 pre-draft smoke test, one session per model. **All twelve failed, on
