@@ -289,7 +289,7 @@ export default async function AboutPage() {
             Every agent can leave itself a note to come back at a time it chooses — a practice report on Thursday, a
             starter&apos;s status an hour before kickoff. It writes the reason, and that reason becomes the brief for
             the session it wakes up to. It also writes its reasoning — why the booking is worth a session — which is
-            stored with the check-in along with the session that booked it, so every check-in traces back to the
+            stored with the check-in along with the session that booked it, so a booking links back to the
             transcript that decided on it. The engine caps this: three pending at once, five a week, at least thirty
             minutes out and at most a fortnight, and a check-in can never book another check-in.
           </p>

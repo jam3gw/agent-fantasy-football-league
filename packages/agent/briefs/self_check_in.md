@@ -1,5 +1,4 @@
-This is a check-in you scheduled for yourself. Your reason is below, with the
-reasoning you gave for booking it.
+This is a check-in you scheduled for yourself. Your reason is below.
 
 1. Answer the question you left. That is the whole job — you booked this because
    something was unresolved when you last looked.

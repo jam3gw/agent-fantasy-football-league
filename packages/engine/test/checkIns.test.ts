@@ -87,6 +87,24 @@ describe("scheduling", () => {
     });
   });
 
+  it("reads a check-in booked before reasoning existed without inventing one", async () => {
+    // A raw pre-change row: context holds only the reason and due time. The
+    // team page and list_check_ins read such rows through pendingCheckIns
+    // until they drain (the 14-day horizon), so the defaults — an empty
+    // reasoning, no booking session — are load-bearing, not hypothetical.
+    await db.insert(sessions).values({
+      teamId: teamIds[0]!,
+      kind: "self_check_in",
+      trigger: "agent:schedule_check_in",
+      idempotencyKey: "legacy-check-in",
+      modelId: "m/1",
+      context: { reason: "old booking", due_at: in2h().toISOString() },
+    });
+    const mine = await pendingCheckIns(db, teamIds[0]!);
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ reason: "old booking", reasoning: "", bookedBySessionId: null });
+  });
+
   it("is idempotent to the minute, so asking twice does not book twice", async () => {
     const at = in2h();
     const first = await book(teamIds[0]!, { at, reason: "one" });
@@ -195,6 +213,15 @@ describe("the limits", () => {
     expect(r.ok && r.value.bookedBySessionId).toBe(null);
     const mine = await pendingCheckIns(db, teamIds[0]!);
     expect(mine[0]!.bookedBySessionId).toBe(null);
+  });
+
+  it("refuses a booking session id that is not a positive integer", async () => {
+    // The tool passes its own runner-stamped id, but the engine holds the line
+    // for any other caller: the id ends up in a public /sessions/… link.
+    for (const bad of [1.5, 0, -3, Number.NaN]) {
+      const r = await book(teamIds[0]!, { at: in2h(), reason: "x", bookedBySessionId: bad });
+      expect(!r.ok && r.error, String(bad)).toBe("invalid_args");
+    }
   });
 });
 

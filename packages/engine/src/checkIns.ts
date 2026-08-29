@@ -110,6 +110,16 @@ export async function scheduleCheckIn(
       return fail("too_long", `the reasoning is ${reasoning.length} characters; the maximum is ${MAX_REASONING_CHARS}`);
     }
 
+    // Provenance is a session id or nothing. The tool always passes its own
+    // runner-stamped id (a model cannot supply this argument), but the engine
+    // still refuses junk so a public `/sessions/…` link is never built from it.
+    if (
+      input.bookedBySessionId !== undefined &&
+      (!Number.isInteger(input.bookedBySessionId) || input.bookedBySessionId <= 0)
+    ) {
+      return fail("invalid_args", "bookedBySessionId must be a positive integer session id");
+    }
+
     if (Number.isNaN(input.at.getTime())) return fail("bad_time", "that is not a time");
     // §9.1 sweeps the queue every five minutes, so a check-in booked for 10:02
     // would start at 10:05 regardless. Rounding up puts the time the agent is

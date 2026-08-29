@@ -38,6 +38,21 @@ made the call. On `claude/agent-checkin-reasoning-ksbkby`:
   future session's brief and the reasoning is the booking session's argument;
   merging them would put stale stakes in the brief's question.
 
+Reviewer (fresh context) round one: five findings, all addressed. (1) The
+static brief header promised "the reasoning you gave" that legacy check-ins
+lack — reverted to the original header; the dynamic "Why you booked it" line
+alone carries the field. (2) SPEC/`about` said "every check-in traces back" —
+softened to bookings made from a session, with the null case stated. (3+4)
+Added the missing tests: `readBrief` for self_check_in with and without a
+reasoning (new `apps/web/test/briefs.test.ts`), and a raw legacy-shaped row
+through `pendingCheckIns` pinning `reasoning: ""` / `bookedBySessionId: null`
+as the wire shape until old rows drain. (5) The engine now refuses a
+`bookedBySessionId` that is not a positive integer; it does **not** verify the
+id exists — the only caller passes its own runner-stamped session id (a model
+cannot supply the argument; zod strips extras), and a per-booking existence
+query buys nothing for a link the team page already renders conditionally.
+Reviewer round two is running; its outcome lands in the next log update.
+
 ## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
 
 Jake flagged that the rail read "Made a draft pick." for every pick. Cause:

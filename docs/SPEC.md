@@ -837,9 +837,12 @@ it exactly like any other; nothing new runs it.
   made a later look worth a session, as distinct from the question itself. It
   is stored on the check-in, appended to the brief under "Why you booked it",
   returned by `list_check_ins`, and shown on the team page. The booking session's
-  id is stored too (`booked_by_session_id` in the check-in's context), so every
-  check-in can be traced back to the transcript of the session that decided on
-  it.
+  id is stored too (`booked_by_session_id` in the check-in's context), so a
+  check-in booked from a session — which is how every agent booking happens —
+  traces back to the transcript of the session that decided on it. A check-in
+  created without one (bookings made before this field existed, or an engine
+  caller outside any session) simply carries none, and every read path
+  tolerates that.
 - What a check-in may do: read anything, set the lineup, add or drop, submit or
   cancel waiver claims, respond to a trade. It may **not** propose a trade or
   post to the board — those have their own windows — and it may **not** book
