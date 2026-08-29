@@ -2,6 +2,42 @@
 
 Each entry: date, the request made, what came back. Items marked **verify** in SPEC.md land here.
 
+## What provider-default reasoning actually returns, per model — measured 2026-08-29 (§8.1/§12.1)
+
+Queried the production `session_events` (assistant rows joined to `sessions`),
+which hold every model step from the smoke rounds. Two separate facts per
+model: did the provider *spend* reasoning tokens, and did it *return* the
+reasoning text (a non-empty `reasoning` part in the raw assistant message)?
+
+| Model | reasoning tokens | reasoning text in `raw` |
+|---|---|---|
+| deepseek/deepseek-v4-pro | 222 | yes |
+| google/gemini-3.1-pro-preview | 186 | **no** — no reasoning part at all |
+| spacexai/grok-4.6 | 104 | yes |
+| alibaba/qwen3.8-max | 69 | yes |
+| moonshotai/kimi-k3 | 63 | yes |
+| meta/muse-spark-1.2 | 62 | **no** — reasoning part present, text empty |
+| openai/gpt-5.6-terra | 24 | **no** — reasoning part present, text empty |
+| anthropic/claude-fable-5 | 12 | **no** — reasoning part present, text empty |
+| anthropic/claude-opus-5 | 0 | — |
+| anthropic/claude-sonnet-5 | 0 | — |
+| openai/gpt-5.6-sol | 0 | — |
+| zai/glm-5.3 | 0 | — |
+
+So with pure provider defaults, thinking *happens* on 8 of 12 but its text is
+recoverable for only 4. The zero rows are consistent with adaptive/dynamic
+thinking skipping a trivial task (the smoke test is one tool call), not with
+thinking being disabled — nothing in the codebase sends any thinking setting
+(§8.1). Muse Spark's empty-text reasoning part appears to be the provider
+withholding its raw chain of thought; no visibility flag is documented for it,
+so it stays as-is.
+
+**Open (re-verify on the next smoke round):** the visibility-only provider
+options added today (`anthropic` display summarized, `google` includeThoughts,
+`openai` reasoningSummary auto) could not be exercised from this environment —
+no `AI_GATEWAY_API_KEY`. Expected result: non-empty `reasoning` on new
+anthropic/google/openai assistant events whenever reasoning tokens > 0.
+
 ## Rankings on Sleeper's projection feed — measured 2026-08-29 (§5.7 verify)
 
 **The §5.7 draft gate is met with about nine times the headroom it needs.** One

@@ -289,7 +289,7 @@ describe("the ledger itself", () => {
 });
 
 describe("every step bills the AI Gateway", () => {
-  it("createModelStep reports `gateway`, and sets no provider options at all", async () => {
+  it("createModelStep reports `gateway`, and sets no billing or routing provider options", async () => {
     // The commissioner's decision on 2026-08-28: one billing path, so one
     // price list and one balance. Asserted on the model step's own output —
     // asserting it on a ledger row a test helper wrote would only restate the
@@ -313,9 +313,11 @@ describe("every step bills the AI Gateway", () => {
     const result = await step({ modelId: "openai/gpt-5.6-sol", messages, tools: [] }, 0);
     expect(result.billedTo).toBe("gateway");
     // No BYOK credential and no `only` pinning can reach the gateway any more,
-    // at the top level or hidden on a message.
+    // at the top level or hidden on a message. The reasoning-visibility option
+    // (§12.1) is the one top-level provider option that remains — exactly it,
+    // nothing else.
     expect(seen).not.toBeNull();
-    expect(Object.keys(seen!)).not.toContain("providerOptions");
+    expect(seen!.providerOptions).toEqual({ openai: { reasoningSummary: "auto" } });
     expect(JSON.stringify(seen)).not.toContain("byok");
     expect(JSON.stringify(seen)).not.toContain("only");
     // A non-Anthropic model gets no explicit breakpoints: those providers cache

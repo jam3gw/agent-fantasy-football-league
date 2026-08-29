@@ -40,6 +40,28 @@ interface Usage {
   [k: string]: unknown;
 }
 
+/**
+ * The thinking log of an assistant event. New events carry it first-class as
+ * `content.reasoning`; events recorded before it existed may still hold
+ * reasoning parts inside the raw assistant message, so those are read as a
+ * fallback rather than left invisible.
+ */
+export function assistantReasoning(content: Record<string, unknown>): string {
+  if (typeof content.reasoning === "string" && content.reasoning.trim() !== "") return content.reasoning;
+  const raw = content.raw as { content?: unknown } | undefined;
+  if (!raw || !Array.isArray(raw.content)) return "";
+  return (raw.content as unknown[])
+    .filter(
+      (p): p is { type: "reasoning"; text: string } =>
+        typeof p === "object" && p !== null &&
+        (p as Record<string, unknown>).type === "reasoning" &&
+        typeof (p as Record<string, unknown>).text === "string",
+    )
+    .map((p) => p.text)
+    .join("\n\n")
+    .trim();
+}
+
 /** One transcript event, serialisable across the live API. */
 export interface TranscriptEvent {
   id: number;
@@ -52,6 +74,7 @@ export interface TranscriptEvent {
 
 export function TranscriptEventItem({ event }: { event: TranscriptEvent }) {
   const content = event.content;
+  const reasoning = event.type === "assistant" ? assistantReasoning(content) : "";
   return (
     <li className="rounded border border-border p-3">
       <div className="flex flex-wrap items-baseline gap-2">
@@ -72,6 +95,14 @@ export function TranscriptEventItem({ event }: { event: TranscriptEvent }) {
 
       {event.type === "assistant" ? (
         <>
+          {reasoning !== "" ? (
+            <div className="mt-2">
+              <span className="text-xs uppercase tracking-wide text-muted">thinking</span>
+              <p className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words text-sm italic leading-relaxed text-muted">
+                {reasoning}
+              </p>
+            </div>
+          ) : null}
           {typeof content.text === "string" && content.text.trim() !== "" ? (
             <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed">{content.text}</p>
           ) : (

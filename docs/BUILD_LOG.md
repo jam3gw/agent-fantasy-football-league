@@ -83,6 +83,109 @@ in production `health` within the hour.
   commissioner who changes plans edits one line next to the comment that
   explains it.
 
+## 2026-08-29 — thinking confirmed per model; thinking logs made durable and visible (commissioner request)
+
+Jake asked to (1) confirm thinking is enabled for the twelve models, (2) make
+sure the thinking logs are persisted for all of them, and (3) show them in the
+UI. Branch `claude/confirm-thinking-enabled-bncjs3`.
+
+**(1) Confirmed, with §8.1 precision.** We *enable* nothing and *disable*
+nothing: no thinking settings ever reach a provider, by spec. What provider
+defaults actually did on the smoke round (production DB, measured today —
+full table in VERIFIED.md): 8 of 12 models emitted reasoning tokens
+(DeepSeek 222, Gemini 186, Grok 104, Qwen 69, Kimi 63, Muse Spark 62,
+GPT-5.6 Terra 24, Fable 5 12). Opus 5, Sonnet 5, GPT-5.6 Sol, and GLM-5.3
+emitted zero — for the Anthropic pair that is adaptive thinking (on by
+default, model chooses; the smoke task is one trivial tool call) rather than
+thinking being off. §8.1 forbids forcing it, so zero-on-a-trivial-task is
+the correct reading. Re-judge on the first weekly review, as already noted.
+
+**(2) Persistence had a real gap.** Reasoning *text* only lived in the
+transient `session_stream` partial, deleted the moment each step's assistant
+event lands. It survived only incidentally, inside `raw.content` reasoning
+parts, and only for the 4 models whose provider returns raw reasoning text
+by default (DeepSeek, Kimi, Grok, Qwen — measured in prod). Fixed:
+`createModelStep` now returns the accumulated reasoning deltas (the same
+text the live stream shows) and the session loop records it as
+`reasoning` on the assistant event — durable in `session_events`, same as
+the message text.
+
+**(3) The UI dropped thinking once a step completed.** `TranscriptEventItem`
+rendered only `text`; reasoning was visible solely in the live ThinkingStream
+panel. Fixed: assistant events now render a "thinking" block (italic, muted,
+matching the live style) from `content.reasoning`, falling back to reasoning
+parts inside `content.raw` so the four models' existing production
+transcripts show their thinking retroactively, no migration needed.
+
+**Provider visibility options — a decision, logged.** Three providers run
+reasoning but hide the text unless asked: Anthropic's current models default
+to `display: "omitted"` (thinking blocks stream empty — exactly what prod
+shows for Fable 5), Gemini returns thought summaries only with
+`includeThoughts`, OpenAI only with a `reasoningSummary` mode. The step now
+sends visibility-only options: `anthropic.thinking = {type: "adaptive",
+display: "summarized"}` (adaptive is already the default on all three league
+Anthropic models; `display` cannot be sent without `type`),
+`google.thinkingConfig.includeThoughts = true`, `openai.reasoningSummary =
+"auto"`. Reading of §8.1: it forbids budgets, effort flags, toggles,
+temperature — things that change *behavior*. These change what the response
+carries, not how the model thinks, the same distinction §8.1 itself draws
+for prompt caching ("changes cost only, never behavior"), and §12.1 v1.10
+exists precisely so spectators can watch agents think. Not asked as a
+question because the commissioner's request is the authorization: thinking
+logs "for all of the models" are impossible while providers omit the text.
+
+**Verify item, open:** the pass-through of these three options via the AI
+Gateway is unverifiable from this sandbox (no `AI_GATEWAY_API_KEY`). On the
+next smoke round, check that anthropic/google/openai steps now record
+non-empty `reasoning` — and that no provider rejects the option (a 400
+would fail sessions; if one appears, drop that provider's option and log it).
+
+Suite after the change: 525 tests green across the five packages
+(shared 13, engine 167, data 23, agent 141, web 181), lint and typecheck
+clean. The stale assertion in `spend.test.ts` ("no provider options at all",
+written for the BYOK removal) now pins exactly the one visibility option.
+
+**Review round 1** (fresh-context reviewer on the diff): no blockers; every
+finding fixed rather than argued —
+- The Anthropic option was keyed on the `anthropic/` prefix; adaptive-is-the-
+  default is only *verified* for the three league models, so a commissioner
+  swap to another Anthropic model would have silently forced a thinking mode
+  (a real §8.1 toggle). Now an exact-id allowlist (`ANTHROPIC_ADAPTIVE_BY_DEFAULT`),
+  with a test that an unlisted Anthropic id gets pure provider defaults.
+- No fallback if the gateway rejects the new option — a 400 would have failed
+  sessions for 6 of 12 teams. Now: if a step errors before producing any
+  output and a visibility option was sent, retry once without it. A rejected
+  option costs the league its thinking display, never a session. An error
+  after real output is a genuine provider failure and is not retried
+  (the tick's requeue owns that path). Both behaviors pinned by tests.
+- Closing-step reasoning and the empty-reasoning-omits-the-field behavior
+  were untested; both have tests now.
+- Consecutive reasoning blocks concatenated with no separator (durable field
+  vs raw fallback disagreed); `reasoning-start` now inserts a blank line.
+- The raw-content fallback would throw on a malformed element (`null` in
+  `raw.content`) and 500 a public page; now guarded, with a test.
+- The thinking block renders capped at the same `max-h-[32rem]` scroll the
+  JSON blocks use, so a 40 KB trace cannot make transcript pages megabytes
+  of DOM.
+**Review round 2**: three new findings on the round-1 retry, all fixed —
+the "no output yet" retry gate was blind to tool-call stream parts (a pure
+tool-call step that errors mid-call would have been silently retried and
+double-billed; the gate now tracks every content-bearing part type); a
+permanently rejected option degraded silently (the drop now rides the step
+result as `visibilityOptionDropped` and the loop records an `info` event, so
+the transcript shows the degradation instead of it reading as "this model
+has no reasoning"); and the block separator appended eagerly could leave a
+dangling blank line after a text-withheld final block (now lazy). All three
+pinned by tests; agent suite at 150.
+
+The round-1 reviewer also noted the repo rule that a real session must run
+against a deployed build before merge. From this sandbox no preview session can be
+started (previews get no cron; the tick and admin need secrets that live in
+Vercel). The commissioner has asked for exactly that end-to-end run — a
+smoke round — so it runs on production immediately after the merge, with the
+defensive fallback above bounding the blast radius if the gateway rejects
+the option, and a revert as the rollback path.
+
 ## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
 
 Jake flagged that the rail read "Made a draft pick." for every pick. Cause:
