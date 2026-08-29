@@ -20,7 +20,9 @@ import {
   commissionerActions,
   draft,
   initLeagueSettings,
+  leagueSettings,
   matchups,
+  reporterPosts,
   sessionEvents,
   sessionStream,
   sessions,
@@ -130,6 +132,34 @@ describe("computePulseStamp", () => {
     // through the log even though `teams` itself has no updated_at.
     await db.insert(commissionerActions).values({ action: "pause_team", payload: { teamId: a } });
     expect(await computePulseStamp(db)).not.toBe(afterDraft);
+  });
+
+  it("moves on a reporter post and on the settings singleton (week/phase flips)", async () => {
+    const before = await computePulseStamp(db);
+    await db.insert(reporterPosts).values({ kind: "recap", week: 2, title: "Week 2", bodyMd: "..." });
+    const afterReporter = await computePulseStamp(db);
+    expect(afterReporter).not.toBe(before);
+
+    await db
+      .update(leagueSettings)
+      .set({ currentWeek: 3, updatedAt: new Date(clock.now().getTime() + 60_000) })
+      .where(eq(leagueSettings.id, 1));
+    expect(await computePulseStamp(db)).not.toBe(afterReporter);
+  });
+
+  it("keeps sub-second precision — two writes inside one second stamp differently", async () => {
+    const team = await makeTeam("a");
+    const sessionId = await makeSession(team);
+    await db
+      .update(sessions)
+      .set({ updatedAt: new Date(clock.now().getTime() + 1) })
+      .where(eq(sessions.id, sessionId));
+    const first = await computePulseStamp(db);
+    await db
+      .update(sessions)
+      .set({ updatedAt: new Date(clock.now().getTime() + 2) })
+      .where(eq(sessions.id, sessionId));
+    expect(await computePulseStamp(db)).not.toBe(first);
   });
 
   it("stamps an un-seeded database rather than throwing", async () => {
