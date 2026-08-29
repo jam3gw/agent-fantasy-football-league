@@ -1,5 +1,5 @@
 /** Team naming (§8.4 set_team_name): onboarding only (tool layer enforces the kind), once. */
-import { eq } from "drizzle-orm";
+import { and, eq, ne, sql } from "drizzle-orm";
 import type { EngineDb } from "./db/index.ts";
 import { teams } from "./db/schema.ts";
 import type { EngineResult } from "./errors.ts";
@@ -28,8 +28,21 @@ export async function setTeamName(
       return fail("name_already_set", `your team is already named "${team.name}"`, {
         hint: "the name is set once, during onboarding",
       });
-    const dupe = (await tx.select({ id: teams.id }).from(teams)).length; // ensure table read inside tx
-    void dupe;
+    // Names must be unique, case-insensitively. Board mentions route by
+    // matching `@Team Name` against every team's name (board.ts), so two teams
+    // with the same name would each receive the other's mentions and both be
+    // woken for every reply. The check runs inside the transaction, and the
+    // whole write is serialized on the settings row above, so two agents
+    // choosing the same name at the same moment cannot both win.
+    const taken = await tx
+      .select({ id: teams.id, name: teams.name })
+      .from(teams)
+      .where(and(ne(teams.id, teamId), sql`lower(${teams.name}) = lower(${trimmed})`));
+    if (taken.length > 0) {
+      return fail("name_taken", `another team is already called "${trimmed}"`, {
+        hint: "pick a different name",
+      });
+    }
     await tx.update(teams).set({ name: trimmed, motto: motto ?? null }).where(eq(teams.id, teamId));
     return ok({ name: trimmed, motto: motto ?? null });
   });

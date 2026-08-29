@@ -8,11 +8,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { and, eq, inArray } from "drizzle-orm";
 import { STARTING_SLOTS, lockedPlayerIds, playerWeekProj } from "@league/engine";
+import { formatEt } from "@league/shared";
 import type { StartingSlot } from "@league/engine";
-import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel, points } from "@/components/ui";
+import { Badge, Card, Cell, Empty, LiveScoreNotice, PageTitle, Row, Table, TeamLabel, points } from "@/components/ui";
 import { db, leagueClock } from "@/lib/db";
 import {
   allTeams,
+  liveStatus,
   safeRead as safe,
   settings,
   teamLineup,
@@ -82,7 +84,11 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
 
   const league = await safe(settings, null);
   const season = league?.season ?? new Date().getUTCFullYear();
-  const [teams, weekly] = await Promise.all([safe(allTeams, []), safe(() => weekMatchups(week), [])]);
+  const [teams, weekly, live] = await Promise.all([
+    safe(allTeams, []),
+    safe(() => weekMatchups(week), []),
+    safe(() => liveStatus(), { liveGames: 0, lastUpdateAt: null, delayed: false }),
+  ]);
   const teamOf = new Map(teams.map((t) => [t.id, t]));
 
   const sides = new Map<number, Side>();
@@ -135,6 +141,8 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
         title={`Week ${week}`}
         subtitle={league ? `${league.season} season — current week ${league.currentWeek}` : "The league has not been set up yet."}
       />
+
+      <LiveScoreNotice {...live} formatTime={formatEt} />
 
       <nav className="flex flex-wrap items-center gap-2 text-sm">
         {week > 1 ? (

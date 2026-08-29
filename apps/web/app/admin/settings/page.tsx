@@ -1,4 +1,4 @@
-import { costAlarmRules, getSettings, toolCosts, DEFAULT_SESSION_GUARDS } from "@league/engine";
+import { costAlarmRules, getSettings, reporterModelId, toolCosts, DEFAULT_SESSION_GUARDS } from "@league/engine";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table } from "../../../components/ui";
 import { db } from "../../../lib/db";
 import {
@@ -47,6 +47,8 @@ export default async function AdminSettingsPage({
   const structureLocked = settings.phase !== "pre_draft";
   const guards = { ...DEFAULT_SESSION_GUARDS, ...((extra.sessionGuards as Record<string, unknown>) ?? {}) };
   const pauseAt = extra.pause_agent_at_usd;
+  const reporterModel = reporterModelId(settings);
+  const tradeNotesOn = extra.reporterTradeNotes !== false;
 
   return (
     <>
@@ -87,6 +89,31 @@ export default async function AdminSettingsPage({
                 label="FantasyPros requests per agent per day"
                 value={settings.fantasyprosDailyAllowance}
               />
+            </div>
+          </section>
+
+          <section>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Reporter (§11)</h3>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-1 block text-muted">Reporter model (gateway id)</span>
+                <input
+                  name="reporterModelId"
+                  defaultValue={reporterModel}
+                  className="w-full rounded border border-border bg-background px-2 py-1.5 font-mono text-xs"
+                />
+                <span className="mt-1 block text-xs text-muted">
+                  Checked against the gateway catalog before it is saved. This is the only way to move the reporter off a
+                  retired model without a deploy.
+                </span>
+              </label>
+              <label className="flex items-start gap-2 pt-6">
+                <input type="checkbox" name="reporterTradeNotes" defaultChecked={tradeNotesOn} className="mt-0.5" />
+                <span>
+                  <span className="block">Reporter writes a note on every trade</span>
+                  <span className="block text-xs text-muted">On by default (§11). Turn it off to cut reporter spend.</span>
+                </span>
+              </label>
             </div>
           </section>
 

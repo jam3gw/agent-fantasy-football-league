@@ -71,24 +71,9 @@ export default async function AdminDraftPage({
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card title="1 — Onboarding">
+        <Card title="1 — Draw the order">
           <p className="mb-3 text-sm text-muted">
-            One <span className="font-mono">onboarding</span> session per team: each names its team and writes its plan. Sessions are
-            staggered a minute apart. Re-running is safe — the idempotency key means a team that already ran is skipped.
-          </p>
-          <p className="mb-3 text-sm">
-            {onboardingDone} of {allTeams.length} teams have a succeeded onboarding session ({onboarding.length} created).
-          </p>
-          <form action={runOnboardingAction}>
-            <button type="submit" className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-background hover:opacity-90">
-              Run onboarding for all teams
-            </button>
-          </form>
-        </Card>
-
-        <Card title="2 — Draw the order">
-          <p className="mb-3 text-sm text-muted">
-            A random permutation, stored on the draft row and shown publicly. It can only be drawn before the draft starts.
+            A random permutation, stored on the draft row and shown publicly. It can only be drawn before the draft starts. This comes first (§10.1): onboarding tells each agent the slot it is preparing for, and it refuses to run until the order exists.
           </p>
           {order.length === 0 ? (
             <Empty>No order drawn yet.</Empty>
@@ -108,6 +93,21 @@ export default async function AdminDraftPage({
               className="rounded border border-border px-3 py-1.5 text-sm hover:border-accent hover:text-accent disabled:opacity-40"
             >
               {order.length === 0 ? "Draw the order" : "Redraw the order"}
+            </button>
+          </form>
+        </Card>
+
+        <Card title="2 — Onboarding">
+          <p className="mb-3 text-sm text-muted">
+            One <span className="font-mono">onboarding</span> session per team: each names its team and writes its plan. Sessions are
+            staggered a minute apart. Re-running is safe — the idempotency key means a team that already ran is skipped.
+          </p>
+          <p className="mb-3 text-sm">
+            {onboardingDone} of {allTeams.length} teams have a succeeded onboarding session ({onboarding.length} created).
+          </p>
+          <form action={runOnboardingAction}>
+            <button type="submit" className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-background hover:opacity-90">
+              Run onboarding for all teams
             </button>
           </form>
         </Card>

@@ -1,8 +1,9 @@
 import { and, desc, eq } from "drizzle-orm";
 import { getSettings, matchups, playerWeekStats, scoringDiscrepancies } from "@league/engine";
+import { formatEt } from "@league/shared";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, points } from "../../../components/ui";
 import { db } from "../../../lib/db";
-import { correctPlayerPointsAction, refinalizeWeekAction } from "../../../lib/adminActions";
+import { correctPlayerPointsAction, refinalizeCutoff, refinalizeWeekAction } from "../../../lib/adminActions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Scores" };
@@ -25,6 +26,12 @@ export default async function AdminScoresPage({
   const currentWeek = settings?.currentWeek ?? 1;
   const season = settings?.season ?? 0;
   const selectedWeek = Number(weekParam ?? Math.max(1, currentWeek - 1)) || 1;
+
+  // §13.4: re-finalization is only allowed between Tuesday 4:00 AM and 9:00 AM
+  // ET. Saying so on the page beats refusing after the click.
+  const now = new Date();
+  const cutoff = refinalizeCutoff(now);
+  const windowOpen = now < cutoff;
 
   const sources = ((settings?.extra as { weekScoringSources?: Record<string, string> } | undefined)
     ?.weekScoringSources ?? {}) as Record<string, string>;
@@ -113,9 +120,19 @@ export default async function AdminScoresPage({
             <button type="submit" className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-background hover:opacity-90">
               Re-finalize
             </button>
-            <p className="text-xs text-muted">
-              Intended for a feed that recovers later the same day, before Tuesday 9:00 AM ET. After the first agent sessions the week
-              stays as scored (§13.4). Re-finalizing an older week never rewinds <span className="font-mono">current_week</span>.
+            <p className={`text-xs ${windowOpen ? "text-accent" : "text-muted"}`}>
+              {windowOpen ? (
+                <>
+                  <strong>The window is open until {formatEt(cutoff)}.</strong> Only week {Math.max(1, currentWeek - 1)}, the one
+                  just finalized, can be re-scored.
+                </>
+              ) : (
+                <>
+                  <strong>The window is closed.</strong> Re-finalization is allowed only between Tuesday 4:00 AM and Tuesday 9:00 AM
+                  ET, before the agents&rsquo; weekly reviews act on the scores (§13.4). This form will refuse until then. A single
+                  player&rsquo;s points can still be corrected below.
+                </>
+              )}
             </p>
           </form>
         </Card>

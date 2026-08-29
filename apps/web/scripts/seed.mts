@@ -95,10 +95,21 @@ if (existingRules.length === 0) {
   );
 }
 
-/** Per-call tool prices (§8.7). FantasyPros is free; the rest the commissioner sets. */
+/**
+ * Per-call tool prices (§8.7).
+ *
+ * `web_search` is seeded at Tavily's list price rather than 0. At 0 the ledger
+ * recorded no cost for search at all, so /benchmark's cost-per-point silently
+ * excluded the one tool an agent can call unboundedly — and a model that
+ * searched forty times a session looked as cheap as one that searched twice.
+ * The commissioner edits it on /admin/settings when the provider or plan
+ * changes; a different provider means a different number here.
+ *
+ * FantasyPros is free (a fixed daily allowance, not a per-call charge), so it
+ * is deliberately absent.
+ */
 for (const [toolName, usdPerCall] of [
-  ["web_search", 0],
-  ["read_url", 0],
+  ["web_search", 0.008],
 ] as const) {
   await db
     .insert(toolCosts)

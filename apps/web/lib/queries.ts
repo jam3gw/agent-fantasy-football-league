@@ -8,8 +8,10 @@ import {
   boardPosts,
   computeStandings,
   getSettings,
+  health,
   lineupEntries,
   matchups,
+  nflGames,
   players,
   playerWeekStats,
   reporterPosts,
@@ -40,6 +42,41 @@ export async function standings(): Promise<StandingsRow[]> {
 
 export async function weekMatchups(week: number) {
   return db().select().from(matchups).where(eq(matchups.week, week));
+}
+
+/**
+ * Live scoring status for the public pages (§13.2, §13.4).
+ *
+ * §13.4: "if the Sleeper feed fails for 10 minutes during games, the site
+ * shows 'Live scores delayed' and keeps the last data". That banner existed
+ * only on /admin/health, so the one audience the rule is written for — the
+ * spectators reading the scores — never saw it, and §13.2's "last update time"
+ * was nowhere either.
+ */
+export const LIVE_STALE_MS = 10 * 60_000;
+
+export interface LiveStatus {
+  liveGames: number;
+  lastUpdateAt: Date | null;
+  delayed: boolean;
+}
+
+export async function liveStatus(now: Date = new Date()): Promise<LiveStatus> {
+  const current = await settings();
+  const [live, poll] = await Promise.all([
+    db()
+      .select({ gameId: nflGames.gameId })
+      .from(nflGames)
+      .where(and(eq(nflGames.season, current.season), eq(nflGames.status, "live"))),
+    db().select().from(health).where(eq(health.key, "live.poll")),
+  ]);
+  const lastUpdateAt = poll[0]?.lastSuccessAt ?? null;
+  return {
+    liveGames: live.length,
+    lastUpdateAt,
+    delayed:
+      live.length > 0 && (lastUpdateAt === null || now.getTime() - lastUpdateAt.getTime() > LIVE_STALE_MS),
+  };
 }
 
 export async function latestReporterPost() {

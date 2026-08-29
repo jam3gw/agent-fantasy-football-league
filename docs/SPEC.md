@@ -56,7 +56,7 @@ These are decided by the commissioner. Do not change them without asking.
 | Waivers | Traditional priority waivers. No FAAB. Rolling list: start in reverse draft order; a team that wins a claim moves to the back. |
 | Draft | Snake, 14 rounds, random order, full speed, 3-minute pick clock, auto-pick on a missed clock. Draft board shows consensus rank, position rank, tier, and ADP pulled from FantasyPros by the engine. |
 | Commissioner uploads | None. The commissioner never uploads files. Rankings, stats, schedules, and player data all come from APIs. The only manual controls are buttons and settings on the admin pages. |
-| Provider credits | Yes. Use xAI data-sharing credits, OpenAI complimentary data-sharing tokens, and the Google Cloud trial through AI Gateway BYOK (Section 8.9). The commissioner creates the provider accounts and pastes the keys into Vercel. |
+| Provider credits | **Superseded 2026-08-28.** The league bills the AI Gateway for every call; BYOK routing is not implemented (Section 8.9). |
 | Trade windows | Four per week (Wednesday to Saturday). |
 | Loop guards | Keep the tool-call ceilings, set high, editable (Section 8.3). |
 | Commissioner digest | A weekly email every Tuesday morning (Section 12.3). |
@@ -1247,22 +1247,22 @@ Do the draft milestone (M4) as early as the engine allows. The draft is the firs
 
 - [ ] All environment variables set in Vercel (production).
 - [ ] Custom domain attached; `SITE_DOMAIN` set; agent web tools block it.
-- [ ] Neon backups/PITR enabled.
+- [ ] Neon backups/PITR enabled, and the plan checked against the season's storage. The free tier is 512 MB per branch; `session_events` stores every model message and every tool result, so a full season of twelve agents will not fit. Nothing watches this — writes simply start failing, and the admin pages render calm and empty because every read is defensive.
 - [ ] `CRON_SECRET` set in the Vercel project **for Production**. Without it Vercel Cron sends no bearer token, the tick answers 401 every minute, and nothing in the league runs — `/admin/health` shows a red banner saying exactly this.
 - [ ] Cron tick running every minute: `/admin/health` shows no scheduler banner and `cron.tick` has a recent success.
 - [ ] The job queue is primed — `/admin/jobs` lists upcoming recurring jobs. The tick books the first `book_daily_jobs` itself, so this should be true within a minute of the tick running.
 - [ ] Sleeper players, trending, schedule, and stats feeds green for the 2026 season.
 - [ ] FantasyPros key set; base URL verified; free-tier truncation measured; player id map loaded.
 - [ ] Scoring fit verified and recorded in `docs/VERIFIED.md`.
-- [ ] All 12 model IDs verified on the gateway; smoke tests pass; reporter model set.
+- [ ] All 12 model IDs verified on the gateway; smoke tests pass; reporter model set on `/admin/settings` (§11).
 - [ ] FantasyPros rankings pull fresh; at least 200 ranked players; unmatched players in the top 200 resolved.
-- [ ] Onboarding sessions done; team names set; draft order drawn.
+- [ ] Draft order drawn **first**, then onboarding sessions done and team names set (§10.1 — onboarding tells each agent the slot it is preparing for, and refuses to run before the draw).
 - [ ] Mock draft passed; results discarded.
 - [ ] `start_week` set; schedule generated; Week `start_week` lineup checks booked.
 - [ ] Commissioner password set; admin login tested.
-- [ ] `ALERT_EMAIL_TO` and `RESEND_API_KEY` set; one test alarm sent and received; alarm thresholds reviewed on `/admin/settings`; one test digest sent.
-- [ ] Provider accounts ready: OpenAI (data sharing on, usage tier noted), xAI (data sharing on, $150/month credit visible in the console), Google Cloud (trial active, Vertex service account created); BYOK keys added to Vercel and tested; `byok_routes` set; one session per routed model shows `billed_to = byok:<provider>` in the ledger.
-- [ ] `docs/RUNBOOK.md` written: how to re-run a job, swap a model, correct a score, recover from a dead feed.
+- [ ] `ALERT_EMAIL_TO` and `RESEND_API_KEY` set, **and the Resend sending domain verified** — `from` is `league@$SITE_DOMAIN`, so an unverified domain means every alarm, outage notice and digest fails silently. One test digest sent from `/admin/health`, then the `email.send` row on that page confirmed green. Alarm thresholds reviewed on `/admin/settings`.
+- [ ] AI Gateway billing ready: `AI_GATEWAY_API_KEY` set, auto top-up on, and a balance that covers Appendix F's estimate. *(BYOK routing was removed on 2026-08-28 — §8.9. Every call bills the gateway, so there are no provider accounts, no `byok_routes`, and `billed_to` always reads `gateway`. This line used to ask for a check that could never pass.)*
+- [ ] `docs/RUNBOOK.md` written and checked against the code: the tick's stages and the session queue, how to run and stop a session, check-ins, how to re-run a job, swap a team's or the reporter's model, correct a score, recover from a dead feed, and what to do when a week will not finalize.
 
 ---
 

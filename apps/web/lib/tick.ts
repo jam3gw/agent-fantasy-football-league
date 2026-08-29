@@ -8,10 +8,12 @@ import "server-only";
  *  5. expire stale offers and resolve trades whose review window ended
  */
 import { and, asc, desc, eq, inArray, lte, not, or, sql } from "drizzle-orm";
-import { etDay, parseDate } from "@league/shared";
+import { etDay, formatEt, parseDate } from "@league/shared";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import {
+  draft,
+  expireAllProposedAtDeadline,
   expireOffers,
   gameStartWaivers,
   getSettings,
@@ -49,6 +51,8 @@ export interface TickSummary {
   queuePrimed: boolean;
   /** Whether the season is stalled on a finalization that never happened. */
   stalled: boolean;
+  /** Whether a draft whose clock had died was re-booked. */
+  draftRestarted: boolean;
   outages: number;
 }
 
@@ -110,10 +114,11 @@ const LIVE_POLL_MIN_INTERVAL_MS = 55_000;
  */
 const QUEUE_SWEEP_INTERVAL_MS = 5 * 60_000;
 /**
- * How long a session with no deadline may sit queued before it is retired.
- * A week's worth of thinking is worthless a week late, and without this a team
- * paused for the rest of the season would keep a growing pile of queued
- * sessions that all fire the moment it is unpaused.
+ * How long a session that carries *no* deadline may sit queued before it is
+ * retired. A week's worth of thinking is worthless a week late, and without
+ * this a team paused for the rest of the season would keep a growing pile of
+ * queued sessions that all fired the moment it was unpaused. Sessions with a
+ * deadline are retired by that deadline instead; this never touches them.
  */
 const STALE_QUEUED_MS = 7 * 24 * 3600_000;
 const GAME_LENGTH_MS = 4.5 * 3600_000;
@@ -140,6 +145,7 @@ export async function runTick(): Promise<TickSummary> {
     queueSwept: false,
     queuePrimed: false,
     stalled: false,
+    draftRestarted: false,
     outages: 0,
   };
 
@@ -251,15 +257,88 @@ export async function runTick(): Promise<TickSummary> {
     if (expired.ok) summary.offersExpired = expired.value.length;
     const resolved = await resolveEndedReviews(database, clock);
     if (resolved.ok) summary.tradesResolved = resolved.value.length;
+    summary.offersExpired += await sweepDeadlineOffers(database, clock);
   });
 
   // 6. The season-stall watchdog (§13.4). A finalization that fails every
   // retry stops the season dead and silently, so it gets its own check.
   await stage(database, clock, "tick.stall_watchdog", async () => {
     summary.stalled = await checkFinalizationStall(database, clock);
+    summary.draftRestarted = await restartStalledDraft(database, clock);
   });
 
   return summary;
+}
+
+/**
+ * Re-book `draft.run` when the draft is `running` but its clock has been dead
+ * for a while (§10.2).
+ *
+ * `draftWorkflow` returns cleanly on a pause or on completion, but a run that
+ * dies any other way was never restarted: `draft.run` is booked only by the
+ * commissioner pressing a button, and nothing said the draft had stopped. The
+ * emergency auto-pick does not help either — the flag is only read inside the
+ * live pick loop, so a dead draft ignores it. Restarting is safe: the workflow
+ * resumes from `current_pick`, and `claimPickSession` refuses to start a second
+ * session for a pick that already has a live one.
+ */
+const DRAFT_STALL_MS = 3 * 60_000;
+
+async function restartStalledDraft(database: EngineDb, clock: Clock): Promise<boolean> {
+  const now = clock.now();
+  const rows = await database
+    .select({ status: draft.status, clockEndsAt: draft.clockEndsAt })
+    .from(draft)
+    .where(eq(draft.id, 1));
+  const row = rows[0];
+  if (!row || row.status !== "running") return false;
+  if (!row.clockEndsAt || now.getTime() - row.clockEndsAt.getTime() < DRAFT_STALL_MS) return false;
+
+  // Idempotent per minute, so a draft that is slow to come back is not booked
+  // sixty times while it starts.
+  const bucket = Math.floor(now.getTime() / 60_000);
+  const inserted = await database
+    .insert(scheduledJobs)
+    .values({
+      type: "draft.run",
+      dueAt: now,
+      payload: { reason: "the draft clock has been dead for minutes" },
+      idempotencyKey: `job:draft.run:restart:${bucket}`,
+    })
+    .onConflictDoNothing({ target: scheduledJobs.idempotencyKey })
+    .returning({ id: scheduledJobs.id });
+  if (inserted.length === 0) return false;
+
+  const message = `the draft clock ended ${formatEt(row.clockEndsAt)} and nothing has moved since; re-booking draft.run`;
+  await database
+    .insert(health)
+    .values({ key: "draft.run", lastError: message, lastErrorAt: now })
+    .onConflictDoUpdate({ target: health.key, set: { lastError: message, lastErrorAt: now } });
+  return true;
+}
+
+/**
+ * §3.5: once the trade deadline has passed, no offer may still be open. The
+ * sweep existed and had no caller, so for up to `trade_offer_expiry_hours`
+ * after the deadline dead offers stayed `proposed` — visible on /trades, in
+ * `get_pending_trades`, and acceptable by an agent, which then got a confusing
+ * `deadline_passed` failure instead of finding the offer already gone.
+ *
+ * Runs once, on the first tick after the deadline week ends.
+ */
+async function sweepDeadlineOffers(database: EngineDb, clock: Clock): Promise<number> {
+  const settings = await getSettings(database);
+  if (settings.currentWeek <= settings.tradeDeadlineWeek) return 0;
+  const key = `trades.deadline_sweep:${settings.season}`;
+  const done = await database.select({ key: health.key }).from(health).where(eq(health.key, key));
+  if (done.length > 0) return 0;
+
+  const result = await expireAllProposedAtDeadline(database, clock);
+  await database
+    .insert(health)
+    .values({ key, lastSuccessAt: clock.now() })
+    .onConflictDoNothing({ target: health.key });
+  return result.ok ? result.value.length : 0;
 }
 
 /**
@@ -351,21 +430,33 @@ export async function checkFinalizationStall(database: EngineDb, clock: Clock): 
   return true;
 }
 
-/** Send an email at most once per ET day for a given key. */
+/**
+ * Send an email at most once per ET day for a given key, and record whether it
+ * left. Recording the outcome is the point: writing the once-a-day marker
+ * before sending meant a failed send still consumed the day, so an outage that
+ * nobody was told about looked exactly like no outage at all.
+ */
 async function notifyOnce(
   database: EngineDb,
   clock: Clock,
   key: string,
   subject: string,
   html: string,
+  detail = subject,
 ): Promise<void> {
   const healthKey = `notify:${key}:${etDay(clock.now())}`;
   const existing = await database.select({ key: health.key }).from(health).where(eq(health.key, healthKey));
   if (existing.length > 0) return;
   const sent = await sendEmail(subject, html);
+  const at = clock.now();
   await database
     .insert(health)
-    .values({ key: healthKey, ...(sent ? { lastSuccessAt: clock.now() } : { lastError: "email not sent", lastErrorAt: clock.now() }) })
+    .values({
+      key: healthKey,
+      lastError: sent ? null : `${detail} — the email did NOT send; see the email.send row`,
+      lastErrorAt: sent ? null : at,
+      ...(sent ? { lastSuccessAt: at } : {}),
+    })
     .onConflictDoNothing({ target: health.key });
 }
 
@@ -479,8 +570,13 @@ export async function startQueuedSessions(
     // this is the only place a queued session is ever retired, so excluding a
     // kind from the *query* would leave its orphans queued for the season.
     const deadlineAt = parseDate(session.context.deadline_at);
-    const staleAt = session.createdAt.getTime() + STALE_QUEUED_MS;
-    if ((deadlineAt && now >= deadlineAt) || now.getTime() >= staleAt) {
+    // A session that carries a deadline is retired by that deadline and by
+    // nothing else. `STALE_QUEUED_MS` is only for the kinds that have none —
+    // a weekly review or a post-waivers session for a team that has been
+    // paused for weeks — which would otherwise sit queued for the season and
+    // all fire at once on the unpause.
+    const staleAt = deadlineAt ? null : new Date(session.createdAt.getTime() + STALE_QUEUED_MS);
+    if ((deadlineAt && now >= deadlineAt) || (staleAt && now >= staleAt)) {
       const rows = await database
         .update(sessions)
         .set({ status: "skipped", endedBy: "deadline", endedAt: now, updatedAt: now })
@@ -663,21 +759,19 @@ async function notifyOutages(database: EngineDb, clock: Clock): Promise<number> 
     database,
     outages.map((o) => o.modelId),
   );
-  const today = clock.now().toISOString().slice(0, 10);
   for (const outage of outages) {
-    const key = `outage:${outage.modelId}:${today}`;
-    const already = await database.select().from(health).where(eq(health.key, key));
-    if (already.length > 0) continue; // one email per model per day
-    await database.insert(health).values({
-      key,
-      lastError: `${outage.consecutiveFailures} sessions in a row failed for ${outage.modelId}`,
-      lastErrorAt: clock.now(),
-    });
-    await sendEmail(
+    // One email per model per ET day. `notifyOnce` records whether the send
+    // actually left, so a day consumed by a *failed* send is visible on
+    // /admin/health rather than looking like a day with no outage.
+    await notifyOnce(
+      database,
+      clock,
+      `outage:${outage.modelId}`,
       `[League] ${outage.modelId} looks down`,
       `<p><strong>${outage.consecutiveFailures}</strong> sessions in a row have failed for <code>${outage.modelId}</code>` +
         ` (${(names.get(outage.modelId) ?? []).join(", ") || "no team"}).</p>` +
         `<p>Check the provider, then swap the model on /admin/teams if it stays down. Nothing is paused automatically.</p>`,
+      `${outage.consecutiveFailures} sessions in a row failed for ${outage.modelId}`,
     );
   }
   return outages.length;

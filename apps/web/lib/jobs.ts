@@ -110,6 +110,12 @@ export async function runJob(
     case "waivers.run": {
       if (!inSeason(settings)) return; // §4.3 job gating
       await runWaivers(db, clock, clock.now());
+      // §9.2 books a lineup check only for teams that roster a player in the
+      // window, decided when the checks are booked — which is Tuesday. Every
+      // claim just changed that, so re-run the booking: it is idempotent per
+      // session key, so this adds newly-eligible teams and duplicates nobody.
+      const { bookLineupChecks } = await import("./weekPlan");
+      await bookLineupChecks(db, clock, settings.currentWeek);
       return;
     }
     case "stats.finalize": {
@@ -248,6 +254,14 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
 
     // §9.1: the optional Sunday injuries pull for the site.
     if (dow === 0) await book("ingest.fp_injuries", at(11, 0));
+  }
+
+  // Same reason as after the waiver run: rosters move all week, and a team
+  // that picks up a Thursday-night starter on Wednesday would otherwise get no
+  // lineup check for that window at all.
+  if (inSeason(settings)) {
+    const { bookLineupChecks } = await import("./weekPlan");
+    await bookLineupChecks(db, clock, settings.currentWeek);
   }
 
   // Weekly fixtures relative to now.

@@ -17,7 +17,7 @@ import type { EngineErrorCode, EngineResult } from "./errors.ts";
 import { fail, ok } from "./errors.ts";
 import { handleEvent } from "./events.ts";
 import { lockedPlayerIds } from "./locks.ts";
-import { frozenPlayerIds, incomingReservedCount, irOccupant, isIrIllegal, rosteredBy } from "./roster.ts";
+import { frozenPlayerIds, incomingReservedCount, irOccupant, isIrIllegal, maxActiveRoster, rosteredBy } from "./roster.ts";
 import type { LeagueSettings } from "./settings.ts";
 import { getSettings } from "./settings.ts";
 import { recordTransaction } from "./transactions.ts";
@@ -62,11 +62,7 @@ export function dropWaiverUntil(
   return nextWaiverRunTime(settings, new Date(from.getTime() + settings.waiverClearHours * 3600_000));
 }
 
-/** Max active players: every roster slot except IR (9 starters + 5 bench = 14 by default). */
-function maxActive(settings: Pick<LeagueSettings, "rosterSlots">): number {
-  const s = settings.rosterSlots;
-  return s.QB + s.RB + s.WR + s.TE + s.FLEX + s.DST + s.K + s.BN;
-}
+const maxActive = maxActiveRoster;
 
 /**
  * Shared drop path (§7.2): delete the roster entry, delete the player's lineup

@@ -13,7 +13,7 @@ import { lineupEntries, teams } from "./db/schema.ts";
 import type { EngineErrorCode, EngineResult } from "./errors.ts";
 import { fail, ok } from "./errors.ts";
 import { lockedPlayerIds } from "./locks.ts";
-import { ALL_LINEUP_SLOTS, STARTING_SLOTS, eligibleForSlot, getRoster, isIrEligible } from "./roster.ts";
+import { ALL_LINEUP_SLOTS, STARTING_SLOTS, eligibleForSlot, getRoster, isIrEligible, maxActiveRoster } from "./roster.ts";
 import { getSettings } from "./settings.ts";
 import { recordTransaction } from "./transactions.ts";
 
@@ -168,8 +168,7 @@ export async function setLineup(
     }
 
     // 5. Active count ≤ 14: roster size − 1 when the NEW IR slot is filled by a rostered player.
-    const rs = settings.rosterSlots;
-    const maxActive = rs.QB + rs.RB + rs.WR + rs.TE + rs.FLEX + rs.DST + rs.K + rs.BN;
+    const maxActive = maxActiveRoster(settings);
     const newIrFilled = newIr !== null && rosterMap.has(newIr);
     const active = roster.length - (newIrFilled ? 1 : 0);
     if (active > maxActive) {

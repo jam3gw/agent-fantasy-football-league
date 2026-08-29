@@ -1,7 +1,8 @@
 import Link from "next/link";
-import { and, eq, gte, isNull } from "drizzle-orm";
-import { costAlarms, getSettings, scheduledJobs, sessions, teams } from "@league/engine";
-import { Badge, Card, PageTitle } from "../../components/ui";
+import { and, desc, eq, gte, isNull } from "drizzle-orm";
+import { commissionerActions, costAlarms, getSettings, scheduledJobs, sessions, teams } from "@league/engine";
+import { formatEt } from "@league/shared";
+import { Badge, Card, Cell, Empty, PageTitle, Row, Table } from "../../components/ui";
 import { db, leagueClock } from "../../lib/db";
 import { getDraft } from "../../lib/draft";
 
@@ -25,7 +26,7 @@ export default async function AdminIndexPage() {
   const now = clock.now();
 
   // Every read is defensive: an empty database must render this page.
-  const [settings, allTeams, draftState, openAlarms, overdue, failedSessions] = await Promise.all([
+  const [settings, allTeams, draftState, openAlarms, overdue, failedSessions, actions] = await Promise.all([
     getSettings(database).catch(() => null),
     database.select().from(teams).catch(() => []),
     getDraft(database).catch(() => undefined),
@@ -39,6 +40,15 @@ export default async function AdminIndexPage() {
       .select()
       .from(sessions)
       .where(and(eq(sessions.status, "failed"), gte(sessions.createdAt, new Date(now.getTime() - 7 * 864e5))))
+      .catch(() => []),
+    // §12.2: every action writes a `commissioner_actions` row. Nothing read
+    // that table, so the audit trail existed and was invisible everywhere —
+    // including to the commissioner trying to remember what he changed.
+    database
+      .select()
+      .from(commissionerActions)
+      .orderBy(desc(commissionerActions.createdAt))
+      .limit(25)
       .catch(() => []),
   ]);
 
@@ -71,6 +81,31 @@ export default async function AdminIndexPage() {
             <p className="mt-1 text-sm text-muted">{p.blurb}</p>
           </Link>
         ))}
+      </div>
+
+      <div className="mt-5">
+        <Card title="What you have done (last 25)">
+          {actions.length === 0 ? (
+            <Empty>No commissioner actions recorded yet.</Empty>
+          ) : (
+            <Table head={["When", "Action", "Reason", "Detail"]}>
+              {actions.map((a) => (
+                <Row key={a.id}>
+                  <Cell>{formatEt(a.createdAt)}</Cell>
+                  <Cell>
+                    <span className="font-mono text-xs">{a.action}</span>
+                  </Cell>
+                  <Cell>{a.reason ?? <span className="text-muted">—</span>}</Cell>
+                  <Cell>
+                    <span className="font-mono text-xs text-muted">
+                      {Object.keys(a.payload).length === 0 ? "—" : JSON.stringify(a.payload).slice(0, 120)}
+                    </span>
+                  </Cell>
+                </Row>
+              ))}
+            </Table>
+          )}
+        </Card>
       </div>
 
       <div className="mt-5">
