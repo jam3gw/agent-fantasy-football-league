@@ -8,7 +8,7 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 
 *(none blocking — FYI items below)*
 
-- **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` were assumed to be in Vercel — as of 2026-08-29 `COMMISSIONER_PASSWORD` measurably is not (see above), so treat the rest of that list as unconfirmed too. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
+- **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
 ## 2026-08-29 — Commissioner login works; both admin secrets confirmed live
