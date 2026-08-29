@@ -241,6 +241,19 @@ describe("every message handed to the model is a valid ModelMessage", () => {
     });
   });
 
+  it("degrades an unserializable result to a failure instead of killing the session", () => {
+    // BigInt and circular references cannot serialize at all; the outer catch
+    // would fail the whole session, so toolOutput degrades to a §8.4 failure.
+    const out = toolOutput({ big: BigInt(7) });
+    expect(out.type).toBe("json");
+    expect(out.value).toMatchObject({ ok: false, error: "unserializable_result" });
+    const parsed = modelMessageSchema.safeParse({
+      role: "tool",
+      content: [{ type: "tool-result", toolCallId: "c", toolName: "t", output: out }],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
   it("holds after context trimming replaces an old tool result", () => {
     const messages: ModelMessage[] = [
       { role: "user", content: "hello" },

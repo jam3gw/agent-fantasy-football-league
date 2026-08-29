@@ -540,9 +540,9 @@ For each team and finalized week: choose the legal 9-slot lineup with the maximu
 
 ### 7.8 Placement of new players and week carry-over
 
-- **New players** (draft, waiver, free agent, trade, commissioner) always arrive on the bench: no `lineup_entries` row. The engine never places a player in a starting slot or in IR.
+- **New players** (waiver, free agent, trade, commissioner) always arrive on the bench: no `lineup_entries` row. The engine never places a player in a starting slot or in IR. The one exception is the **draft** (2026-08-29): a drafted player fills his team's first open eligible starting slot per Section 3.1's draft-time slotting — placement by arrival order, not a lineup decision.
 - **Carry-over**: `weekPlanWorkflow(W + 1)` creates week W + 1 entries for each team as a copy of week W's entries for players still on the roster (same slots, IR included), unless the team already has W + 1 entries (then it leaves them). Players not on the roster are skipped. Ghost entries are not copied. The transaction type is `lineup` with `carried_over: true`.
-- After the draft there are no entries: every team's `start_week` lineup is empty until the agent sets it. The post-draft `weekly_review` session (Section 9.3) exists for this.
+- After the draft every team's `start_week` lineup holds the draft's auto-filled entries (Section 3.1) — draft-order quality, not optimized. The post-draft `weekly_review` session (Section 9.3) is where the agent tunes it. A draft that ends after `start_week` moved past the draft-time week has its entries moved to the real `start_week` by the `draft.completed` handler.
 
 ---
 
@@ -794,11 +794,16 @@ Optional hard stop (**default off**): setting `pause_agent_at_usd` per season. W
 ### 8.9 Provider credits and BYOK
 
 > **Superseded by the commissioner, 2026-08-28: the league bills the AI Gateway
-> for every model call.** BYOK routing is not implemented. One billing path
-> means one price list, one balance on `/spend`, and no provider credential
-> that can expire mid-season and silently reroute a model. `spend_ledger.billed_to`
-> keeps the column §6 defines and always reads `gateway`. The rest of this
-> section is kept as the record of what was specified.
+> for every model call.** Request-scoped BYOK routing is not implemented — no
+> `byok_routes`, no `BYOK_*` variables, and no credential ever rides a request.
+>
+> **Revisited 2026-08-29:** the commissioner loaded his own Anthropic, OpenAI
+> and xAI keys into the gateway itself (gateway-held BYOK). Requests are
+> unchanged, but the gateway reports $0 for those providers' calls, so the
+> ledger prices such steps from the price table and `billed_to` names the
+> payer: `byok:anthropic`, `byok:openai`, `byok:xai` — every other provider
+> still reads `gateway`. The mapping lives in `packages/agent/src/models.ts`.
+> The rest of this section is kept as the record of what was specified.
 
 Some providers give free API credits (Appendix F lists the current programs). AI Gateway supports Bring Your Own Key with no markup, and its docs say BYOK is "useful for using credits provided by the AI provider". Requests that use a BYOK credential bill the provider account; if the credential fails, the gateway falls back to its own credentials and bills the gateway balance.
 
@@ -896,6 +901,7 @@ Recurring job table (ET):
 | `ingest.players` | every 6 h; hourly Fri 12:00 PM – Mon 11:59 PM | Section 5.1 |
 | `ingest.trending` | hourly | Section 5.2 |
 | `ingest.schedule` | daily 5:00 AM | Section 5.5 |
+| `ingest.season_stats` | daily 5:10 AM | last season's totals (week 0 rows); feeds the draft board and `get_player_stats.last_season` |
 | `ingest.projections` | Tue 6:00 AM, then daily | Section 5.4 |
 | `ingest.rankings` | daily 5:30 AM; again when the draft starts | Sleeper ADP and projection pull for the draft board (Section 5.7) |
 | `waivers.run` | daily 4:30 AM | Section 7.2 |
@@ -950,7 +956,7 @@ Emitted by engine functions; handled by the tick or directly by the engine (same
 
 ### 10.1 Setup (commissioner)
 
-1. Run `ingest.season_stats` from `/admin/jobs`. It is not booked automatically — last season's totals never change, so there is nothing to schedule — but the draft board's last-season points come from it, and without it every player shows zero.
+1. `ingest.season_stats` runs daily at 5:10 AM (2026-08-29 — it was previously "run it by hand", and nobody ever did: production drafted with every player's last season reading null). Sleeper republishes stat corrections and the upsert is idempotent, so the daily re-pull is cheap and self-healing. `/admin/jobs` can still run it on demand.
 2. Check `/admin/rankings`: the pull is fresh and at least 200 players have a rank.
 3. Verify all 12 models pass the smoke test.
 4. **Draw the order** (button; random permutation; stored; shown on the site).
@@ -1247,7 +1253,7 @@ Do the draft milestone (M4) as early as the engine allows. The draft is the firs
 - [ ] `start_week` set; schedule generated; Week `start_week` lineup checks booked.
 - [ ] Commissioner password set; admin login tested.
 - [ ] `ALERT_EMAIL_TO` and `RESEND_API_KEY` set, **and the Resend sending domain verified** — `from` is `league@$SITE_DOMAIN`, so an unverified domain means every alarm, outage notice and digest fails silently. One test digest sent from `/admin/health`, then the `email.send` row on that page confirmed green. Alarm thresholds reviewed on `/admin/settings`.
-- [ ] AI Gateway billing ready: `AI_GATEWAY_API_KEY` set, auto top-up on, and a balance that covers Appendix F's estimate. *(BYOK routing was removed on 2026-08-28 — §8.9. Every call bills the gateway, so there are no provider accounts, no `byok_routes`, and `billed_to` always reads `gateway`. This line used to ask for a check that could never pass.)*
+- [ ] AI Gateway billing ready: `AI_GATEWAY_API_KEY` set, auto top-up on, and a balance that covers Appendix F's estimate. *(Request-scoped BYOK was removed 2026-08-28; gateway-held BYOK keys for Anthropic, OpenAI and xAI were added 2026-08-29 — §8.9. `billed_to` names the payer per provider, and those three providers' balances live with their own keys, so check those balances too.)*
 - [ ] `docs/RUNBOOK.md` written and checked against the code: the tick's stages and the session queue, how to run and stop a session, check-ins, how to re-run a job, swap a team's or the reporter's model, correct a score, recover from a dead feed, and what to do when a week will not finalize.
 
 ---

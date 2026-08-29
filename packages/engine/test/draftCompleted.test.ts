@@ -9,7 +9,7 @@ import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { makeGame, makePlayer, seedLeague, seedTeams } from "./helpers/factories.ts";
 import { createSession, handleEvent } from "../src/events.ts";
 import { getSettings } from "../src/settings.ts";
-import { draft, leagueSettings, matchups, players, scheduledJobs, sessions, teams } from "../src/db/schema.ts";
+import { draft, leagueSettings, lineupEntries, matchups, players, scheduledJobs, sessions, teams } from "../src/db/schema.ts";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -86,6 +86,22 @@ describe("draft.completed (§9.3)", () => {
     const settings = await getSettings(db);
     expect(settings.startWeek).toBe(3);
     expect(settings.currentWeek).toBe(3);
+  });
+
+  it("moves the draft's auto-filled lineup entries to the real start week", async () => {
+    // Draft-time slotting (§3.1) wrote entries for week 1; the draft slipped
+    // past two kickoffs, so week 1 is never played. Without the move, every
+    // team's start-week lineup is empty — the exact gap the slotting closes.
+    const clock = new FixedClock("2026-09-18T12:00:00Z");
+    const teamIds = await seedDraftedLeague();
+    const pid = await makePlayer(db, { position: "QB" });
+    await db.insert(lineupEntries).values({ teamId: teamIds[0]!, week: 1, playerId: pid, slot: "QB" });
+
+    await handleEvent(db, clock, { type: "draft.completed" });
+
+    const rows = await db.select().from(lineupEntries);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ teamId: teamIds[0], week: 3, slot: "QB" });
   });
 
   it("is idempotent: running it twice does not double up sessions or matchups", async () => {

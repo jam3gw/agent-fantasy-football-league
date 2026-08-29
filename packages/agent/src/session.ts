@@ -177,7 +177,18 @@ export function toolOutput(value: unknown): { type: "json"; value: unknown } {
   // validates the prompt against a strict JSON schema, and one live Date in a
   // result meta failed every session that touched it (mock draft, 2026-08-29)
   // while every stored copy of the same prompt validated clean.
-  return { type: "json", value: value === undefined ? null : (JSON.parse(JSON.stringify(value)) as unknown) };
+  if (value === undefined) return { type: "json", value: null };
+  try {
+    return { type: "json", value: JSON.parse(JSON.stringify(value)) as unknown };
+  } catch (err) {
+    // A BigInt or a circular reference cannot serialize at all. Failing one
+    // tool result beats failing the whole session from outside the per-tool
+    // catch — the agent reads this like any other §8.4 failure and moves on.
+    return {
+      type: "json",
+      value: { ok: false, error: "unserializable_result", message: String(err).slice(0, 200) },
+    };
+  }
 }
 
 /**
