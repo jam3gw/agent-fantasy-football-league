@@ -99,3 +99,28 @@ describe("the season-stall watchdog (§13.4)", () => {
     expect(await checkFinalizationStall(db, clock)).toBe(false);
   });
 });
+
+/**
+ * The heartbeat `/admin/health` keys its red banner on. A stage refactor
+ * dropped this write once: every stage recorded itself, the tick did all its
+ * work, and the page still said "the scheduler has never run" — the exact
+ * false alarm the banner exists to avoid.
+ */
+describe("the tick's heartbeat", () => {
+  it("is written by runTick and by nothing else", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const path = await import("node:path");
+    const { fileURLToPath } = await import("node:url");
+    const tickSrc = await readFile(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "lib", "tick.ts"),
+      "utf8",
+    );
+    expect(tickSrc).toContain('key: "cron.tick"');
+
+    // It must be the last thing runTick does, after every stage — not inside
+    // one, where a single failing stage would suppress the heartbeat.
+    const heartbeat = tickSrc.indexOf('key: "cron.tick"');
+    const lastStage = tickSrc.lastIndexOf('await stage(database, clock, "tick.');
+    expect(heartbeat).toBeGreaterThan(lastStage);
+  });
+});
