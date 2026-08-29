@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { snakeSlot } from "../lib/draft";
 import { groupKickoffWindows } from "../lib/weekPlan";
+import { refinalizeCutoff } from "../lib/adminActions";
 
 describe("snakeSlot (§3.8)", () => {
   it("runs forward in odd rounds and backward in even rounds", () => {
@@ -74,5 +75,40 @@ describe("groupKickoffWindows (§9.2)", () => {
     expect(windows).toHaveLength(2);
     expect(windows[0]!.nflTeams.sort()).toEqual(["A", "B", "C", "D"]);
     expect(windows[1]!.nflTeams.sort()).toEqual(["E", "F"]);
+  });
+});
+
+describe("re-finalization window (§13.4)", () => {
+  const et = (iso: string) => new Date(iso);
+
+  it("is open between Tuesday 4:00 AM and Tuesday 9:00 AM ET", () => {
+    // 2026-09-15 is a Tuesday. ET is UTC-4 in September.
+    const tue0500Et = et("2026-09-15T09:00:00Z");
+    expect(tue0500Et < refinalizeCutoff(tue0500Et)).toBe(true);
+    expect(refinalizeCutoff(tue0500Et).toISOString()).toBe("2026-09-15T13:00:00.000Z");
+  });
+
+  it("is closed from Tuesday 9:00 AM ET onward", () => {
+    const tue0930Et = et("2026-09-15T13:30:00Z");
+    expect(tue0930Et >= refinalizeCutoff(tue0930Et)).toBe(true);
+  });
+
+  it("is closed every other day of the week", () => {
+    for (const iso of [
+      "2026-09-16T13:00:00Z", // Wednesday 9:00 ET
+      "2026-09-17T20:00:00Z", // Thursday 4:00 PM ET
+      "2026-09-20T17:00:00Z", // Sunday 1:00 PM ET
+      "2026-09-15T07:00:00Z", // Tuesday 3:00 AM ET — before this week's finalization
+    ]) {
+      const now = et(iso);
+      expect(now >= refinalizeCutoff(now), iso).toBe(true);
+    }
+  });
+
+  it("holds across the November DST change", () => {
+    // 2026-11-01 is the fall-back Sunday; ET is UTC-5 from then on.
+    const tue0500Et = et("2026-11-03T10:00:00Z");
+    expect(refinalizeCutoff(tue0500Et).toISOString()).toBe("2026-11-03T14:00:00.000Z");
+    expect(tue0500Et < refinalizeCutoff(tue0500Et)).toBe(true);
   });
 });

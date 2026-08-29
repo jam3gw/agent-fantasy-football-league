@@ -5,13 +5,15 @@ import {
   costAlarmRules,
   getSettings,
   health,
+  lineupEntries,
   nflGames,
   scheduledJobs,
   scoringDiscrepancies,
   sessions,
+  STARTING_SLOTS,
   teams,
 } from "@league/engine";
-import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel, money } from "../../../components/ui";
+import { Badge, Banner, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel, money } from "../../../components/ui";
 import { db, leagueClock } from "../../../lib/db";
 import { weekScoringSource } from "../../../lib/finalize";
 import { MAX_CONCURRENT_SESSIONS } from "../../../lib/runSession";
@@ -43,7 +45,7 @@ export default async function AdminHealthPage({
   const season = settings?.season ?? 0;
   const week = settings?.currentWeek ?? 0;
 
-  const [feeds, allTeams, failed, discrepancies, dueJobs, alarms, rules, liveGames, recentSessions, fp, liveQueue] =
+  const [feeds, allTeams, failed, discrepancies, dueJobs, failedJobs, alarms, rules, liveGames, recentSessions, fp, liveQueue] =
     await Promise.all([
       database.select().from(health).catch(() => []),
       database.select().from(teams).catch(() => []),
@@ -64,6 +66,16 @@ export default async function AdminHealthPage({
         .from(scheduledJobs)
         .where(eq(scheduledJobs.status, "due"))
         .orderBy(scheduledJobs.dueAt)
+        .catch(() => []),
+      // A failed job was visible nowhere on this page — a failing ingest, a
+      // failing waiver run or a failing digest simply vanished, on the page
+      // the runbook says to check first.
+      database
+        .select()
+        .from(scheduledJobs)
+        .where(and(eq(scheduledJobs.status, "failed"), gte(scheduledJobs.doneAt, since)))
+        .orderBy(desc(scheduledJobs.doneAt))
+        .limit(30)
         .catch(() => []),
       database.select().from(costAlarms).where(isNull(costAlarms.acknowledgedAt)).orderBy(desc(costAlarms.firedAt)).catch(() => []),
       database.select().from(costAlarmRules).catch(() => []),
@@ -95,6 +107,13 @@ export default async function AdminHealthPage({
   // The tick is the one thing whose failure this page could not report: every
   // row here is written by the tick, so when the tick is dead the page is
   // simply empty and looks calm. It is checked separately and loudly.
+  // `notify:` and `outage:` rows are one per model per ET day and never
+  // cleaned up, so by mid-season they would be most of this table. They are a
+  // log, not a feed; counted here and kept out of the feed list below.
+  const isNotice = (key: string) => key.startsWith("notify:") || key.startsWith("outage:");
+  const notices = feeds.filter((f) => isNotice(f.key));
+  const feedRows = feeds.filter((f) => !isNotice(f.key));
+
   const tick = feeds.find((f) => f.key === "cron.tick");
   const tickLastAt = tick?.lastSuccessAt ?? null;
   const tickSilentMs = tickLastAt ? now.getTime() - tickLastAt.getTime() : null;
@@ -118,6 +137,24 @@ export default async function AdminHealthPage({
     return at === null || at.getTime() <= now.getTime();
   };
   const waiting = queuedSessions.filter(isWaitingForSlot);
+  // §3.1: an empty starting slot scores 0, and the engine never fills one for
+  // an agent. Nothing showed which teams had one, so a team that never set a
+  // week-1 lineup — where there is no previous week to carry over from — would
+  // have scored nothing with no warning anywhere before kickoff.
+  const startersThisWeek = settings
+    ? await database
+        .select({ teamId: lineupEntries.teamId, slot: lineupEntries.slot })
+        .from(lineupEntries)
+        .where(and(eq(lineupEntries.week, week), inArray(lineupEntries.slot, STARTING_SLOTS)))
+        .catch(() => [])
+    : [];
+  const filledByTeam = new Map<number, number>();
+  for (const e of startersThisWeek) filledByTeam.set(e.teamId, (filledByTeam.get(e.teamId) ?? 0) + 1);
+  const emptyLineups = allTeams
+    .filter((t) => !t.paused && !t.eliminated)
+    .map((t) => ({ name: t.name ?? t.slug, empty: STARTING_SLOTS.length - (filledByTeam.get(t.id) ?? 0) }))
+    .filter((e) => e.empty > 0);
+
   const streaks = failureStreaks(recentSessions);
   const brokenModels = streaks.filter((s) => s.streak >= 3);
   const scoringSource = settings ? await weekScoringSource(database, Math.max(1, week - 1)).catch(() => null) : null;
@@ -163,6 +200,17 @@ export default async function AdminHealthPage({
           {alarms.length} unacknowledged cost alarm{alarms.length === 1 ? "" : "s"}. An alarm notifies; it never stops a session.
         </Banner>
       ) : null}
+      {emptyLineups.length > 0 ? (
+        <Banner tone="warn">
+          <strong>
+            {emptyLineups.length} team{emptyLineups.length === 1 ? "" : "s"} {emptyLineups.length === 1 ? "has" : "have"} an
+            empty starting slot for week {week}.
+          </strong>{" "}
+          An empty slot scores 0 and the engine never picks a starter for an agent (§3.1), so this only clears when the
+          team&rsquo;s own session sets a lineup: {emptyLineups.map((e) => `${e.name} (${e.empty})`).join(", ")}. In week 1 there
+          is no previous lineup to carry over, so a team whose model had a bad day will field nothing.
+        </Banner>
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card
@@ -175,11 +223,11 @@ export default async function AdminHealthPage({
             </form>
           }
         >
-          {feeds.length === 0 ? (
+          {feedRows.length === 0 ? (
             <Empty>No health rows yet — nothing has ingested.</Empty>
           ) : (
             <Table head={["Source", "Last success", "Last error"]}>
-              {feeds
+              {feedRows
                 .slice()
                 .sort((a, b) => a.key.localeCompare(b.key))
                 .map((f) => {
@@ -208,6 +256,32 @@ export default async function AdminHealthPage({
           )}
           <p className="mt-3 text-xs text-muted">
             Week {Math.max(1, week - 1)} was scored by <strong>{scoringSource ?? "—"}</strong>. Live games right now: {liveGames.length}.
+            {notices.length > 0 ? ` ${notices.length} outage or alert notice(s) sent, one per model per day; not listed here.` : ""}
+          </p>
+        </Card>
+
+        <Card title={`Failed jobs (${failedJobs.length} in the last week)`}>
+          {failedJobs.length === 0 ? (
+            <Empty>No job has failed this week.</Empty>
+          ) : (
+            <Table head={["Job", "Due", "Failed", "Error"]}>
+              {failedJobs.map((j) => (
+                <Row key={j.id}>
+                  <Cell>
+                    <span className="font-mono text-xs">{j.type}</span>
+                  </Cell>
+                  <Cell>{formatEt(j.dueAt)}</Cell>
+                  <Cell>{j.doneAt ? formatEt(j.doneAt) : "—"}</Cell>
+                  <Cell>
+                    <span className="text-danger">{(j.error ?? "no message").slice(0, 200)}</span>
+                  </Cell>
+                </Row>
+              ))}
+            </Table>
+          )}
+          <p className="mt-3 text-xs text-muted">
+            A failed job is not re-run by itself. Book it again from <span className="font-mono">/admin/jobs</span> once
+            the cause is fixed — &ldquo;Run now&rdquo; only applies to a job still open.
           </p>
         </Card>
 
@@ -403,11 +477,4 @@ function failureStreaks(
   return out.sort((a, b) => b.streak - a.streak || a.modelId.localeCompare(b.modelId));
 }
 
-function Banner({ children, tone }: { children: React.ReactNode; tone: "accent" | "warn" | "danger" }) {
-  const tones = {
-    accent: "border-accent/50 bg-accent-soft text-accent",
-    warn: "border-warn/50 text-warn",
-    danger: "border-danger/50 text-danger",
-  } as const;
-  return <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${tones[tone]}`}>{children}</div>;
-}
+

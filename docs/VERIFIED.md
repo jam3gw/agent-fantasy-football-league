@@ -70,8 +70,9 @@ Final league model list (intent per §8.1 unchanged; two gateway IDs corrected):
 Reporter: `anthropic/claude-sonnet-5` (same ID as slot 3).
 
 Notes:
-- Spec candidate `google/gemini-3.1-pro` does not exist on the gateway; the live ID is `google/gemini-3.1-pro-preview` (§8.9 already anticipated the `-preview` ID in `byok_routes`).
-- Spec candidate `xai/grok-4.6` does not exist; xAI models are listed under the `spacexai/` prefix. `spacexai/grok-4.6` is live. BYOK credential/settings name stays `xai` (§8.9); only the gateway model ID differs.
+- Spec candidate `google/gemini-3.1-pro` does not exist on the gateway; the live ID is `google/gemini-3.1-pro-preview`.
+- Spec candidate `xai/grok-4.6` does not exist; xAI models are listed under the `spacexai/` prefix. `spacexai/grok-4.6` is live.
+- BYOK routing was removed on 2026-08-28 (§8.9): every call bills the AI Gateway, so `billed_to` always reads `gateway` and there is nothing per-provider left to verify.
 - Sonnet 5 catalog price (2/10) is lower than Appendix F's estimate (3/15); GLM-5.3 (1.40/4.40) differs from F's GLM-5.2 figure. Appendix F is an estimate; the catalog is authoritative for `model_prices`.
 - Some models have tiered long-context pricing (OpenAI >272k, Gemini/Grok >200k) and DeepSeek has peak/off-peak windows; `model_prices` stores the base tier, and the gateway-reported cost (when present, §8.7 verify pending) is preferred over the price table.
 - Raw catalog extract for the 12 models: `fixtures/gateway-models-2026-08-28.json`.

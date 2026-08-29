@@ -81,6 +81,17 @@ export async function irOccupant(db: EngineDb, teamId: number, week: number): Pr
  * Active count (§7.1 check 5): roster size, minus 1 when the IR slot is
  * filled for the week by a player still on the roster.
  */
+/**
+ * Max active players: every roster slot except IR (9 starters + 5 bench = 14
+ * by default, §3.1). One definition — it was written out three times, and a
+ * roster rule that disagrees with itself is the kind of drift nobody notices
+ * until a claim is refused for a reason the agent was never told.
+ */
+export function maxActiveRoster(settings: Pick<LeagueSettings, "rosterSlots">): number {
+  const s = settings.rosterSlots;
+  return s.QB + s.RB + s.WR + s.TE + s.FLEX + s.DST + s.K + s.BN;
+}
+
 export async function activeCount(db: EngineDb, teamId: number, week: number): Promise<number> {
   const roster = await db
     .select({ playerId: rosterEntries.playerId })

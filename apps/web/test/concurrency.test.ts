@@ -699,3 +699,78 @@ describe("§9.1 — the job queue primes itself", () => {
     expect(await prime(clock.now())).toBe(true);
   });
 });
+
+describe("§4.3 — a paused team runs nothing", () => {
+  it("holds a paused team's queued sessions and starts everyone else's", async () => {
+    const teamIds = await twelveTeams();
+    const ids = await bookTwelve(teamIds, new Date("2026-11-08T18:00:00Z"));
+    await db.update(teams).set({ paused: true }).where(eq(teams.id, teamIds[0]!));
+
+    const started: number[] = [];
+    await startQueuedSessions(db, clock, async (id) => {
+      started.push(id);
+    });
+
+    // Six slots, and the paused team is not one of them.
+    expect(started).toHaveLength(CAP);
+    expect(started).not.toContain(ids[0]);
+    // Held, not cancelled: still queued and still startable after an unpause.
+    const paused = (await db.select().from(sessions).where(eq(sessions.id, ids[0]!)))[0];
+    expect(paused!.status).toBe("queued");
+  });
+
+  it("starts the held session once the team is unpaused", async () => {
+    const teamIds = await twelveTeams();
+    const ids = await bookTwelve([teamIds[0]!], new Date("2026-11-08T18:00:00Z"));
+    await db.update(teams).set({ paused: true }).where(eq(teams.id, teamIds[0]!));
+    await startQueuedSessions(db, clock, async () => {});
+    expect((await db.select().from(sessions).where(eq(sessions.id, ids[0]!)))[0]!.status).toBe("queued");
+
+    await db.update(teams).set({ paused: false }).where(eq(teams.id, teamIds[0]!));
+    const started: number[] = [];
+    await startQueuedSessions(db, clock, async (id) => {
+      started.push(id);
+    });
+    expect(started).toEqual([ids[0]]);
+  });
+
+  it("retires a deadline-less session that has sat queued for a week, and not one that has not", async () => {
+    const teamIds = await twelveTeams();
+    const old = new Date(clock.now().getTime() - 8 * 24 * 3600_000);
+    const fresh = new Date(clock.now().getTime() - 2 * 24 * 3600_000);
+    const rows = await db
+      .insert(sessions)
+      .values([
+        {
+          teamId: teamIds[0]!,
+          kind: "weekly_review" as const,
+          trigger: "job:weekly_review",
+          idempotencyKey: "stale",
+          modelId: "m/1",
+          status: "queued" as const,
+          context: { week: 10 },
+          createdAt: old,
+        },
+        {
+          teamId: teamIds[1]!,
+          kind: "weekly_review" as const,
+          trigger: "job:weekly_review",
+          idempotencyKey: "recent",
+          modelId: "m/2",
+          status: "queued" as const,
+          context: { week: 10 },
+          createdAt: fresh,
+        },
+      ])
+      .returning({ id: sessions.id });
+
+    const started: number[] = [];
+    const result = await startQueuedSessions(db, clock, async (id) => {
+      started.push(id);
+    });
+
+    expect(result.expired).toBe(1);
+    expect((await db.select().from(sessions).where(eq(sessions.id, rows[0]!.id)))[0]!.status).toBe("skipped");
+    expect(started).toEqual([rows[1]!.id]);
+  });
+});

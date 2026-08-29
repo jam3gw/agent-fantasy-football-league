@@ -119,3 +119,47 @@ export function money(n: number | null | undefined): string {
 export function points(n: number | null | undefined): string {
   return (n ?? 0).toFixed(2);
 }
+
+export function Banner({ children, tone }: { children: ReactNode; tone: "accent" | "warn" | "danger" }) {
+  const tones = {
+    accent: "border-accent/50 bg-accent-soft text-accent",
+    warn: "border-warn/50 text-warn",
+    danger: "border-danger/50 text-danger",
+  } as const;
+  return <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${tones[tone]}`}>{children}</div>;
+}
+
+/**
+ * §13.2 and §13.4 on the public pages: while games are live, say when the
+ * scores last updated, and say plainly when the feed has gone quiet. §13.4
+ * makes this a rule about the *site*, not the admin page, because the people
+ * it protects are the ones reading the scores.
+ */
+export function LiveScoreNotice({
+  liveGames,
+  lastUpdateAt,
+  delayed,
+  formatTime,
+}: {
+  liveGames: number;
+  lastUpdateAt: Date | null;
+  delayed: boolean;
+  formatTime: (d: Date) => string;
+}) {
+  if (liveGames === 0) return null;
+  if (delayed) {
+    return (
+      <Banner tone="warn">
+        <strong>Live scores delayed.</strong> The stats feed has been quiet for more than ten minutes with{" "}
+        {liveGames} game{liveGames === 1 ? "" : "s"} in progress, so these are the last scores we received
+        {lastUpdateAt ? ` (${formatTime(lastUpdateAt)})` : ""}. Nothing is lost — the week still finalizes on Tuesday.
+      </Banner>
+    );
+  }
+  return (
+    <p className="mb-4 text-xs text-muted">
+      {liveGames} game{liveGames === 1 ? "" : "s"} live. Scores last updated{" "}
+      {lastUpdateAt ? formatTime(lastUpdateAt) : "—"}.
+    </p>
+  );
+}

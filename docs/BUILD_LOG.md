@@ -686,6 +686,186 @@ What is done, what needs Jake, and what needs the season to start. Nothing below
 ### Still outstanding
 - Live smoke tests per model, the mock draft, and the simulated week all need credentials that live only in Vercel; they run against a preview deploy.
 
+## 2026-08-29 — Three audits of what was already built, and what they found
+
+Ran three independent audits with fresh context — spec coverage against §15/§17,
+dead-and-unfinished code, and a chronological walk through a season for silent
+failures — because the code was reviewed as it was written but never as a whole.
+They found more than the four review rounds did. What follows is what was fixed
+and, where something was deliberately not fixed, why.
+
+### The ones that would have broken the season
+
+- **Briefs would have failed every session in production.** `apps/web/lib/briefs.ts`
+  read `packages/agent/briefs/*.md` at request time with a path relative to
+  `process.cwd()`. Inside a Vercel function that path does not exist, so the very
+  first real session would have thrown ENOENT. Nothing caught it because every
+  test runs from the repo root. The briefs stay markdown (§8.6 is about how they
+  read) and are compiled into `packages/agent/src/briefs.generated.ts` by a build
+  step; a test fails if the two drift.
+- **Two tools shared the name `get_team_week_results`.** `byName` built its index
+  with `new Map(entries)`, which keeps the *last* one, so the reporter's thinner
+  copy — no paging, therefore no §8.2 character cap, and missing `model` and
+  `lineup_efficiency` — was what all twelve agents got. The read-table version
+  wins now and a duplicate name throws at module load.
+- **Every kicker scored 0 on the nflverse rung.** `STAT_COLUMNS` had no
+  field-goal or extra-point columns although the comment said it did. That is the
+  rung taken when both Sleeper and FantasyPros are down. Added the bucketed
+  columns, with a documented 30–39-rate fallback for older release files that
+  only carry `fg_made`.
+- **A failed finalization stopped the season silently.** `current_week` never
+  advances, so no week is planned, no lineups carry over, and Tuesday's
+  `sessions.book` recomputes last week's idempotency keys and creates nothing at
+  all — while trade windows keep firing, so the league looks alive. A watchdog in
+  the tick now notices three hours after a scheduled finalization, records it,
+  re-books the job, and emails once a day.
+- **A Sleeper outage took out trade resolution.** `runTick` was one unguarded
+  sequence; the live-score poll throws after its retries, so everything ordered
+  after it — offer expiry, review resolution, outage detection, the `cron.tick`
+  health write — was skipped for as long as Sleeper was down. An accepted trade
+  whose 24-hour window ended would simply never have executed. Each stage now
+  records its own failure to `health` and the tick continues.
+- **Stale weeks in booked `ingest.stats` jobs un-finalized the previous week.**
+  Game-day stats jobs are booked two days ahead with the week baked in; Tuesday's
+  finalization advances it in between, so Thursday's runs re-upserted the
+  finalized week with `final = false` and overwrote the source that scored it.
+  The week is resolved at run time now.
+
+### The ones that made a setting a lie
+
+- The system prompt stated seven editable settings as literals — the waiver time,
+  the review window, the veto threshold, offers per day, the trade deadline, the
+  playoff shape, the FantasyPros allowance. Changing one on `/admin/settings` left
+  all twelve agents told the old value, identically and invisibly. All
+  interpolated, with a test that fails if a default leaks back in.
+- `waivers.run` was booked at a hardcoded 4:30 while `waiverRunTimeEt` moved the
+  clear window and what the agents were told. Now booked from the setting.
+- The reporter's model was read from `extra.reporterModelId` and written by
+  nothing, so a retired Sonnet 5 would have failed every recap, preview, note and
+  draft grade until someone ran SQL — while §17 lists "reporter model set" as a
+  go-live check. Now on `/admin/settings`, with the same gateway-catalog check the
+  team swap got.
+- Pausing a team was enforced only where sessions are *booked*, so a team paused
+  mid-week still ran everything already queued. A pause now holds queued sessions
+  and releases them on unpause; anything time-sensitive still expires on its own
+  deadline, and a deadline-less session is retired after a week so a season-long
+  pause cannot accumulate a pile that all fires at once.
+
+### Deliberately not fixed, and why
+
+- **Auto-filling an empty week-1 lineup.** The operational audit proposed filling
+  empty starting slots from the optimal-lineup solver. §3.1 says plainly that the
+  engine never chooses a starter for an agent, and §8.8's "keep the previous
+  lineup" fallback is `carryOverLineups`, which has nothing to carry in week 1.
+  Auto-filling would overrule a fixed league rule to paper over a bad session, and
+  it would corrupt the benchmark — a model that never set a lineup would score
+  like one that did. Instead `/admin/health` now warns, before kickoff, which
+  active teams have an empty starting slot for the current week, so the
+  commissioner can run a session for them. The exposure is real and it is the
+  spec's choice, not an oversight.
+- **A league-wide spend stop.** §2 is explicit: no cap, alarms notify and never
+  stop a session. `pause_agent_at_usd` stays the only brake and stays off by
+  default.
+- **Lineup checks re-evaluated after every roster change.** §9.2 says membership
+  is decided when the checks are booked. `bookLineupChecks` is idempotent per
+  session key, so re-running it adds newly-eligible teams without duplicating
+  anyone; that is the cheap way to close the gap and it is on the daily
+  `book_daily_jobs` path, not on every add.
+
+### Things that were true and are now also visible
+
+- Failed jobs have a card on `/admin/health`; before, a failing ingest or digest
+  appeared nowhere on the page the runbook says to check first.
+- `sendEmail` records every attempt under the `email.send` health key with the
+  provider's own reason. Email is the only channel that pushes anything to the
+  commissioner, and every caller but one discarded the result — an unverified
+  Resend sending domain (the most likely failure, since `from` is
+  `league@$SITE_DOMAIN`) would have meant eighteen weeks of silence.
+- §13.4's "Live scores delayed" is on the public pages now, with the last update
+  time (§13.2). It existed only on `/admin/health`, which is not the audience the
+  rule is written for.
+- The digest now carries what §12.3 actually asks for: vote tallies on vetoed and
+  failed trades, playoff seeds, per-agent last-week spend, FantasyPros requests
+  used, named players on transactions, degraded feeds, and a draft variant with
+  grades, auto-picks and the cost of the draft. The post-draft digest reported on
+  week 0 before this.
+
+### More, from the same pass
+
+- **Two runners could both work one draft pick.** Reading the attempt number and
+  creating the pick's session were separate steps, so a double-clicked resume (or
+  a resume racing a run that was still alive) had the first write `draft:5:1` and
+  the second read it back, take attempt 2, and start a *second* live session —
+  two model calls racing `make_pick`, the loser ending with no pick and getting
+  auto-picked. Both steps are now one transaction under an advisory lock, and a
+  pick that already has a queued or running session is refused.
+- **A dead draft workflow was unmonitored.** `draftWorkflow` returns cleanly on a
+  pause or completion; a run that died any other way was never restarted, because
+  `draft.run` is only booked by a button, and nothing said the draft had stopped.
+  The emergency auto-pick does not help either — the flag is read inside the live
+  pick loop. The tick now re-books `draft.run` when the draft is `running` and its
+  clock has been dead for three minutes, and records why.
+- **A missed recap could not be re-run.** `reporter.run` and `sessions.book` were
+  not bookable from `/admin/jobs`, and both dispatch on a `kind` the form had no
+  field for. Both added, with the kind.
+- **The commissioner audit log was write-only.** Every action writes a
+  `commissioner_actions` row (§12.2) and nothing read the table. The last
+  twenty-five are on `/admin` now.
+
+### Left alone deliberately
+
+- `runAgentSession`'s `!resuming` branch is unreachable today — the tick claims
+  the slot before starting the workflow, so the row is always `running` on entry.
+  It is defensive code holding an invariant, not a stub: deleting it would make a
+  future caller that passes a queued session run without claiming a slot. Kept.
+- `computePoints` in the engine has no production caller; the two live copies are
+  in `packages/data` and `apps/web/lib/finalize.ts`. Worth collapsing, but the
+  three agree today and moving scoring around before week 1 is the wrong risk.
+  Recorded here so it is a decision rather than an oversight.
+- Simulation mode (`clock_override.now_at`) is read and never written, so
+  `SIMULATION_MODE` silently falls back to the system clock. §15.3's simulated
+  week is covered in-process by `apps/web/test/simulatedWeek.test.ts`, which runs
+  a full week including the Sleeper-unavailable finalization, so the capability
+  the flag exists for is tested. Wiring an admin control for it is not worth a
+  new way to move production's clock.
+
+### Smaller corrections
+
+- `/admin/draft` numbered onboarding as step 1 and the draw as step 2, but
+  `runOnboardingAction` refuses to run before the order exists (§10.1). A
+  commissioner following the numbers got an error on his first click of the
+  biggest day of the season. Renumbered.
+- Starting the draft re-pulls the FantasyPros draft rankings (§5.7).
+- Re-finalization now honours §13.4's Tuesday 9:00 AM cutoff, anchored to the
+  week's own finalization rather than the calendar week.
+- The trade-deadline sweep (§3.5) existed with no caller; it runs once, on the
+  first tick after the deadline week.
+- Team names are checked for uniqueness. Board mentions route by name, so two
+  teams with the same one would each have received the other's mentions.
+- Reversing a trade refuses unless every player is still where the trade left him,
+  and re-checks the roster limit. It used to delete roster entries by player id
+  alone, so a player since dropped or traded on was silently taken from whoever
+  held him.
+- `maxActive` was written out three times; one definition now, in `roster.ts`.
+- A session can be stopped from `/admin/teams`. There was no way to.
+- `web_search` was seeded at $0, so `/benchmark`'s cost-per-point silently
+  excluded the one tool an agent can call without limit. Seeded at Tavily's list
+  price; the commissioner edits it if the provider changes. The seed also wrote a
+  price for `read_url`, which is not a tool.
+- `robots.txt` and a sitemap; §17's BYOK checklist line, which could never pass
+  since BYOK was removed on 2026-08-28, replaced with the gateway-billing check
+  that is actually true.
+- `docs/RUNBOOK.md` rewritten against the current code. It described a job queue
+  that no longer runs sessions, a "Run now" button that behaves differently from
+  what it said, a draft-day order that was reversed by `3e0f08b`, a re-finalization
+  cutoff that was not implemented, and it did not mention check-ins at all.
+
+### Questions for Jake
+
+None blocking. Still waiting on him for the environment variables listed in the
+go-live section below — `CRON_SECRET` is the one that matters today, because the
+cron has been answering 401 every minute since the merge and nothing has ingested.
+
 ## 2026-08-28 — Environment limitation: direct database access from the build sandbox
 
 The remote build container reaches the outside world only through an HTTPS egress proxy. Two consequences, neither of which affects production:

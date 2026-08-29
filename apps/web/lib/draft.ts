@@ -7,10 +7,10 @@ import "server-only";
  * the draft workflow… there is no wait-for-slot step"), because the clock is
  * the only concurrency control that matters.
  */
-import { eq, inArray, like } from "drizzle-orm";
+import { eq, inArray, like, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import { draftSessionKey } from "@league/shared";
-import type { EngineDb } from "@league/engine";
+import type { EngineDb, LeagueSettings } from "@league/engine";
 import {
   createSession,
   draft as draftTable,
@@ -185,29 +185,8 @@ async function runDraftPick(
   const team = (await database.select().from(teams).where(eq(teams.id, pick.teamId)))[0];
   if (!team) throw new Error(`team ${pick.teamId} not found`);
 
-  // §10.2: a pick resumed after a pause gets a NEW session, so the attempt
-  // number has to step past any session already recorded for this pick —
-  // otherwise the idempotency key collides with the paused one, no session is
-  // created, and the pick falls through to an auto-pick the agent never earned.
-  const attempt = await nextAttemptNumber(database, pick.pickNo);
-
   {
-    const sessionId = await createSession(database, settings, {
-      teamId: team.id,
-      kind: "draft_pick",
-      trigger: "draft",
-      idempotencyKey: draftSessionKey(pick.pickNo, attempt),
-      modelId: team.modelId,
-      dueAt: clock.now(),
-      now: clock.now(),
-      // The deadline IS the draft clock (§8.3).
-      deadlineAt: pick.clockEndsAt,
-      context: {
-        pick_no: pick.pickNo,
-        round: pick.round,
-        seconds_left: Math.max(0, Math.round((pick.clockEndsAt.getTime() - clock.now().getTime()) / 1000)),
-      },
-    });
+    const sessionId = await claimPickSession(database, settings, clock, pick, team);
 
     if (sessionId !== null) {
       const modelStep = createModelStep(database);
@@ -384,6 +363,73 @@ export async function draftState(database: EngineDb, clock: Clock) {
       reason: p.reason,
     })),
   };
+}
+
+/**
+ * One advisory lock for the whole draft, so only one runner can be taking a
+ * pick's attempt number at a time. A draft is strictly sequential, so a single
+ * lock costs nothing.
+ */
+const DRAFT_PICK_LOCK_KEY = 728_314_502;
+
+/**
+ * Create the session for a pick, or return null because another runner already
+ * has one live.
+ *
+ * §10.2: a pick resumed after a pause gets a NEW session, so the attempt
+ * number has to step past any session already recorded for this pick —
+ * otherwise the idempotency key collides with the paused one, no session is
+ * created, and the pick falls through to an auto-pick the agent never earned.
+ *
+ * Reading that number and creating the session have to be one atomic step. A
+ * double-clicked resume, or a resume racing a run that is still alive, would
+ * otherwise both read attempt 1, the first would write `draft:5:1`, and the
+ * second would then read it back, take attempt 2, and start a *second* live
+ * session for the same pick — two model calls racing `make_pick`, with
+ * whichever loses ending without a pick and getting auto-picked.
+ */
+export async function claimPickSession(
+  database: EngineDb,
+  settings: LeagueSettings,
+  clock: Clock,
+  pick: { pickNo: number; round: number; clockEndsAt: Date },
+  team: { id: number; modelId: string },
+): Promise<number | null> {
+  return database.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${DRAFT_PICK_LOCK_KEY})`);
+
+    const prior = await tx
+      .select({ key: sessions.idempotencyKey, status: sessions.status })
+      .from(sessions)
+      .where(like(sessions.idempotencyKey, `draft:${pick.pickNo}:%`));
+
+    // Someone is already on this pick. Two runners on one pick is the failure
+    // this whole function exists to prevent.
+    if (prior.some((p) => p.status === "queued" || p.status === "running")) return null;
+
+    let highest = 0;
+    for (const row of prior) {
+      const n = Number(row.key.split(":")[2]);
+      if (Number.isFinite(n) && n > highest) highest = n;
+    }
+
+    return createSession(tx, settings, {
+      teamId: team.id,
+      kind: "draft_pick",
+      trigger: "draft",
+      idempotencyKey: draftSessionKey(pick.pickNo, highest + 1),
+      modelId: team.modelId,
+      dueAt: clock.now(),
+      now: clock.now(),
+      // The deadline IS the draft clock (§8.3).
+      deadlineAt: pick.clockEndsAt,
+      context: {
+        pick_no: pick.pickNo,
+        round: pick.round,
+        seconds_left: Math.max(0, Math.round((pick.clockEndsAt.getTime() - clock.now().getTime()) / 1000)),
+      },
+    });
+  });
 }
 
 /** The next `draft:{pick}:{attempt}` number for a pick (§10.2). */

@@ -16,7 +16,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { and, eq, inArray, isNull, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
-import { etDay, sessionKey } from "@league/shared";
+import { etDay, formatEt, lastEtWeekdayTime, sessionKey } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
 import {
   commissionerActions,
@@ -29,20 +29,23 @@ import {
   fpUsage,
   getSettings,
   lineupEntries,
+  maxActiveRoster,
   players,
   playerWeekStats,
   rankings,
   rankingsUnmatched,
   recordTransaction,
+  reporterModelId,
   rosterEntries,
   scheduledJobs,
   scoreWeek,
+  sessions,
   teams,
   toolCosts,
   trades,
   updateSettings,
 } from "@league/engine";
-import { LEAGUE_MODELS, seedAlarmRules } from "@league/agent";
+import { LEAGUE_MODELS, checkGatewayModelId, seedAlarmRules } from "@league/agent";
 import { fetchWeekStats, fetchNflverseWeeklyStats, fpRequest, upsertWeekStats } from "@league/data";
 import type { SleeperStatsEntry } from "@league/data";
 import { db, leagueClock } from "./db";
@@ -71,6 +74,8 @@ const BOOKABLE_JOBS = [
   "ingest.fp_injuries",
   "waivers.run",
   "stats.finalize",
+  "reporter.run",
+  "sessions.book",
   "draft.run",
   "week.plan",
   "book_daily_jobs",
@@ -329,6 +334,14 @@ export async function bookJobAction(form: FormData): Promise<void> {
   if (!(BOOKABLE_JOBS as readonly string[]).includes(type)) throw new Error(`job type not bookable: ${type}`);
   const week = num(form, "week");
   const payload: Record<string, unknown> = week === null ? {} : { week };
+  // `reporter.run` and `sessions.book` both dispatch on a `kind`, so booking
+  // one without it would throw at run time. This is how a missed recap or
+  // preview gets re-run — there was no way to before.
+  const kind = str(form, "kind");
+  if (type === "reporter.run" || type === "sessions.book") {
+    if (!kind) throw new Error(`${type} needs a kind`);
+    payload.kind = kind;
+  }
   await bookJobNow(c.database, c.clock, type, payload);
   await logAction(c, "job_booked", { type, payload });
   finish("/admin/jobs", `Booked ${type}; the next tick runs it.`);
@@ -374,6 +387,42 @@ export async function runSessionNowAction(form: FormData): Promise<void> {
   finish("/admin/teams", `Queued a ${kind} session for ${team.name ?? team.slug}.`);
 }
 
+/**
+ * Stop a session (§12.2). There was no way to: a session stuck `running`
+ * held one of six slots and blocked its team entirely for half an hour, and an
+ * agent going somewhere bad mid-session could not be stopped at all.
+ *
+ * Both a queued and a running session end `skipped`, not `failed`: the slot
+ * comes back at once, the loop's own writes are all predicated on the row
+ * still being `running` so the next step is a no-op, and `skipped` is not a
+ * status `requeueFailedSessions` retries — stopping a session must not start
+ * it again a minute later.
+ */
+export async function cancelSessionAction(form: FormData): Promise<void> {
+  const c = await ctx();
+  const sessionId = num(form, "sessionId");
+  if (sessionId === null) throw new Error("sessionId is required");
+
+  const session = (await c.database.select().from(sessions).where(eq(sessions.id, sessionId)))[0];
+  if (!session) throw new Error(`session ${sessionId} not found`);
+  if (session.status !== "queued" && session.status !== "running") {
+    throw new Error(`session ${sessionId} is already ${session.status}`);
+  }
+
+  await c.database
+    .update(sessions)
+    .set({
+      status: "skipped",
+      error: "stopped by the commissioner",
+      endedAt: c.now,
+      updatedAt: c.now,
+    })
+    .where(and(eq(sessions.id, sessionId), inArray(sessions.status, ["queued", "running"])));
+
+  await logAction(c, "session_cancelled", { sessionId, was: session.status, teamId: session.teamId, kind: session.kind });
+  finish("/admin/teams", `Stopped session ${sessionId} (${session.kind}).`);
+}
+
 export async function swapModelAction(form: FormData): Promise<void> {
   const c = await ctx();
   const teamId = num(form, "teamId");
@@ -392,11 +441,25 @@ export async function swapModelAction(form: FormData): Promise<void> {
   const team = (await c.database.select().from(teams).where(eq(teams.id, teamId)))[0];
   if (!team) throw new Error(`team ${teamId} not found`);
 
+  // A typo here fails every session this team runs until someone notices, and
+  // when the swap is a response to an outage the detector is still watching
+  // the old id, so nothing would notice. An unreadable catalog is not a
+  // refusal: the swap is the commissioner's answer to a provider having a bad
+  // day, and that is exactly when the catalog may be unreachable.
+  const onGateway = await checkGatewayModelId(modelId);
+  if (onGateway === "not_found") {
+    throw new Error(`the AI Gateway has no model called ${modelId}. Check the id and try again.`);
+  }
+
   await c.database.update(teams).set({ modelId, modelLabel, provider }).where(eq(teams.id, teamId));
   const payload = { teamId, from: team.modelId, to: modelId, modelLabel, provider };
   await logAction(c, "model_swapped", payload, reason);
   await publicTransaction(c, "model_swapped", [teamId], { ...payload, reason });
-  finish("/admin/teams", `${team.name ?? team.slug} now runs ${modelLabel}.`);
+  finish(
+    "/admin/teams",
+    `${team.name ?? team.slug} now runs ${modelLabel}.` +
+      (onGateway === "unknown" ? " The gateway catalog could not be read, so the id was not verified." : ""),
+  );
 }
 
 export async function runOnboardingAction(): Promise<void> {
@@ -454,9 +517,28 @@ export async function reverseTradeAction(form: FormData): Promise<void> {
     // Undo the swap: give-side players go back to the proposer, get-side to
     // the counterparty. Mirrors §7.5 execution, in reverse.
     const moves = [
-      ...trade.givePlayerIds.map((playerId) => ({ playerId, to: a })),
-      ...trade.getPlayerIds.map((playerId) => ({ playerId, to: b })),
+      ...trade.givePlayerIds.map((playerId) => ({ playerId, to: a, from: b })),
+      ...trade.getPlayerIds.map((playerId) => ({ playerId, to: b, from: a })),
     ];
+
+    // The reversal used to delete each roster entry by player id alone, so a
+    // traded player who had since been dropped, claimed on waivers or traded
+    // on to a third team was silently taken from whoever held him. Refuse
+    // unless every player is exactly where the trade left him — a reversal is
+    // only meaningful while the trade is the last thing that happened.
+    const held = await tx
+      .select({ playerId: rosterEntries.playerId, teamId: rosterEntries.teamId })
+      .from(rosterEntries)
+      .where(inArray(rosterEntries.playerId, moves.map((m) => m.playerId)));
+    const moved = moves.filter((m) => held.find((h) => h.playerId === m.playerId)?.teamId !== m.from);
+    if (moved.length > 0) {
+      throw new Error(
+        `cannot reverse: ${moved.map((m) => m.playerId).join(", ")} ` +
+          `${moved.length === 1 ? "is" : "are"} no longer on the team the trade put ` +
+          `${moved.length === 1 ? "him" : "them"} on. Undo the later moves first.`,
+      );
+    }
+
     for (const m of moves) {
       await tx.delete(rosterEntries).where(eq(rosterEntries.playerId, m.playerId));
       await tx
@@ -467,6 +549,21 @@ export async function reverseTradeAction(form: FormData): Promise<void> {
       await tx
         .delete(lineupEntries)
         .where(and(eq(lineupEntries.playerId, m.playerId), inArray(lineupEntries.week, [week, week + 1])));
+    }
+
+    // §3.1: a reversal must not leave a team over the roster limit. It cannot
+    // here — it restores the exact rosters the trade changed — but a trade
+    // with unequal sides plus later adds could, so it is checked rather than
+    // assumed. This is the one admin action that writes roster state directly.
+    for (const teamId of [a, b]) {
+      const n = await tx
+        .select({ n: sql<number>`count(*)::int` })
+        .from(rosterEntries)
+        .where(eq(rosterEntries.teamId, teamId));
+      const max = maxActiveRoster(settings);
+      if ((n[0]?.n ?? 0) > max) {
+        throw new Error(`cannot reverse: team ${teamId} would hold ${n[0]?.n} players, over the ${max} limit.`);
+      }
     }
 
     await tx
@@ -504,6 +601,23 @@ export async function reverseTradeAction(form: FormData): Promise<void> {
 
 // ------------------------------------------------------------------- scores
 
+/**
+ * §13.4: "before Tuesday 9:00 AM (the first agent sessions). After that the
+ * week stays as scored."
+ *
+ * The window is the five hours between the week's own finalization (Tuesday
+ * 4:00 AM) and the weekly reviews (Tuesday 9:00 AM), so it is anchored to the
+ * most recent finalization rather than to the calendar week: on a Wednesday
+ * the anchor is yesterday's 4:00 AM and the window closed yesterday at 9:00,
+ * which is exactly right. Tuesday 4:00 to 9:00 never crosses a DST change —
+ * those land on Sunday at 2:00 — so the arithmetic is safe.
+ */
+const REFINALIZE_WINDOW_MS = 5 * 3600_000;
+
+export function refinalizeCutoff(now: Date): Date {
+  return new Date(lastEtWeekdayTime(now, 2, 4, 0).getTime() + REFINALIZE_WINDOW_MS);
+}
+
 export async function refinalizeWeekAction(form: FormData): Promise<void> {
   const c = await ctx();
   const week = num(form, "week");
@@ -511,6 +625,25 @@ export async function refinalizeWeekAction(form: FormData): Promise<void> {
   if (week === null) throw new Error("week is required");
 
   const settings = await getSettings(c.database);
+
+  // §13.4: re-finalization is allowed only until Tuesday 9:00 AM ET, when the
+  // weekly reviews start. After that the agents have already acted on the
+  // scores, so changing them would rewrite the week under them. A week that is
+  // not the one just finalized is always past its window.
+  const cutoff = refinalizeCutoff(c.now);
+  if (week !== settings.currentWeek - 1) {
+    throw new Error(
+      `week ${week} is closed: only week ${settings.currentWeek - 1}, the one just finalized, can be re-scored. ` +
+        `Correct a single player's points on /admin/scores instead.`,
+    );
+  }
+  if (c.now >= cutoff) {
+    throw new Error(
+      `the window closed at ${formatEt(cutoff)} — the agents' weekly reviews have started and the week stands (§13.4). ` +
+        `A single player's points can still be corrected.`,
+    );
+  }
+
   let message: string;
 
   if (source === "auto") {
@@ -646,13 +779,36 @@ export async function saveSettingsAction(form: FormData): Promise<void> {
     if (scoringSettings) patch.scoringSettings = parseJson(scoringSettings, "scoring_settings");
   }
 
+  // Everything that lives in `extra` is edited through one copy of the object,
+  // so saving two of these in one submit cannot lose the other.
+  const extra = { ...(current.extra as Record<string, unknown>) };
+  let extraTouched = false;
+
   // Loop guards live in extra.sessionGuards (§8.3); they stay editable.
   const guards = str(form, "sessionGuards");
   if (guards) {
-    const extra = { ...(current.extra as Record<string, unknown>) };
     extra.sessionGuards = parseJson(guards, "sessionGuards");
-    patch.extra = extra;
+    extraTouched = true;
   }
+
+  // §11: the reporter's model. It was read from `extra.reporterModelId` and
+  // written by nothing, so if Sonnet 5 were retired mid-season every recap,
+  // preview, trade note and draft grade would have failed until someone ran
+  // SQL — while §17 lists "reporter model set" as a go-live check.
+  const reporterModel = str(form, "reporterModelId");
+  if (reporterModel && reporterModel !== reporterModelId(current)) {
+    if ((await checkGatewayModelId(reporterModel)) === "not_found") {
+      throw new Error(`the AI Gateway has no model called ${reporterModel}.`);
+    }
+    extra.reporterModelId = reporterModel;
+    extraTouched = true;
+  }
+
+  // §11: reporter trade notes, default on. Also read-only until now.
+  extra.reporterTradeNotes = form.get("reporterTradeNotes") !== null;
+  extraTouched = true;
+
+  if (extraTouched) patch.extra = extra;
 
   await updateSettings(c.database, patch);
   await logAction(c, "settings_updated", { fields: Object.keys(patch), structureLocked });
@@ -825,6 +981,14 @@ export async function startDraftAction(): Promise<void> {
     throw new Error(
       `the §5.7 gate is not met: ${gate.ranked} ranked players (200 needed), ${gate.unmatchedTop200} unmatched inside the top 200`,
     );
+  }
+
+  // §5.7: the draft rankings are pulled again when the draft starts, so the
+  // board the agents see is today's, not whatever the 5:30 AM job fetched. A
+  // failure here must not block the draft — the gate above already proved the
+  // rankings on hand are usable — so it is booked, not awaited.
+  if (state.currentPick === null || state.currentPick <= 1) {
+    await bookJobNow(c.database, c.clock, "ingest.fp_rankings");
   }
 
   await logAction(c, "draft_started", { from: state.currentPick ?? 1 });

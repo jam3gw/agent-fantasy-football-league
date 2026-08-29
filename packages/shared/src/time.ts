@@ -103,6 +103,26 @@ export function nextEtWeekdayTime(
   return zonedTimeToUtc(day.y, day.m, day.d, hh, mm);
 }
 
+/**
+ * The most recent instant with ET wall-clock `hh:mm` on weekday `dow`, at or
+ * before `from`. The mirror of `nextEtWeekdayTime`, for windows that close
+ * rather than open — §13.4's Tuesday 9:00 AM re-finalization cutoff.
+ */
+export function lastEtWeekdayTime(from: Date, dow: number, hh: number, mm: number): Date {
+  const start = wallClockParts(from);
+  for (let i = 0; i <= 7; i++) {
+    const dayAnchor = new Date(Date.UTC(start.y, start.m - 1, start.d - i, 12));
+    const day = wallClockParts(dayAnchor, "UTC");
+    if (((start.dow - i) % 7 + 7) % 7 !== dow) continue;
+    const candidate = zonedTimeToUtc(day.y, day.m, day.d, hh, mm);
+    if (candidate <= from) return candidate;
+  }
+  // Today is `dow` but the time has not arrived yet: last week's.
+  const dayAnchor = new Date(Date.UTC(start.y, start.m - 1, start.d - 7, 12));
+  const day = wallClockParts(dayAnchor, "UTC");
+  return zonedTimeToUtc(day.y, day.m, day.d, hh, mm);
+}
+
 /** The next instant with ET wall-clock `hh:mm` (any day) at or after `from` (strictly after when `strict`). */
 export function nextEtTime(from: Date, hh: number, mm: number, opts: { strict?: boolean } = {}): Date {
   const start = wallClockParts(from);

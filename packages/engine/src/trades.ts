@@ -15,7 +15,7 @@ import type { EngineErrorCode, EngineFailure, EngineResult } from "./errors.ts";
 import { fail, ok } from "./errors.ts";
 import { handleEvent } from "./events.ts";
 import { lockedPlayerIds } from "./locks.ts";
-import { irOccupant } from "./roster.ts";
+import { irOccupant, maxActiveRoster } from "./roster.ts";
 import type { LeagueSettings } from "./settings.ts";
 import { getSettings } from "./settings.ts";
 import { recordTransaction } from "./transactions.ts";
@@ -53,11 +53,7 @@ const MAX_VOTE_REASON_CHARS = 200;
 /** "3 offers per day" is a rolling 24-hour window (§3.5). */
 const OFFER_WINDOW_MS = 24 * 3600_000;
 
-/** Max active players: every roster slot except IR (14 by default). */
-function maxActive(settings: Pick<LeagueSettings, "rosterSlots">): number {
-  const s = settings.rosterSlots;
-  return s.QB + s.RB + s.WR + s.TE + s.FLEX + s.DST + s.K + s.BN;
-}
+const maxActive = maxActiveRoster;
 
 /**
  * roster.ts `frozenPlayerIds` with one trade excluded — used when a trade

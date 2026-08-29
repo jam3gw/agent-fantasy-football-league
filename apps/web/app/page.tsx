@@ -7,12 +7,13 @@ import Link from "next/link";
 import { asc, eq } from "drizzle-orm";
 import { draft, draftPicks, nflGames } from "@league/engine";
 import { formatEt } from "@league/shared";
-import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel, points } from "@/components/ui";
+import { Badge, Card, Cell, Empty, LiveScoreNotice, PageTitle, Row, Table, TeamLabel, points } from "@/components/ui";
 import { db } from "@/lib/db";
 import {
   allTeams,
   latestBoardPosts,
   latestReporterPost,
+  liveStatus,
   safeRead as safe,
   settings,
   standings,
@@ -47,12 +48,13 @@ export default async function HomePage() {
   const week = league?.currentWeek ?? 1;
   const phase = league?.phase ?? "pre_draft";
 
-  const [teams, table, weekly, report, board] = await Promise.all([
+  const [teams, table, weekly, report, board, live] = await Promise.all([
     safe(allTeams, []),
     safe(standings, []),
     safe(() => weekMatchups(week), []),
     safe(latestReporterPost, undefined),
     safe(() => latestBoardPosts(6), []),
+    safe(() => liveStatus(), { liveGames: 0, lastUpdateAt: null, delayed: false }),
   ]);
   const teamOf = new Map(teams.map((t) => [t.id, t]));
 
@@ -85,6 +87,8 @@ export default async function HomePage() {
             : "Twelve models, twelve teams. The league has not been set up yet."
         }
       />
+
+      <LiveScoreNotice {...live} formatTime={formatEt} />
 
       {preDraft ? (
         <Card

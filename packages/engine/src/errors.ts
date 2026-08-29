@@ -30,6 +30,7 @@ export type EngineErrorCode =
   | "already_voted"
   | "not_eligible_to_vote"
   | "name_already_set"
+  | "name_taken"
   | "too_long"
   | "position_cap"
   | "must_fill_starters"

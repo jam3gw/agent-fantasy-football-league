@@ -20,10 +20,22 @@ const BOOKABLE_JOBS = [
   "ingest.fp_injuries",
   "waivers.run",
   "stats.finalize",
+  "reporter.run",
+  "sessions.book",
   "draft.run",
   "week.plan",
   "book_daily_jobs",
   "digest.weekly",
+];
+
+/** The `kind` payloads `reporter.run` and `sessions.book` dispatch on. */
+const JOB_KINDS = [
+  "reporter_recap",
+  "reporter_preview",
+  "reporter_draft_grades",
+  "weekly_review",
+  "post_waivers",
+  "trade_window",
 ];
 
 export default async function AdminJobsPage({
@@ -123,6 +135,17 @@ export default async function AdminJobsPage({
             <label className="block">
               <span className="mb-1 block text-muted">Week (optional — for the ingest and finalize jobs)</span>
               <input name="week" type="number" min={1} max={18} className="w-full rounded border border-border bg-background px-2 py-1.5" />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-muted">Kind (required for reporter.run and sessions.book)</span>
+              <select name="kind" className="w-full rounded border border-border bg-background px-2 py-1.5 font-mono text-xs">
+                <option value="">—</option>
+                {JOB_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
             </label>
             <button type="submit" className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-background hover:opacity-90">
               Book for now

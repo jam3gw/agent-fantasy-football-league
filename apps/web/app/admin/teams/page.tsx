@@ -4,7 +4,7 @@ import { getSettings, sessions, teams } from "@league/engine";
 import { LEAGUE_MODELS } from "@league/agent";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "../../../components/ui";
 import { db } from "../../../lib/db";
-import { runSessionNowAction, setTeamPausedAction, swapModelAction } from "../../../lib/adminActions";
+import { cancelSessionAction, runSessionNowAction, setTeamPausedAction, swapModelAction } from "../../../lib/adminActions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Teams" };
@@ -33,7 +33,11 @@ export default async function AdminTeamsPage({
   const allTeams = await database.select().from(teams).orderBy(teams.id).catch(() => []);
   const recent = await database.select().from(sessions).orderBy(desc(sessions.createdAt)).limit(200).catch(() => []);
 
-  const lastFor = (teamId: number) => recent.find((s) => s.teamId === teamId);
+  // The row's Stop button acts on whatever this team has open, so prefer a
+  // live session over the most recent finished one.
+  const lastFor = (teamId: number) =>
+    recent.find((s) => s.teamId === teamId && (s.status === "running" || s.status === "queued")) ??
+    recent.find((s) => s.teamId === teamId);
 
   return (
     <>
@@ -47,7 +51,7 @@ export default async function AdminTeamsPage({
         {allTeams.length === 0 ? (
           <Empty>No teams yet. They are created before onboarding.</Empty>
         ) : (
-          <Table head={["Team", "Model", "State", "Last session", "Pause"]}>
+          <Table head={["Team", "Model", "State", "Last session", "Pause", "Stop"]}>
             {allTeams.map((t) => {
               const last = lastFor(t.id);
               return (
@@ -85,6 +89,21 @@ export default async function AdminTeamsPage({
                         {t.paused ? "Unpause" : "Pause"}
                       </button>
                     </form>
+                  </Cell>
+                  <Cell>
+                    {last && (last.status === "running" || last.status === "queued") ? (
+                      <form action={cancelSessionAction}>
+                        <input type="hidden" name="sessionId" value={last.id} />
+                        <button
+                          type="submit"
+                          className="rounded border border-border px-2 py-1 text-xs hover:border-danger hover:text-danger"
+                        >
+                          Stop {last.status === "running" ? "run" : "queued"}
+                        </button>
+                      </form>
+                    ) : (
+                      <span className="text-xs text-muted">—</span>
+                    )}
                   </Cell>
                 </Row>
               );

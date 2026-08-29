@@ -6,9 +6,10 @@ import "server-only";
 import { eq, inArray } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
-import { costAlarms, teams } from "@league/engine";
+import { costAlarms, health, teams } from "@league/engine";
 import type { FiredAlarm } from "@league/agent";
 import { env } from "./env";
+import { db } from "./db";
 
 function subjectFor(alarm: FiredAlarm, label: string): string {
   return `[League] ${alarm.scope} alarm: ${label} $${alarm.amountUsd.toFixed(2)} > $${alarm.thresholdUsd.toFixed(2)}`;
@@ -61,11 +62,24 @@ function alarmBody(alarm: FiredAlarm, label: string): string {
   ].join("\n");
 }
 
-/** Send through Resend. Returns false (without throwing) when unconfigured. */
+/**
+ * Send through Resend. Returns false (without throwing) when unconfigured or
+ * rejected, and records the outcome under the `email.send` health key.
+ *
+ * Recording matters more here than anywhere else on the page: email is the
+ * only channel that pushes anything to the commissioner, and every caller but
+ * one discards the result. An unverified sending domain — the most likely
+ * production failure, because `from` is `league@SITE_DOMAIN` — would have
+ * meant every alarm, every outage notice and every weekly digest failing in
+ * silence for eighteen weeks, with `/admin/health` showing nothing at all.
+ */
 export async function sendEmail(subject: string, html: string): Promise<boolean> {
   const key = env.resendApiKey;
   const to = env.alertEmailTo;
-  if (!key || !to) return false;
+  if (!key || !to) {
+    await recordSend(false, "RESEND_API_KEY or ALERT_EMAIL_TO is not set, so no email can be sent");
+    return false;
+  }
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -78,9 +92,35 @@ export async function sendEmail(subject: string, html: string): Promise<boolean>
       }),
       signal: AbortSignal.timeout(15_000),
     });
-    return res.ok;
-  } catch {
+    if (res.ok) {
+      await recordSend(true);
+      return true;
+    }
+    // Resend puts the actual reason in the body — an unverified domain, a bad
+    // key — and that reason is what makes this fixable.
+    const detail = await res.text().catch(() => "");
+    await recordSend(false, `Resend returned ${res.status}: ${detail.slice(0, 300)}`);
     return false;
+  } catch (err) {
+    await recordSend(false, String(err).slice(0, 300));
+    return false;
+  }
+}
+
+/** Never let recording a send failure become a failure of its own. */
+async function recordSend(ok: boolean, error?: string): Promise<void> {
+  try {
+    const database = db();
+    const at = new Date();
+    await database
+      .insert(health)
+      .values({ key: "email.send", ...(ok ? { lastSuccessAt: at } : { lastError: error, lastErrorAt: at }) })
+      .onConflictDoUpdate({
+        target: health.key,
+        set: ok ? { lastSuccessAt: at } : { lastError: error, lastErrorAt: at },
+      });
+  } catch {
+    // The database being unreachable is already reported everywhere else.
   }
 }
 

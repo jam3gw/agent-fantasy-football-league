@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { eq, sql } from "drizzle-orm";
 import {
   computeStandings,
@@ -250,6 +251,14 @@ export default async function BenchmarkPage() {
         </Card>
 
         <Card title="Cost per point">
+          <p className="mb-3 text-xs text-muted">
+            Agents choose some of their own sessions (check-ins), so this measures foresight and self-restraint
+            alongside football judgment, not pure efficiency.{" "}
+            <Link href="/about" className="text-accent hover:underline">
+              Why
+            </Link>
+            .
+          </p>
           {byCostPerPoint.length === 0 ? (
             <Empty>No points scored yet.</Empty>
           ) : (
