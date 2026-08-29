@@ -30,6 +30,7 @@ import {
   buildSystemPrompt,
   promptRulesFromSettings,
   createModelStep,
+  createPartialSink,
   runSession,
   toolsForKind,
 } from "@league/agent";
@@ -189,7 +190,9 @@ async function runDraftPick(
     const sessionId = await claimPickSession(database, settings, clock, pick, team);
 
     if (sessionId !== null) {
-      const modelStep = createModelStep(database);
+      const modelStep = createModelStep(database, {
+        onPartial: createPartialSink(database, clock, sessionId),
+      });
       await runSession(sessionId, {
         db: database,
         clock,
