@@ -2,6 +2,40 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-29 — $0 BYOK steps: root-caused as already fixed in code; historical rows backfilled
+
+The zero-cost sessions on the Anthropic/OpenAI/xAI models (857–862, 881,
+flagged in the smoke-round entry below) were root-caused against production
+data. Every zero row has `spend_ledger.source = 'gateway'` and
+`billed_to = 'gateway'`: the gateway reports $0 for a call billed to a
+gateway-held BYOK key, and the code of the day took that 0 as authoritative
+instead of falling back to the price table. That is exactly the bug commit
+`39d5b78` ("BYOK steps are priced, not $0") fixed — `computeStepCost` now
+treats a gateway 0 against real tokens as "not billed here" and prices from
+`model_prices`, and `billed_to` names the actual payer. The fix merged to
+main at 22:56 UTC and deployed at ~23:02 UTC; every zero row was written
+between 17:16 and 22:52 UTC, all on the pre-fix deploy. No BYOK-model step
+has recorded $0 since, the unit test pinning "gateway reports 0 with real
+tokens → price table" already exists (`spend.test.ts`, "a $0 gateway cost
+against real tokens is priced from the table"), and `model_prices` in
+production has rows for every league model — so no code change was needed,
+only data repair.
+
+**Backfill (production, 2026-08-29 ~23:20 UTC).** 28 ledger rows across
+sessions 228, 607–611, 613, 857–860, 862, 869, 881 (teams 1–5 and 7)
+were repriced from `model_prices` with the exact `computeStepCost` formula
+(uncached input + cached input at the cache rate + output + reasoning at
+the output rate, rounded to 6dp), `source` set to `price_table` and
+`billed_to` to the real payer (`byok:anthropic`/`byok:openai`/`byok:xai`).
+`sessions.cost_usd` was recomputed from each session's ledger sum, and the
+day/season rollups re-derived the same way `updateRollups` does (no week
+rollups touched — none of these sessions carries a week). Total recovered
+spend: ~$0.47; league season rollup went from ~$0.10 to $0.568666.
+Backup first, per the standing rule: pre-update copies live in
+`backfill_20260829_spend_ledger_zero`, `backfill_20260829_sessions_zero`
+and `backfill_20260829_spend_rollups` on the production branch; drop them
+once a later audit confirms the numbers.
+
 ## 2026-08-29 — Smoke round verified thinking end to end; the harder probe found a real pre-existing bug
 
 Jake asked for a smoke round to verify the reasoning shows up, and gave the
