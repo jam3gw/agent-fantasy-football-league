@@ -5,6 +5,7 @@ import "server-only";
  */
 import { eq, inArray } from "drizzle-orm";
 import type { Clock } from "@league/shared";
+import { etDay } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import { costAlarms, health, teams } from "@league/engine";
 import type { FiredAlarm } from "@league/agent";
@@ -105,6 +106,39 @@ export async function sendEmail(subject: string, html: string): Promise<boolean>
     await recordSend(false, String(err).slice(0, 300));
     return false;
   }
+}
+
+/**
+ * Send an email at most once per ET day for a given key, and record whether it
+ * left. Recording the outcome is the point: writing the once-a-day marker
+ * before sending meant a failed send still consumed the day, so an outage that
+ * nobody was told about looked exactly like no outage at all.
+ *
+ * (Lives here rather than in tick.ts because the capacity watchdogs use it
+ * too, and tick → capacity → alarms keeps the imports one-directional.)
+ */
+export async function notifyOnce(
+  database: EngineDb,
+  clock: Clock,
+  key: string,
+  subject: string,
+  html: string,
+  detail = subject,
+): Promise<void> {
+  const healthKey = `notify:${key}:${etDay(clock.now())}`;
+  const existing = await database.select({ key: health.key }).from(health).where(eq(health.key, healthKey));
+  if (existing.length > 0) return;
+  const sent = await sendEmail(subject, html);
+  const at = clock.now();
+  await database
+    .insert(health)
+    .values({
+      key: healthKey,
+      lastError: sent ? null : `${detail} — the email did NOT send; see the email.send row`,
+      lastErrorAt: sent ? null : at,
+      ...(sent ? { lastSuccessAt: at } : {}),
+    })
+    .onConflictDoNothing({ target: health.key });
 }
 
 /** Never let recording a send failure become a failure of its own. */

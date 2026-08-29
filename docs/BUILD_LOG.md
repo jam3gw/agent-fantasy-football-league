@@ -50,6 +50,24 @@ run-their-validator lesson this log already recorded once. The tick's
 automatic retry of 869 (session 870) was cancelled before it could fail
 against the un-fixed deploy; a fresh probe runs after this deploys.
 
+**Probe rerun after the fix (session 881): the loop is closed.** Sonnet 5 on
+the same deliberative objective: succeeded, 5 model steps, 8 tool calls
+(player_research included — through the exact path that killed 869), 874
+reasoning tokens, thinking persisted on 3 of 5 steps (1,449 chars), zero
+dropped options, and `/sessions/881` renders each step's "Thought — N
+reasoning tokens" block in the redesigned step view (which another session
+shipped mid-stream; its `sessionTranscript.ts` reads the same first-class
+`reasoning` field with the same raw fallback, so the two changes composed
+cleanly). Full per-model results are in VERIFIED.md — the visibility-option
+verify item is resolved.
+
+Noticed in passing, filed as its own task rather than widened into this one:
+sessions on the Anthropic/OpenAI/xAI models record `cost_usd = 0` despite
+real token usage (881: five ~9k-token steps, $0.000000), while the other
+seven providers record plausible costs. §8.7's spend page undercounts those
+teams until that is root-caused (`gatewayCostFrom` trusting a zero instead
+of falling back to the price table is the leading suspect).
+
 ## Questions for Jake
 
 
@@ -141,6 +159,99 @@ wrong for accept-time failures and commissioner-reversed trades). Round
 five (fresh context, delta only) verified the three alignments against the
 engine and reported no findings — review loop closed.
 
+## 2026-08-29 — Vercel/Neon audit: the alarms that could not fire
+
+Jake asked for an audit of the Vercel and Neon setup and what monitoring to
+add. Findings first, from live state (Vercel MCP, Neon MCP, the production
+`health` table), then what was changed.
+
+### Found healthy
+
+Tick green every minute; all feeds green; smoke sessions 13/13; deployment
+protection right (`all_except_custom_domains`, custom domain public); Web
+Analytics collecting; CI covering lint/typecheck/tests/no-database build. The
+morning's smoke-test failures fired the outage notices and `email.send`
+recorded successful sends — the alert path has now worked for real.
+
+### Found broken or missing
+
+- **Neon was at its 10-branch free-plan limit the day of the audit** — the
+  next preview deploy would have failed to create its branch. Resolved by the
+  Launch upgrade (limit 5000), not by deletions; stale preview branches remain
+  and are cosmetic.
+- **The free plan could not carry the season on compute, not just storage**:
+  ~190 CU-hours/month included, and the per-minute cron holds `main`'s
+  0.25 CU compute awake 24/7 ≈ 180 CU-hours before `dev` or any preview.
+  Jake upgraded to Launch the same day.
+- **Every alarm channel ran through the tick**, so the tick dying (or Cron,
+  or the database) silenced its own alarm. §17 also warned nothing watched
+  database growth; nothing watched the gateway balance either, and a $0
+  balance is a twelve-team outage.
+- **Migration 0002's column drop briefly broke the still-serving deployment**
+  (16:23–19:43 UTC error burst: old code selecting
+  `fantasypros_daily_allowance` after the new build's migration dropped it).
+  Standing rule going forward: a destructive migration ships one deploy
+  *after* the code stops reading the column (expand/contract).
+
+### Changed (this entry's deploy)
+
+- **`/api/healthz`** — public heartbeat: `200` while `cron.tick` succeeded in
+  the last three minutes (the admin banner's own constant, now shared from
+  `lib/healthz.ts`), `503` otherwise, database-unreachable included. Body is
+  `ok` + `lastTickAt`, nothing else. For the external uptime monitor only a
+  person can create (SETUP §6a).
+- **`tick.capacity` stage, hourly** — `db.size` (pg_database_size vs a 10 GiB
+  Launch budget; alarm + daily email past 80%) and `gateway.credits`
+  (`GET /v1/credits`; alarm + daily email under $100; a malformed response
+  reads as unusable, never as $0). Gate pre-stamps like the queue sweep so a
+  throwing check retries hourly, not per minute. `notifyOnce` moved from
+  `tick.ts` to `alarms.ts` so capacity → alarms keeps imports one-directional.
+- **Neon settings applied over MCP** (Launch unlocked them): history
+  retention 6h → **7 days**; **daily snapshot** of `main` 10:00 UTC kept 14
+  days (10:00, not 09:00 — 09:00 UTC is 4:00 AM ET once DST ends, colliding
+  with Tuesday finalization; the reviewer caught it); **`main` protected**.
+  Autoscaling had already moved to 0.25–8 CU with the plan.
+- Docs: RUNBOOK (tick stage 9, external-monitor section, gateway-balance
+  paragraph), SETUP (§3 check, §6 rewritten as done, §6a external monitor +
+  four Vercel dashboard switches, fails-silently table), this entry.
+
+**Verify after deploy** (recorded below when done): `/api/healthz` answers 200
+from outside; `tick.capacity`, `db.size`, `gateway.credits` rows appear green
+in production `health` within the hour.
+
+### Left alone deliberately
+
+- Stale preview branches and `backup-pre-smoke-cleanup` not deleted — branch
+  deletion is destructive and the limit pressure is gone; flagged to Jake
+  instead, along with the Neon integration's auto-cleanup toggle.
+- No Sentry/APM, no log drain: the health table plus Vercel's error clustering
+  answered every question this audit asked, and the league's own Postgres is
+  already the season's system of record.
+- `GATEWAY_CREDITS_ALARM_USD` ($100) and `DB_SIZE_BUDGET_BYTES` (10 GiB) are
+  code constants, not settings — they encode the plan and Appendix F, and a
+  commissioner who changes plans edits one line next to the comment that
+  explains it.
+
+### Review round one (fresh context): no blockers, six findings
+
+Fixed: a route-level test now pins the public 503's exact body (`{ok,
+lastTickAt}` — the §15.5 property lived in a four-line catch nothing
+defended); recovery clears the capacity rows' error text so a stale "$42.10"
+never sits beside an ok badge; the hourly gate's pre-stamp property has a
+test; the size-is-a-floor caveat (history window and other branches are not
+in `pg_database_size`) is in the comment; the snapshot moved 09:00 → 10:00
+UTC because 09:00 becomes 4:00 AM ET when DST ends and would collide with
+Tuesday finalization.
+
+Accepted, recorded: `dueForCapacityCheck`'s select-then-upsert can double-run
+under two overlapping ticks (the tick can legally run 800 s against a 60 s
+cadence) and at worst duplicates one daily email — the same shape
+`sessions.sweep` has run all season; making it conditional buys nothing the
+pre-stamp has not already narrowed.
+
+Round two verified all six fixes — the mock genuinely exercises the route's
+catch, recovery clearing touches only capacity's keys, the snapshot hour
+confirmed live at 10:00 UTC — and reported nothing new. Loop closed.
 ## 2026-08-29 — Review round on the mock-draft merge
 
 Fresh-context reviewer on the full diff before merging to main. Fixed:
@@ -206,6 +317,7 @@ permission classifier blocked the first attempt: one transaction carrying the
 `teams` update, the public `model_swapped` transaction, the commissioner-action
 audit row, and the `model_prices` seed row. Verified after commit: team 2 reads
 `mistral/mistral-large-3`.
+
 
 ## 2026-08-29 — /sessions/[id] rebuilt as steps (Claude Design handoff)
 
@@ -275,6 +387,7 @@ Verified: lint, typecheck and all tests green; `next build` clean; the page
 rendered to static HTML and screenshotted at 1280px and 390px (finished and
 running states) — no sideways scroll, tables scroll inside their scrollers,
 which `test/mobile.test.ts` now asserts for these tables too.
+
 ## 2026-08-29 — thinking confirmed per model; thinking logs made durable and visible (commissioner request)
 
 Jake asked to (1) confirm thinking is enabled for the twelve models, (2) make

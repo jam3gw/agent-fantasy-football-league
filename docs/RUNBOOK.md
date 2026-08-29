@@ -15,6 +15,7 @@ First-time setup — accounts, secrets, the domain, the pre-draft order of opera
 | Money | `/spend`, alarms on `/admin/health` |
 | Job queue | `/admin/jobs` |
 | Session queue | `/admin/health`, "Session queue" card |
+| Liveness, from outside | `/api/healthz` (public; built for an external uptime monitor) |
 
 Migrations run automatically: `apps/web`'s build script applies them before `next build`, so **every deploy migrates its own database** — preview deploys migrate the branch database, production migrates `main`.
 
@@ -32,10 +33,11 @@ One Vercel Cron hits `/api/cron/tick` every minute with `Authorization: Bearer $
 6. **Re-queues failed sessions** (§8.8) and notices a provider outage.
 7. **Expires stale trade offers and resolves trade reviews** whose 24-hour window ended. Once past the trade deadline week, sweeps every still-open offer closed, once.
 8. **Checks the season is advancing** — see "A week that will not finalize" below.
+9. **Checks capacity, hourly** — database size against a 10 GiB budget (`db.size`) and the AI Gateway credit balance (`gateway.credits`). Either one exhausting is silent and league-wide, so each writes its own health row and emails once per ET day while the condition stands.
 
 Each of these is wrapped on its own: a stage that throws records its failure to `health` under its own key (`tick.live_scores`, `tick.trades`, …) and the tick carries on. One dead feed cannot take out trade resolution any more.
 
-If the tick itself stops, everything stops. `/admin/health` raises a red banner after three silent minutes — that banner is the first thing to look at, because every other row on the page is written by the tick, so a dead tick otherwise makes the page look calm and empty.
+If the tick itself stops, everything stops. `/admin/health` raises a red banner after three silent minutes — that banner is the first thing to look at, because every other row on the page is written by the tick, so a dead tick otherwise makes the page look calm and empty. The banner only exists when someone opens the page, which is why the same three-minute rule is also served publicly at `/api/healthz` — see "External uptime monitoring" below.
 
 ---
 
@@ -143,7 +145,29 @@ Alarms notify; they never stop a session. An alarm email means "look", not "some
 
 The only setting that can stop an agent is `pause_agent_at_usd`, which is **off by default**. Turning it on pauses an agent that crosses it for the season.
 
-**Email is the only channel that pushes anything to you**, so check that it works before week 1. Every send — the digest, every alarm, every outage notice — records its outcome under the `email.send` key on `/admin/health`, with the provider's own reason on a failure. The most likely failure is an unverified sending domain at Resend: `from` is `league@$SITE_DOMAIN`, so that domain has to be verified in the Resend dashboard. Use "Send digest now" on `/admin/health` and then look at the `email.send` row.
+The tick also reads the **AI Gateway credit balance** hourly (`gateway.credits` on `/admin/health`). Under $100 it emails once per day: that is the dead-auto-top-up alarm, because at $0 every session for every team fails at once and the outage detector reports twelve "providers" down. Top up in the Vercel team's AI Gateway tab and check auto top-up.
+
+**Email is the only channel the league itself pushes to you** (the external monitor below is the exception, and deliberately outside the league), so check that it works before week 1. Every send — the digest, every alarm, every outage notice — records its outcome under the `email.send` key on `/admin/health`, with the provider's own reason on a failure. The most likely failure is an unverified sending domain at Resend: `from` is `league@$SITE_DOMAIN`, so that domain has to be verified in the Resend dashboard. Use "Send digest now" on `/admin/health` and then look at the `email.send` row.
+
+---
+
+## External uptime monitoring
+
+Every alert above travels through the tick: the banner, every email, the
+webhook. A dead tick therefore silences its own alarm — and so does a dead
+database, a broken deploy of the tick route, or Vercel Cron simply not firing.
+
+`/api/healthz` exists for exactly this. It is public and unauthenticated,
+answers `200` while `cron.tick` has succeeded within the last three minutes
+(the same rule as the red banner, from the same constant) and `503` otherwise —
+including when the database itself cannot be reached. The body carries `ok`
+and `lastTickAt` and nothing else; the *reason* stays on `/admin/health`.
+
+Point an external monitor at `https://$SITE_DOMAIN/api/healthz` on a one-to-
+five-minute interval, alerting to the commissioner's email or phone
+(UptimeRobot's and Better Stack's free tiers both do this). That monitor is
+the only alarm that does not depend on the tick, Vercel, Neon, or Resend
+being healthy — which is the point.
 
 ---
 

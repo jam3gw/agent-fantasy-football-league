@@ -32,11 +32,29 @@ thinking being disabled — nothing in the codebase sends any thinking setting
 withholding its raw chain of thought; no visibility flag is documented for it,
 so it stays as-is.
 
-**Open (re-verify on the next smoke round):** the visibility-only provider
-options added today (`anthropic` display summarized, `google` includeThoughts,
-`openai` reasoningSummary auto) could not be exercised from this environment —
-no `AI_GATEWAY_API_KEY`. Expected result: non-empty `reasoning` on new
-anthropic/google/openai assistant events whenever reasoning tokens > 0.
+**RESOLVED the same day, on a production smoke round (sessions 857–868) plus
+one deliberative `manual` probe (881).** All twelve smoke sessions succeeded,
+zero errors, zero `visibility_option_dropped` events — every provider accepts
+the visibility options. Measured after the change:
+
+| Model | round 2 reasoning tokens | durable `reasoning` text |
+|---|---|---|
+| google/gemini-3.1-pro-preview | 143 | **yes, new** (203 chars — `includeThoughts` works) |
+| zai/glm-5.3 | 0 (!) | **yes, new** (931 chars; tokens unreported by provider) |
+| spacexai/grok-4.6 | 111 | yes |
+| moonshotai/kimi-k3 | 48 | yes |
+| alibaba/qwen3.8-max | 83 | yes |
+| deepseek/deepseek-v4-pro | 40 | yes |
+| anthropic/claude-sonnet-5 (probe 881, hard task) | 874 | **yes, new** (1,449 chars over 3 of 5 steps — `display: "summarized"` works) |
+| anthropic/claude-fable-5 / claude-opus-5→mistral swap / gpt-5.6-sol | 0 on the trivial task | nothing to show (adaptive skipped thinking; option accepted without error) |
+| openai/gpt-5.6-terra | 20 | no — `reasoningSummary: "auto"` returned no summary for so small a burst |
+| meta/muse-spark-1.2 | 126 | no — provider withholds the text; no visibility flag exists |
+
+The smoke task (one tool call, one line) is too trivial to make the Anthropic
+models think, which is why probe 881 exists: on a real deliberation Sonnet 5
+thought on 3 of 5 steps and every thought is in the transcript and rendered
+on `/sessions/881`. Fable 5 and the OpenAI pair should be re-eyeballed on
+the first weekly review, but the mechanism is proven end to end.
 
 ## Rankings on Sleeper's projection feed — measured 2026-08-29 (§5.7 verify)
 
