@@ -51,6 +51,78 @@ layout stays a server component and no page loses static rendering.
   component, so `league.jake-moses.com` serves the routes but nothing calls
   them. Data starts on merge.
 
+## 2026-08-29 — Vercel Connect evaluated and declined; the gateway key stays persistent
+
+Jake asked whether [Vercel Connect](https://vercel.com/docs/connect) should back
+some of our integrations. Two decisions came out of it, both his, both recorded
+here so neither gets re-raised as an oversight.
+
+### 1. We do not adopt Vercel Connect
+
+Connect is a credential broker: a connector is configured once at the team level
+(Slack, GitHub, Microsoft, Linear, Snowflake, Salesforce, custom OAuth, or a
+static API key), and code calls `getToken()` at runtime, authenticating with the
+deployment's OIDC token, so no provider secret sits in an environment variable.
+It earns its place when you need delegated or user-scoped tokens, OAuth refresh,
+multi-tenant installations, or verified webhook fan-out.
+
+We need none of those. Every third-party credential in this league is a static
+single-tenant key or a connection string, and no part of the system ever acts on
+behalf of a signed-in human:
+
+| Integration | Auth today | Connect fit |
+|---|---|---|
+| Neon (`DATABASE_URL`) | Postgres connection string | No — not a bearer-token HTTP API; Neon's own Vercel integration manages the variable |
+| AI Gateway (`AI_GATEWAY_API_KEY`) | static key | No — see decision 2 |
+| FantasyPros | static key | Possible (API-key connector), no benefit |
+| Web search (Tavily/Exa/Brave) | static key | Possible, no benefit |
+| Resend | static key | Possible, no benefit |
+| Sleeper, nflverse | unauthenticated | N/A |
+| `COMMISSIONER_PASSWORD`, `SESSION_SECRET`, `CRON_SECRET` | our own secrets | N/A — not third-party credentials |
+
+For the four static-key providers Connect would move a key from a Vercel
+environment variable into a Vercel-managed vault: same vendor, same trust
+boundary, one owner, one project. What it buys is rotation in one place and a
+token-request audit log. What it costs is a runtime dependency in the agents'
+hot path and **$3 per 1,000 token requests on Pro** (Hobby's 500/month free
+allowance does not apply to us). Agents call `web_search` on every tool step
+with no cap (§2, "Information"), so that is a recurring bill and a new failure
+mode in the session loop for no security gain.
+
+Revisit if the spec ever grows a Slack or Discord surface (§2 currently says
+Discord: none), a GitHub App, or anything acting for a signed-in user.
+
+### 2. `AI_GATEWAY_API_KEY` stays a persistent key — deliberately
+
+While reviewing the above I proposed replacing the gateway key with Vercel's
+OIDC authentication. AI Gateway accepts a deployment's injected
+`VERCEL_OIDC_TOKEN` in place of an API key: short-lived, auto-renewed, scoped to
+one project and environment, nothing stored. The argument for it is that
+`AI_GATEWAY_API_KEY` is our highest-value secret — it bills the gateway for all
+twelve agents and §2 sets no spend cap — and it neither expires nor is scoped to
+anything.
+
+The change would have been small: the agent hot path needs no edit at all
+(`modelStep.ts:106` passes a bare model id, so the AI SDK resolves it through
+its default gateway provider, which falls back to the OIDC token itself), plus a
+one-line fallback at `gateway.ts:23` for the model-catalog check, then removing
+the variable from the Vercel production and preview environments. The key would
+have stayed in `.env.example` and `.env.local`, since no OIDC token exists
+outside a deployment.
+
+**Jake decided a persistent key is fine, so none of this was implemented.** No
+code changed. The fallback line is pointless on its own — it only mattered as a
+step toward removing the variable — so it was not added either.
+
+This is a choice, not an oversight. A reviewer who later finds a long-lived,
+uncapped billing credential in the production environment should read this entry
+before filing it as a finding. If the position changes, the work is the four
+steps above, and the OIDC path is a **verify** item: neither the fallback
+behaviour of our pinned `@ai-sdk/gateway` (^4.0.68) nor whether Vercel Workflow
+steps receive `VERCEL_OIDC_TOKEN` on resume has been confirmed against our
+versions, and both would need a real preview session and a `VERIFIED.md` row
+before the production variable came out.
+
 ## 2026-08-29 — Full audit: three findings that would each have stopped the season
 
 Jake asked what is missing. Rather than answer from the build log I checked

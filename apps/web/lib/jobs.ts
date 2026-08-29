@@ -13,6 +13,7 @@ import {
   carryOverLineups,
   createSession,
   getSettings,
+  health,
   runWaivers,
   scheduledJobs,
   teams,
@@ -144,12 +145,18 @@ export async function runJob(
     case "ingest.fp_rankings": {
       const { ingestFpRankings } = await import("@league/data");
       const { fantasyprosApiKey, fantasyprosBaseUrl, fantasyprosDailyCap } = env.toolConfig;
-      if (!fantasyprosApiKey) return; // no key configured: skip rather than fail the tick
+      // A missing key used to `return` here, so the job reported `done` having
+      // done nothing at all — no rankings, no health row, no error. §5.7's
+      // rankings gate then blocks the draft, and the only evidence anywhere is
+      // an empty /admin/rankings page. That is a misconfiguration, not a normal
+      // state (§17 requires the key), so it fails loudly and lands in the
+      // failed-jobs card with a message that says what to do.
+      const apiKey = await requireFantasyprosKey(db, clock, fantasyprosApiKey);
       const set = settings.phase === "pre_draft" || settings.phase === "drafting" ? "draft" : "weekly";
       await ingestFpRankings(
         db,
         clock,
-        { apiKey: fantasyprosApiKey, baseUrl: fantasyprosBaseUrl, dailyCap: fantasyprosDailyCap },
+        { apiKey, baseUrl: fantasyprosBaseUrl, dailyCap: fantasyprosDailyCap },
         { season, set, week: settings.currentWeek },
       );
       return;
@@ -157,11 +164,11 @@ export async function runJob(
     case "ingest.fp_injuries": {
       const { fpRequest } = await import("@league/data");
       const { fantasyprosApiKey, fantasyprosBaseUrl, fantasyprosDailyCap } = env.toolConfig;
-      if (!fantasyprosApiKey) return;
+      const injuriesKey = await requireFantasyprosKey(db, clock, fantasyprosApiKey);
       await fpRequest(
         db,
         clock,
-        { apiKey: fantasyprosApiKey, baseUrl: fantasyprosBaseUrl, dailyCap: fantasyprosDailyCap },
+        { apiKey: injuriesKey, baseUrl: fantasyprosBaseUrl, dailyCap: fantasyprosDailyCap },
         { kind: "engine" },
         "/nfl/injuries",
         { year: season, week: settings.currentWeek, include_probabilities: "true" },
@@ -189,6 +196,28 @@ export async function runJob(
     default:
       throw new Error(`unknown job type: ${type}`);
   }
+}
+
+/**
+ * The FantasyPros key, or a failure that is visible in three places: the job
+ * row, the failed-jobs card on /admin/health, and a `fp.key` health row that
+ * says exactly what is wrong and how to fix it.
+ *
+ * Silence was the old behaviour and it cost an afternoon: the job ran, wrote
+ * nothing, and reported success.
+ */
+async function requireFantasyprosKey(db: EngineDb, clock: Clock, key: string | undefined): Promise<string> {
+  if (key) return key;
+  const at = clock.now();
+  const message =
+    "FANTASYPROS_API_KEY is not set on this deployment, so no rankings or injuries can be " +
+    "ingested and the draft cannot start (§5.7). Set it in the Vercel project for Production " +
+    "and redeploy — a deployment only sees the environment it was built with.";
+  await db
+    .insert(health)
+    .values({ key: "fp.key", lastError: message, lastErrorAt: at })
+    .onConflictDoUpdate({ target: health.key, set: { lastError: message, lastErrorAt: at } });
+  throw new Error(message);
 }
 
 /**
