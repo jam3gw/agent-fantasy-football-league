@@ -11,6 +11,64 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — /sessions/[id] rebuilt as steps (Claude Design handoff)
+
+Jake designed a replacement for the session transcript in Claude Design and
+handed the bundle over for implementation. The old page was eighteen flat
+events, each a row of badges over a collapsed blob of JSON — everything §12.1
+asks for and none of what a reader came for.
+
+What shipped, on `sessions-transcript-redesign`:
+
+- `lib/sessionTranscript.ts` — pure derivation over `session_events`:
+  `groupSteps` (the brief, then one step per assistant turn with that turn's
+  tool calls nested by `tool_call_id`), `stepTitle`/`callSummary` (a step is
+  named after what it did — "Added a free agent", "15 of 16 active"),
+  `playerIndex`, and `outcomeOf`. No database reads, so the live view derives
+  exactly what the finished page does. 29 tests in
+  `test/sessionTranscript.test.ts`.
+- `components/session-steps.tsx` — the step card, plus purpose-built renderers
+  for `get_my_team`/`get_team_roster`, `get_free_agents`/`get_available_players`,
+  `get_player_stats`, `add_free_agent`/`drop_player`, `write_decision_log`/
+  `make_pick`, and the scratchpad/board writes. Every other tool falls back to
+  the JSON view the page always had. §12.1's raw arguments and result stay one
+  disclosure away inside the step that made the call.
+- `components/session-view.tsx` and `components/session-rail.tsx` — the header,
+  the six facts, the outcome banner, and a sticky scrollspy rail (the only
+  client island; open/close is set on the `<details>` elements directly so a
+  reader's open step survives a live re-render).
+- `live.tsx` now renders the same components with a thinking card above them,
+  so a running session and a finished one are one page rather than two.
+
+Three decisions worth recording. **The prototype's palette was stale** — it
+was drawn from a pre-redesign snapshot (Geist, `#1f6f4a`, a twelve-link nav),
+so the layout was taken from it and the colours from the design system already
+in `globals.css`; Jake confirmed. **No Finished/Live toggle**: the prototype
+showed one, but status decides which view renders, so a manual switch would
+lie about a finished session. **The prototype's tool names were invented**
+(`get_roster`, and `get_available_players` for a waivers session); the
+renderers are keyed on the tools that actually exist.
+
+Two real defects the work turned up, both fixed:
+
+- The opening `user` event (brief + context snapshot) was being grouped as a
+  mid-session nudge, so the brief rendered as a "Note". Caught by a test, not
+  by eye.
+- "Jump to the decision" rendered accent-on-accent — invisible. `globals.css`
+  colours every `a` *unlayered*, which outranks any Tailwind colour utility on
+  the anchor itself. The label carries its own colour on a `<span>` now. Worth
+  remembering: it will bite any future filled-accent link.
+
+Rebased onto main after the durable-thinking work landed below. That entry
+made `content.reasoning` first-class on assistant events and added
+`assistantReasoning` as its reader; the step card's "Thought" disclosure now
+delegates to that reader rather than carrying a second copy of the same
+fallback, so both the durable field and the older raw-parts events render.
+
+Verified: lint, typecheck and all tests green; `next build` clean; the page
+rendered to static HTML and screenshotted at 1280px and 390px (finished and
+running states) — no sideways scroll, tables scroll inside their scrollers,
+which `test/mobile.test.ts` now asserts for these tables too.
 ## 2026-08-29 — thinking confirmed per model; thinking logs made durable and visible (commissioner request)
 
 Jake asked to (1) confirm thinking is enabled for the twelve models, (2) make
