@@ -35,6 +35,7 @@ import type { Result } from "./broadcastLogic";
 import {
   describeTransaction,
   foldForm,
+  remainingPoints,
   newestFirst,
   powerScore,
   rankingBefore,
@@ -245,8 +246,13 @@ export interface GameCard {
   homeTeam: TeamRow | undefined;
   awayPoints: number;
   homePoints: number;
-  /** Starting slots on either side whose NFL game has not finished. */
-  slotsToPlay: number;
+  /**
+   * Starting slots on either side whose NFL game has not finished, or null
+   * when the week's schedule is not in the database and there is no way to
+   * tell. Null is not zero: a caller that treats it as zero renders a Sunday
+   * afternoon as a finished week, which is exactly the bug this type prevents.
+   */
+  slotsToPlay: number | null;
   /** The slot names still to play for each side, e.g. ["DST", "K"]. */
   awayToPlay: string[];
   homeToPlay: string[];
@@ -391,7 +397,7 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
     return {
       slots: list.map((s) => s.slot),
       projected: list.reduce(
-        (sum, s) => sum + Math.max(0, (projOf.get(s.playerId) ?? 0) - (scoredOf.get(s.playerId) ?? 0)),
+        (sum, s) => sum + remainingPoints(projOf.get(s.playerId) ?? 0, scoredOf.get(s.playerId) ?? 0),
         0,
       ),
     };
@@ -402,8 +408,8 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
     const homePoints = m.homePoints ?? 0;
     const away = remainingFor(m.awayTeamId);
     const home = remainingFor(m.homeTeamId);
-    const slotsToPlay = away.slots.length + home.slots.length;
-    const over = m.final || (scheduleKnown && slotsToPlay === 0);
+    const slotsToPlay = scheduleKnown ? away.slots.length + home.slots.length : null;
+    const over = m.final || slotsToPlay === 0;
     const margin = awayPoints + away.projected - (homePoints + home.projected);
     return {
       matchupId: m.id,
@@ -418,7 +424,9 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
       slotsToPlay,
       awayToPlay: away.slots,
       homeToPlay: home.slots,
-      awayWinChance: over ? null : winChanceFromMargin(margin),
+      // No schedule means no idea who is left to play, so no chance is
+      // offered rather than one computed from the score alone.
+      awayWinChance: over || slotsToPlay === null ? null : winChanceFromMargin(margin),
     };
   });
 }
@@ -743,21 +751,23 @@ export async function seasonTimeline(limit = 8): Promise<TimelineEvent[]> {
           .limit(1),
       [],
     ),
-    safe(
-      () =>
-        db()
-          .select({ at: transactions.createdAt, type: transactions.type, teamIds: transactions.teamIds })
-          .from(transactions)
-          // Only the earliest trade and the earliest waiver claim are wanted,
-          // and the table grows all season. Asking for a small oldest-first
-          // window of just those two types beats scanning every roster move
-          // ever recorded; twenty is comfortably enough to contain the first
-          // of each even when a week's claims all land at once.
-          .where(inArray(transactions.type, ["trade", "waiver_add"]))
-          .orderBy(transactions.createdAt)
-          .limit(20),
-      [],
-    ),
+    // The earliest trade and the earliest waiver claim, asked for separately.
+    // One oldest-first window over both types can be filled entirely by
+    // whichever happens more often, hiding the other for ever.
+    Promise.all(
+      (["trade", "waiver_add"] as const).map((kind) =>
+        safe(
+          () =>
+            db()
+              .select({ at: transactions.createdAt, type: transactions.type, teamIds: transactions.teamIds })
+              .from(transactions)
+              .where(eq(transactions.type, kind))
+              .orderBy(transactions.createdAt)
+              .limit(1),
+          [],
+        ),
+      ),
+    ).then((pairs) => pairs.flat()),
     safe(
       () =>
         db()

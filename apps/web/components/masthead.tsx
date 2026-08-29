@@ -112,7 +112,12 @@ export async function Masthead() {
           <div className="flex flex-shrink-0 items-center self-stretch bg-accent px-4 text-[11px] font-bold uppercase tracking-[0.14em] text-band-text">
             {live.liveGames > 0 ? "Live" : `Week ${week}`}
           </div>
-          <div className="ticker-viewport flex-1 overflow-hidden">
+          <div
+            className="ticker-viewport flex-1 overflow-hidden"
+            tabIndex={0}
+            role="group"
+            aria-label={`Week ${week} scores`}
+          >
             {/* The week's games twice over, so translating the track by half
                 its width loops without a seam. The copy is hidden from
                 assistive tech so the scores are announced once. */}
