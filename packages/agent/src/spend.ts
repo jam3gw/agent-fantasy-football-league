@@ -17,6 +17,7 @@ import {
   spendRollups,
   teams,
   toolCosts,
+  tstz,
 } from "@league/engine";
 import type { BilledTo } from "./models.ts";
 
@@ -148,7 +149,8 @@ export async function updateRollups(db: EngineDb, clock: Clock): Promise<void> {
   const dayStart = etDayStartUtc(now);
 
   const sessionWeek = sql<number>`(${sessions.context} ->> 'week')::int`;
-  const inDay = sql`${spendLedger.createdAt} >= ${dayStart}`;
+  // Raw template: the timestamp must go over as a cast string, not a Date.
+  const inDay = sql`${spendLedger.createdAt} >= ${tstz(dayStart)}`;
   const inWeek = sql`${sessionWeek} = ${settings.currentWeek}`;
 
   const rows = await db

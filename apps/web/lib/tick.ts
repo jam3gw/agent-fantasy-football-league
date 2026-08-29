@@ -25,6 +25,7 @@ import {
   sessionEvents,
   sessions,
   teams,
+  tstz,
 } from "@league/engine";
 import { db, leagueClock } from "./db";
 import { detectModelOutages, requeueFailedSessions, teamsForModels } from "./retry";
@@ -158,12 +159,14 @@ export async function runTick(): Promise<TickSummary> {
   summary.queuePrimed = await primeJobQueue(database, clock);
 
   // 1. Claim due jobs. SKIP LOCKED means two overlapping ticks never double-run one.
+  // `tstz(now)` rather than `now`: a raw sql template has no column type to
+  // serialize against, and postgres-js throws on a bare Date (see db/sqlTime).
   const claimed = await database.execute(sql`
     update scheduled_jobs
-       set status = 'claimed', claimed_at = ${now}
+       set status = 'claimed', claimed_at = ${tstz(now)}
      where id in (
        select id from scheduled_jobs
-        where status = 'due' and due_at <= ${now}
+        where status = 'due' and due_at <= ${tstz(now)}
         order by due_at
         for update skip locked
         limit ${MAX_JOBS_PER_TICK}
