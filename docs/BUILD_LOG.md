@@ -11,6 +11,40 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — The xAI data-sharing credit does not exist on our account
+
+Jake went to set it up and the option is not in the console. Billing → Spend
+management shows Credits, auto top-up, payment details and invoices; there is no
+data sharing row, which is exactly where every source I used places it. He had
+already added a card and bought $5 of credits.
+
+**My recommendation earlier today was wrong, and the fault is in the sourcing.**
+xAI publishes no free-credits page any more — `docs.x.ai/docs/data-sharing`
+404s, and the security FAQ mentions no credits — so the $150/month figure came
+from aggregator sites. Re-reading those with the console in hand, several carry
+May-2025 reports that the program ended, and one says outright that it "should
+be treated as ended unless your xAI Console shows it today." I ranked it first
+for value-per-effort on sources that were echoing a dead program.
+
+Two things could still explain the missing row, and both are cheap to check
+before writing it off: the $5 gate is prior **spend** and the account has
+consumed $0 (a purchase is not spend), and the setting is team-level and may
+live under Team Settings rather than Billing — where xAI's docs do put the other
+team data controls, and where ZDR, if on, replaces the sharing row and blocks it
+outright.
+
+**What this changes.** If xAI is gone, Google Cloud is the only credit worth
+chasing, and the capture drops from ~$250–400 to ~$100–140 against a ~$2,200
+season — from one API key to a service account, a 90-day clock and a preview
+model that still needs confirming on Vertex. That is a materially worse trade
+for reinstating a BYOK path Jake removed on 2026-08-28 for good reasons, and it
+should be weighed again rather than assumed. Recommendation now: leave
+gateway-only billing alone unless Google verifies, and spend the effort on
+prompt caching instead, which is worth ~$1,000 on its own.
+
+`docs/VERIFIED.md` corrected — the xAI row reads $0 and the terms are recorded
+as an unverified claim rather than as fact.
+
 ## 2026-08-29 — Which providers are worth BYOK for free credits (commissioner's question)
 
 Jake asked which services to set up BYOK for to use free credits, noting he

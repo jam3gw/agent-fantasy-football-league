@@ -55,7 +55,7 @@ a credit program on that provider could offset:
 | GPT-5.6 Sol | 2 / 10 | $135 | complimentary daily tokens (data sharing) | up to full, if tool use qualifies |
 | GPT-5.6 Terra | 2 / 12 | $142 | same | same |
 | Gemini 3.1 Pro | 2 / 12 | $142 | GCP $300 / 90 days, Vertex only | ~$100–140 (window-limited) |
-| Grok 4.6 | 2 / 6 | $121 | xAI $150/month data sharing + $25 signup | full |
+| Grok 4.6 | 2 / 6 | $121 | none available (see below — the $150/month program does not appear in the console) | $0 |
 | DeepSeek V4-Pro | 0.66 / 1.98 | $40 | off-peak pricing only | ~$20, already assumed |
 | Kimi K3 | 3 / 15 | $203 | none found | $0 |
 | Qwen 3.8-Max | 2 / 6 | $121 | 1M free tokens / 90 days | ~$3 |
@@ -67,25 +67,30 @@ base (which also carries draft, onboarding and mock-draft overhead).
 
 Program terms confirmed in docs on 2026-08-29:
 
-- **xAI**: $150/month for opting into data sharing, refreshes monthly and does
-  not accumulate, requires $5 of prior spend, **the opt-in is permanent** (a
-  team cannot opt back out), and it is region-dependent. Plus $25 at signup,
-  expiring 30 days later. Grok's heaviest month is well under $150, so this
-  covers the slot outright.
-  - Setup path (docs, 2026-08-29): console.x.ai → Billing → Credits section →
-    a **team admin** enables "Share API Inputs and Outputs for Model Training"
-    → accept the terms. Credits appear within ~24 hours.
-  - **Region**: excluded are the 27 EU member states plus Iceland,
-    Liechtenstein, Norway and the UK. The US is eligible.
-  - **Data sharing is a team-level setting and one xAI account can hold several
-    teams.** Since the opt-in cannot be reversed, the league should get its own
-    xAI team, so the permanent consent covers only league traffic — which §8.9
-    already deems acceptable because everything here is public.
-  - The $5 threshold is prior *spend*. At Grok's $2/$6 that is ~2.5M input
-    tokens: one agent reaches it in roughly two or three days of live play, so
-    the opt-in comes after the season starts, not before. Whether the $25
-    signup promo counts toward the threshold is claimed by secondary sources
-    only and is unconfirmed.
+- **xAI**: **not available on the league's account — treat the $150/month
+  data-sharing credit as gone until the console says otherwise.** Checked in
+  the live console on 2026-08-29 (Jake, screenshot): Billing → Spend management
+  shows Credits, auto top-up, payment details and invoices, and **no data
+  sharing option anywhere on the page**, which is where every source places it.
+  Corroborating: xAI's own docs have no free-credits page (the URL 404s) and no
+  mention of credits in the security FAQ; the aggregator pages this was sourced
+  from carry May-2025 reports that the program ended and one states plainly that
+  it "should be treated as ended unless your xAI Console shows it today."
+  - Two innocent explanations remain, both cheap to rule out. (1) The $5 gate is
+    prior **spend**, not a deposit — the account has a $5 purchase and a $5.00
+    balance, so $0 consumed; the row may appear after real usage. (2) The
+    setting is team-level and may sit under **Team Settings** rather than
+    Billing, where xAI's docs do put the other team data controls; ZDR, if
+    enabled, replaces the sharing row entirely and blocks it.
+  - Until one of those produces a visible toggle, the Grok slot has **no credit
+    program** and its ~$121 season cost bills like any other model.
+  - The terms as *claimed* by the aggregator sources, kept as the claim and not
+    as verified fact: $150/month refreshing and non-accumulating, $25 at signup
+    expiring after 30 days, opt-in is team-level, permanent and admin-only, set
+    from Billing → Credits, credits landing within ~24 hours, and the 27 EU
+    states plus Iceland, Liechtenstein, Norway and the UK excluded. None of this
+    is on an x.ai page that resolves today.
+
 - **OpenAI**: complimentary daily tokens for shared traffic, ~1M/day on the
   flagship group at usage tiers 3–5 (250K at tiers 1–2), resetting 00:00 UTC.
   **The tool-use exclusion is still unverified** — the help-center article
