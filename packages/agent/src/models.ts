@@ -30,7 +30,11 @@ export interface LeagueModel {
  */
 export const LEAGUE_MODELS: LeagueModel[] = [
   { slot: 1, modelId: "anthropic/claude-fable-5", label: "Claude Fable 5", provider: "anthropic" },
-  { slot: 2, modelId: "anthropic/claude-opus-5", label: "Claude Opus 5", provider: "anthropic" },
+  // Slot 2 ran anthropic/claude-opus-5 until 2026-08-29; replaced because of
+  // Opus 5's price point (commissioner). Measured before the swap: $3.34 for
+  // one onboarding session, ~$335 projected for the season — about half the
+  // league's entire bill on one seat.
+  { slot: 2, modelId: "mistral/mistral-large-3", label: "Mistral Large 3", provider: "mistral" },
   { slot: 3, modelId: "anthropic/claude-sonnet-5", label: "Claude Sonnet 5", provider: "anthropic" },
   { slot: 4, modelId: "openai/gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "openai" },
   { slot: 5, modelId: "openai/gpt-5.6-terra", label: "GPT-5.6 Terra", provider: "openai" },
@@ -56,7 +60,7 @@ export const MODEL_PRICE_SEED: Record<
   { input: number; output: number; cachedInput?: number; contextWindow: number }
 > = {
   "anthropic/claude-fable-5": { input: 10, output: 50, cachedInput: 1, contextWindow: 1_000_000 },
-  "anthropic/claude-opus-5": { input: 5, output: 25, cachedInput: 0.5, contextWindow: 1_000_000 },
+  "mistral/mistral-large-3": { input: 2, output: 6, cachedInput: 0.5, contextWindow: 128_000 },
   "anthropic/claude-sonnet-5": { input: 2, output: 10, cachedInput: 0.2, contextWindow: 1_000_000 },
   "openai/gpt-5.6-sol": { input: 2, output: 10, cachedInput: 0.2, contextWindow: 1_050_000 },
   "openai/gpt-5.6-terra": { input: 2, output: 12, cachedInput: 0.2, contextWindow: 1_050_000 },

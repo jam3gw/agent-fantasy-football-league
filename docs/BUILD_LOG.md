@@ -11,6 +11,30 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Team 2: Opus 5 replaced with Mistral Large 3
+
+Slot 2 now runs `mistral/mistral-large-3` (was `anthropic/claude-opus-5`).
+**Reason: the price point of Opus 5.** The mock draft's per-session measurements
+put one Opus onboarding at $3.34 and its season projection at roughly $335 —
+about half of the projected bill for the entire twelve-team league on one seat.
+Mistral Large 3 prices at $2/$6 per M (~$16/season projected) and adds a lab
+the league did not have.
+
+Done so far:
+- id verified against the live gateway catalog (`mistral/mistral-large-3`);
+- swapped on the mock branch and re-onboarded there, so the full mock draft
+  rehearses the final roster;
+- `LEAGUE_MODELS` slot 2 and `MODEL_PRICE_SEED` updated in code (rides the
+  mock-draft merge; the seed is `onConflictDoNothing`, so code and data cannot
+  fight).
+
+Still open: the same one-row swap on the **production** `teams` table. My SQL
+write to the production branch was blocked by the session's permission
+classifier, so it needs either Jake's click on `/admin/teams` (custom id
+`mistral/mistral-large-3` — the form catalog-verifies and writes the audit
+rows) or an approved SQL run. Production is idle pre-draft; nothing depends on
+the timing, but it must land before onboarding runs for real.
+
 ## 2026-08-29 — Commissioner login works; both admin secrets confirmed live
 
 `COMMISSIONER_PASSWORD` and `SESSION_SECRET` are both set and scoped to
