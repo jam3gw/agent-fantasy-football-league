@@ -215,14 +215,35 @@ export function createModelStep(
       let partialReasoning = "";
       let partialText = "";
       let streamError: unknown = null;
+      // Whether the provider produced ANY content — tool calls included, which
+      // stream as their own part types and are the whole output of a routine
+      // step for several models. This is what the retry below gates on.
+      let sawOutput = false;
+      // A new reasoning block after an earlier one gets a blank line, appended
+      // lazily on its first delta: a final block whose text is withheld
+      // (Anthropic's omitted display) must not leave a trailing separator.
+      let pendingSeparator = false;
       let lastFlush = 0;
       for await (const part of result.fullStream) {
-        // A new reasoning block after an earlier one: keep the blocks readable
-        // in the durable log rather than running their words together.
-        if (part.type === "reasoning-start" && partialReasoning !== "") partialReasoning += "\n\n";
-        else if (part.type === "reasoning-delta") partialReasoning += part.text;
-        else if (part.type === "text-delta") partialText += part.text;
-        else if (part.type === "error") streamError = part.error;
+        if (part.type === "tool-input-start" || part.type === "tool-input-delta" || part.type === "tool-call") {
+          sawOutput = true;
+          continue;
+        }
+        if (part.type === "reasoning-start") {
+          pendingSeparator = partialReasoning !== "";
+          continue;
+        }
+        if (part.type === "reasoning-delta") {
+          if (pendingSeparator) {
+            partialReasoning += "\n\n";
+            pendingSeparator = false;
+          }
+          partialReasoning += part.text;
+          sawOutput = true;
+        } else if (part.type === "text-delta") {
+          partialText += part.text;
+          sawOutput = true;
+        } else if (part.type === "error") streamError = part.error;
         else continue;
         if (!config.onPartial || streamError !== null) continue;
         const interval =
@@ -232,18 +253,22 @@ export function createModelStep(
         lastFlush = now;
         await config.onPartial({ stepNo, reasoning: partialReasoning, text: partialText });
       }
-      return { result, partialReasoning, partialText, streamError };
+      return { result, partialReasoning, partialText, streamError, sawOutput };
     };
 
     const providerOptions = reasoningVisibilityOptions(req.modelId);
     let run = await attempt(providerOptions);
-    // Defensive fallback: if the very first thing back was an error — no
-    // reasoning, no text — and we had sent a visibility option, retry once
+    // Defensive fallback: if the very first thing back was an error — before
+    // any output at all — and we had sent a visibility option, retry once
     // without it. A gateway or provider that starts rejecting the option must
     // cost the league its thinking display, never its sessions. An error after
-    // real output is a genuine provider failure and is not retried here (the
-    // tick's requeue owns that).
-    if (run.streamError !== null && providerOptions !== null && run.partialReasoning === "" && run.partialText === "") {
+    // real output (reasoning, text, or a tool call) is a genuine provider
+    // failure and is not retried here (the tick's requeue owns that). The drop
+    // is carried on the result so the session loop can record it — a silently
+    // degraded step would read as "this model just shows no reasoning".
+    let visibilityOptionDropped: string | null = null;
+    if (run.streamError !== null && providerOptions !== null && !run.sawOutput) {
+      visibilityOptionDropped = String(run.streamError);
       run = await attempt(null);
     }
     if (run.streamError !== null) throw run.streamError;
@@ -269,6 +294,7 @@ export function createModelStep(
       // The reasoning deltas accumulated above ARE the thinking log: the same
       // text the live stream shows, made durable by the session loop (§12.1).
       reasoning: partialReasoning,
+      ...(visibilityOptionDropped !== null ? { visibilityOptionDropped } : {}),
       toolCalls,
       usage: usageOf(usage ?? {}),
       gatewayCostUsd: gatewayCostFrom(providerMetadata),

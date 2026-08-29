@@ -136,6 +136,32 @@ describe("createModelStep streaming", () => {
     expect(captured[0]!.providerOptions).toBeDefined();
     expect(captured[1]!.providerOptions).toBeUndefined();
     expect(result.text).toBe("ok");
+    // The degradation is carried on the result so the loop can record it —
+    // otherwise a permanent rejection reads as "this model shows no reasoning".
+    expect(result.visibilityOptionDropped).toContain("unknown provider option");
+  });
+
+  it("does not retry an error that arrives after a streamed tool call — the routine all-tool step", async () => {
+    // Several models' normal steps are pure tool calls: no text, no visible
+    // reasoning. An error after one is a provider failure, not an option
+    // rejection, and retrying it would re-bill the first attempt invisibly.
+    let calls = 0;
+    const step = createModelStep({} as never, {
+      stream: (() => {
+        calls++;
+        return fakeStreamResult({
+          parts: [
+            { type: "tool-input-start" },
+            { type: "error", error: new Error("provider fell over mid-call") },
+          ],
+        });
+      }) as never,
+      flushIntervalMs: 0,
+    });
+    await expect(step({ modelId: "anthropic/claude-opus-5", messages: [], tools: [] }, 0)).rejects.toThrow(
+      "provider fell over mid-call",
+    );
+    expect(calls).toBe(1);
   });
 
   it("does not retry an error that arrives after real output — that is a provider failure, not an option rejection", async () => {
@@ -173,6 +199,24 @@ describe("createModelStep streaming", () => {
     });
     const result = await step({ modelId: "test/model", messages: [], tools: [] }, 0);
     expect(result.reasoning).toBe("first block.\n\nsecond block.");
+  });
+
+  it("a final reasoning block with withheld text leaves no trailing separator", async () => {
+    // Anthropic's omitted display streams a reasoning block whose text never
+    // arrives; the separator is appended lazily so it cannot dangle.
+    const step = createModelStep({} as never, {
+      stream: (() =>
+        fakeStreamResult({
+          parts: [
+            { type: "reasoning-start" },
+            { type: "reasoning-delta", text: "a real thought" },
+            { type: "reasoning-start" },
+          ],
+        })) as never,
+      flushIntervalMs: 0,
+    });
+    const result = await step({ modelId: "test/model", messages: [], tools: [] }, 0);
+    expect(result.reasoning).toBe("a real thought");
   });
 
   it("throttles flushes by wall clock rather than writing one per delta", async () => {
@@ -345,6 +389,45 @@ describe("partial sink and session_stream lifecycle", () => {
     const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
     const assistant = events.find((e) => e.type === "assistant");
     expect((assistant!.content as { reasoning?: string }).reasoning).toBe("let me think");
+  });
+
+  it("a dropped visibility option is recorded as an info event in the transcript", async () => {
+    const id = await makeSession();
+    const logTool: LeagueTool = defineTool({
+      name: "write_decision_log",
+      description: "end the session",
+      ending: true,
+      schema: z.object({ summary: z.string() }),
+      async execute() {
+        return { ok: true };
+      },
+    });
+    const deps: RunSessionDeps = {
+      db,
+      clock,
+      tools: [logTool],
+      toolConfig: {},
+      buildSystemPrompt: async () => "system",
+      buildContext: async () => ({ brief: "brief", snapshot: {} }),
+      modelStep: async (): Promise<ModelStepResult> => ({
+        text: "done",
+        visibilityOptionDropped: "Error: unknown provider option",
+        toolCalls: [{ toolCallId: "c1", toolName: "write_decision_log", args: { summary: "ok" } }],
+        usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cachedInputTokens: 0 },
+        gatewayCostUsd: null,
+        billedTo: "gateway",
+        assistantMessage: { role: "assistant", content: "done" },
+      }),
+    };
+
+    await runSession(id, deps);
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
+    const info = events.find(
+      (e) => e.type === "info" && "visibility_option_dropped" in (e.content as Record<string, unknown>),
+    );
+    expect((info!.content as { visibility_option_dropped: string }).visibility_option_dropped).toContain(
+      "unknown provider option",
+    );
   });
 
   it("a step with no visible reasoning records no reasoning field at all", async () => {
