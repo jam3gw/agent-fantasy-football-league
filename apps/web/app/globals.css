@@ -1,48 +1,114 @@
 @import "tailwindcss";
 
+/*
+ * The Jake Moses design system (`_ds/.../tokens/*.css` in the design handoff):
+ * warm paper rather than white, a golf-course green accent, and a near-black
+ * band colour that the masthead, the leaderboard and the matchup hero all sit
+ * on. Single theme by design decision — the system removed its dark tokens and
+ * its theme toggle, so there is no `prefers-color-scheme` branch here either.
+ *
+ * The semantic names below (`--background`, `--surface`, `--muted`, …) are the
+ * ones the admin pages already use. Keeping the names and changing only the
+ * values is what lets the whole site adopt the palette without touching the
+ * twelve pages the redesign does not cover.
+ */
 :root {
-  --background: #fbfaf8;
-  --surface: #ffffff;
-  --border: #e5e1da;
-  --foreground: #1a1917;
-  --muted: #6b665e;
-  --accent: #1f6f4a;
-  --accent-soft: #e8f2ec;
-  --warn: #9a5b12;
-  --danger: #a52f24;
-}
+  /* base neutrals */
+  --paper: #faf8f3;
+  --paper-alt: #f1ece1;
+  --white: #fffdf9;
+  --ink: #2a2823;
+  --ink-soft: #6f6a5e;
+  /*
+   * The design system's slate is #a39c8c, which is 2.57:1 on this paper — it
+   * fails WCAG AA for the small meta text the layout uses it for, on every
+   * screen. Darkened until it passes (4.63:1) while still reading as the
+   * quietest text on the page. The system's own value is kept below as
+   * `--slate-soft-decorative` for the places it is a shape, not a word.
+   */
+  --slate-soft: #736c60;
+  /* 4.89:1 on paper, 5.11:1 on a card, 4.75:1 on the standings' playoff tint.
+     Still under AA on `--bg-alt` (4.41:1), so quiet text sitting on the alt
+     band uses `--muted`. Enforcing AA has left this tier close to `--muted`;
+     that is the honest consequence of the original value failing at 2.57:1,
+     not an accident. */
+  --slate-soft-decorative: #a39c8c;
+  --black: #1c1a16;
+  --black-alt: #242019;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #14140f;
-    --surface: #1d1d18;
-    --border: #34342c;
-    --foreground: #eceae4;
-    --muted: #9c968a;
-    --accent: #6bbf90;
-    --accent-soft: #1c2f25;
-    --warn: #d8a44f;
-    --danger: #e08076;
-  }
+  /* base brand */
+  --green: #2f5d34;
+  --green-dark: #24461f;
+  --green-light: #4a8f4a;
+  --green-lighter: #7ab86f;
+
+  /* semantic */
+  --background: var(--paper);
+  --background-alt: var(--paper-alt);
+  --surface: var(--white);
+  --band: var(--black);
+  --band-alt: var(--black-alt);
+  --border: rgba(42, 40, 35, 0.1);
+  --border-strong: rgba(42, 40, 35, 0.18);
+  --foreground: var(--ink);
+  --muted: var(--ink-soft);
+  --faint: var(--slate-soft);
+  --accent: var(--green);
+  --accent-hover: var(--green-dark);
+  --accent-soft: rgba(47, 93, 52, 0.08);
+  --accent-bright: var(--green-lighter);
+  --warn: #8a6a1f;
+  --danger: #8a3b30;
+
+  /* on the dark band, where ink-on-paper values go invisible */
+  --band-text: var(--paper);
+  /* On the near-black band the system's slate is 6.36:1 — it passes there,
+     and it is the value the design uses for the band's secondary text. */
+  --band-muted: var(--slate-soft-decorative);
+  /* #6f6a5e is only 3.23:1 on the band; this is 4.93:1. */
+  --band-faint: #8f8878;
+  --band-border: rgba(250, 248, 243, 0.1);
+  --band-fill: rgba(250, 248, 243, 0.06);
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-alt: var(--background-alt);
   --color-surface: var(--surface);
+  --color-band: var(--band);
+  --color-band-alt: var(--band-alt);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
+  --color-faint: var(--faint);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
+  --color-accent-bright: var(--accent-bright);
   --color-warn: var(--warn);
   --color-danger: var(--danger);
-  --font-sans: var(--font-geist-sans);
+  --color-band-text: var(--band-text);
+  --color-band-muted: var(--band-muted);
+  --color-band-faint: var(--band-faint);
+  --color-band-border: var(--band-border);
+  --color-band-fill: var(--band-fill);
+  --font-sans: var(--font-inter-tight);
   --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-hover);
 }
 
 /*
@@ -55,4 +121,68 @@ body {
   overflow-x: auto;
   min-width: 0;
   overscroll-behavior-x: contain;
+}
+
+/* Same rule for the horizontal strips the broadcast layout scrolls: the
+   season timeline and the leaderboard's metric tabs. */
+.scroll-x {
+  overflow-x: auto;
+  min-width: 0;
+  overscroll-behavior-x: contain;
+}
+
+/*
+ * The masthead ticker. The track holds the week's games twice over, so
+ * translating it by half its width loops seamlessly.
+ */
+@keyframes ticker-slide {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* The live dot, on the masthead pill and above the activity rail. */
+@keyframes soft-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.ticker-track {
+  display: flex;
+  width: max-content;
+  animation: ticker-slide 52s linear infinite;
+}
+
+.live-dot {
+  animation: soft-pulse 1.8s ease-in-out infinite;
+}
+
+/*
+ * Someone who has asked not to see motion should not be handed a scrolling
+ * ticker and a blinking dot. Stopping the animation alone would strand every
+ * game past the first screenful, so the track becomes an ordinary horizontal
+ * scroller instead and the second, duplicate copy of the games is dropped.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track,
+  .live-dot {
+    animation: none;
+  }
+
+  .ticker-viewport {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+
+  .ticker-track > [data-ticker-echo] {
+    display: none;
+  }
 }
