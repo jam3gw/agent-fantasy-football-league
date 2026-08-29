@@ -1,11 +1,23 @@
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist_Mono, Inter_Tight } from "next/font/google";
 import Link from "next/link";
+import { Container } from "@/components/broadcast";
+import { Masthead } from "@/components/masthead";
 import "./globals.css";
 
-const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
+/**
+ * Inter Tight for everything, per the bound design system — it replaced the
+ * Syne + DM Sans pairing there, and the broadcast layout leans on its 700/800
+ * weights at negative tracking. Geist Mono stays for the places the design
+ * sets numbers in mono: activity timestamps and the decision log.
+ */
+const interTight = Inter_Tight({
+  variable: "--font-inter-tight",
+  subsets: ["latin"],
+  weight: ["300", "400", "500", "600", "700", "800"],
+});
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
@@ -14,42 +26,57 @@ export const metadata: Metadata = {
     "Twelve AI models manage twelve fantasy football teams for the 2026 NFL season. Every decision, transcript and scratchpad is public.",
 };
 
-const NAV = [
-  ["/", "Home"],
-  ["/matchups/1", "Matchups"],
-  ["/standings", "Standings"],
+/**
+ * The routes the six-link bar does not carry. They are all still in SPEC
+ * §12.1; cutting the nav was about what a reader follows every week, not about
+ * removing pages, so these keep a permanent home down here.
+ */
+const MORE = [
   ["/transactions", "Transactions"],
   ["/waivers", "Waivers"],
   ["/trades", "Trades"],
-  ["/board", "Board"],
   ["/draft", "Draft"],
   ["/report", "Reporter"],
-  ["/benchmark", "Benchmark"],
   ["/spend", "Spend"],
   ["/about", "About"],
 ] as const;
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}>
-      <body className="min-h-full flex flex-col font-sans">
-        <header className="border-b border-border bg-surface">
-          <div className="mx-auto w-full max-w-6xl px-4 py-3">
-            <Link href="/" className="text-lg font-semibold tracking-tight">
-              Agent Fantasy Football League
-            </Link>
-            <nav className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
-              {NAV.map(([href, label]) => (
-                <Link key={href} href={href} className="hover:text-accent">
+    <html lang="en" className={`${interTight.variable} ${geistMono.variable} h-full antialiased`}>
+      <head>
+        {/* Font Awesome is the design system's entire icon system and its only
+            third-party visual dependency; it asks explicitly that icons come
+            from here rather than being hand-drawn as SVG. */}
+        <link
+          rel="stylesheet"
+          href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
+        />
+      </head>
+      <body className="flex min-h-full flex-col bg-background font-sans text-foreground">
+        <Masthead />
+        <main className="flex-1">{children}</main>
+        <footer className="border-t border-border bg-background-alt">
+          <Container className="py-[26px]">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <span className="text-[13px] text-muted">
+                Twelve AI models. One prompt. One set of tools. Everything here is public.
+              </span>
+              <span className="text-[12px] text-faint">
+                Scores update every 30 seconds while games are live.
+              </span>
+            </div>
+            <nav
+              className="mt-4 flex flex-wrap gap-x-5 gap-y-2 border-t border-border pt-4 text-[13px]"
+              aria-label="More pages"
+            >
+              {MORE.map(([href, label]) => (
+                <Link key={href} href={href} className="text-muted hover:text-accent">
                   {label}
                 </Link>
               ))}
             </nav>
-          </div>
-        </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">{children}</main>
-        <footer className="border-t border-border px-4 py-4 text-center text-xs text-muted">
-          Twelve AI models, one prompt, one tool set. Everything here is public.
+          </Container>
         </footer>
         <Analytics />
         <SpeedInsights />
