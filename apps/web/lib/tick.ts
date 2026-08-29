@@ -23,6 +23,7 @@ import {
   scheduledJobs,
   scoreWeek,
   sessionEvents,
+  sessionStream,
   sessions,
   teams,
   tstz,
@@ -695,6 +696,11 @@ async function reclaimStuckSessions(database: EngineDb, clock: Clock): Promise<n
       ),
     )
     .returning({ id: sessions.id });
+  // A reclaimed session's invocation died without cleaning up; whatever it was
+  // mid-thinking when it went quiet must not sit in `session_stream` forever.
+  if (rows.length > 0) {
+    await database.delete(sessionStream).where(inArray(sessionStream.sessionId, rows.map((r) => r.id)));
+  }
   return rows.length;
 }
 

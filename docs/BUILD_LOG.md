@@ -55,6 +55,45 @@ exact same components as the static page (extracted to
   to the `session_stream` create only; 0003_snapshot.json now records the true
   schema, so future generates diff cleanly.
 
+**Review round 1** (fresh-context reviewer, 10 findings; all addressed):
+1. `router.refresh()` does not invalidate the ISR cache (Next 16 docs), so a
+   one-shot refresh on a stamp movement usually re-served the stale payload
+   and went quiet. Fixed: a movement opens a refresh window — the client keeps
+   refreshing each poll until the longest §12.1 revalidate window (300 s +
+   slack) has lapsed since the last movement, so one refresh always lands on
+   the regenerated page.
+2. `clearPartial` was awaited unguarded on the success path: a transient error
+   deleting the throwaway preview row could mark a *succeeded* session failed.
+   Fixed: `clearPartial` swallows internally, same rationale as the sink.
+3. The site's own polling ate the shared 60/min/IP public-API budget (one live
+   tab ≈ 27 rpm; two tabs + NAT neighbours → 429 churn). Fixed: `pulse` and
+   `live` each rate-limit in their own per-IP bucket; the five data-API routes
+   keep the shared window.
+4. No tests for the live route. Fixed: read logic extracted to
+   `lib/sessionLive.ts` and tested — cursor filtering, hasMore paging, the
+   public-field allowlist (`idempotency_key` and `workflow_run_id` must never
+   leave), and the partial being hidden for queued/terminal sessions.
+5. Between the assistant-event insert and the partial delete, the live view
+   could render the same step twice. Fixed client-side: a batch carrying an
+   assistant event supersedes the staged partial for that poll.
+6. Leaked `session_stream` rows when an invocation died hard: fixed — cleared
+   on the skipped-deadline path, on resume (a killed invocation's stale
+   partial must not show as the new one's thinking), and by the tick's
+   `reclaimStuckSessions`.
+7. Pulse missed commissioner-driven changes. Fixed: the stamp now also covers
+   `league_settings.updated_at` and `commissioner_actions` (`teams` has no
+   updated_at; §12.2 logs every admin action, which is the better signal).
+   `players` is deliberately not covered — see comment in `lib/pulse.ts`.
+8. Pulse was 7 round trips. Fixed: one statement of scalar subqueries anchored
+   on the settings singleton. Bug found while fixing: a scalar subquery like
+   `max(updated_at)` over a table *without* that column silently correlates to
+   the outer `league_settings` row and 42803s the whole statement — the tests
+   now exercise every column.
+9. Each flush rewrote the whole accumulated partial at 2/s regardless of size.
+   Fixed: the throttle backs off as the partial grows (500 ms → 2 s past 8 KB
+   → 5 s past 32 KB).
+10. SPEC §8.2 still said `generateText`; updated to match §12.1 v1.10.
+
 **Verified here.** Full suite green (510 tests, 6 new: streaming/partial-sink
 lifecycle, pulse stamp movement). `pnpm build` run against the Neon `dev`
 branch — migration 0003 applied there and the build prerendered every page.

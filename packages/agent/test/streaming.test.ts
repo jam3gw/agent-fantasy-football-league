@@ -8,10 +8,10 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
-import { initLeagueSettings, modelPrices, sessionStream, sessions, teams } from "@league/engine";
+import { initLeagueSettings, modelPrices, sessionEvents, sessionStream, sessions, teams } from "@league/engine";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { fakeStreamResult, type FakePart } from "./helpers/stream.ts";
-import { createModelStep } from "../src/modelStep.ts";
+import { createModelStep, partialFlushIntervalMs } from "../src/modelStep.ts";
 import { clearPartial, createPartialSink, type StreamPartial } from "../src/stream.ts";
 import { runSession, type ModelStepResult, type RunSessionDeps } from "../src/session.ts";
 import { defineTool, type LeagueTool } from "../src/tools/types.ts";
@@ -74,6 +74,13 @@ describe("createModelStep streaming", () => {
     await step({ modelId: "test/model", messages: [], tools: [] }, 0);
     expect(flushes.length).toBe(1);
     expect(flushes[0]!.text).toBe("x");
+  });
+
+  it("backs the flush interval off as the partial grows, so long steps do not rewrite kilobytes twice a second", () => {
+    expect(partialFlushIntervalMs(0)).toBe(500);
+    expect(partialFlushIntervalMs(8_000)).toBe(500);
+    expect(partialFlushIntervalMs(8_001)).toBe(2_000);
+    expect(partialFlushIntervalMs(32_001)).toBe(5_000);
   });
 
   it("rethrows a provider failure delivered as an error part, since streamText does not throw", async () => {
@@ -214,6 +221,54 @@ describe("partial sink and session_stream lifecycle", () => {
     const result = await runSession(id, deps);
     expect(result.status).toBe("succeeded");
     expect(await db.select().from(sessionStream).where(eq(sessionStream.sessionId, id))).toEqual([]);
+  });
+
+  it("a resumed session discards the killed invocation's stale partial before its first step", async () => {
+    const id = await makeSession();
+    // The prior invocation got as far as a transcript and a staged partial,
+    // then died. Mark the row running (resume path) and leave the partial.
+    await db.insert(sessionEvents).values([
+      { sessionId: id, seq: 0, type: "system", content: { prompt: "system" }, createdAt: clock.now() },
+      { sessionId: id, seq: 1, type: "user", content: { brief: "brief", snapshot: {} }, createdAt: clock.now() },
+    ]);
+    await db.update(sessions).set({ status: "running" }).where(eq(sessions.id, id));
+    await createPartialSink(db, clock, id)({ stepNo: 0, reasoning: "from the dead invocation", text: "" });
+
+    let partialAtFirstStep: string | null = "unread";
+    const logTool: LeagueTool = defineTool({
+      name: "write_decision_log",
+      description: "end the session",
+      ending: true,
+      schema: z.object({ summary: z.string() }),
+      async execute() {
+        return { ok: true };
+      },
+    });
+    const deps: RunSessionDeps = {
+      db,
+      clock,
+      tools: [logTool],
+      toolConfig: {},
+      buildSystemPrompt: async () => "system",
+      buildContext: async () => ({ brief: "brief", snapshot: {} }),
+      modelStep: async (): Promise<ModelStepResult> => {
+        const rows = await db.select().from(sessionStream).where(eq(sessionStream.sessionId, id));
+        partialAtFirstStep = rows[0]?.reasoning ?? null;
+        return {
+          text: "done",
+          toolCalls: [{ toolCallId: "c1", toolName: "write_decision_log", args: { summary: "ok" } }],
+          usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cachedInputTokens: 0 },
+          gatewayCostUsd: null,
+          billedTo: "gateway",
+          assistantMessage: { role: "assistant", content: "done" },
+        };
+      },
+    };
+
+    const result = await runSession(id, deps);
+    expect(result.status).toBe("succeeded");
+    // The stale partial was gone before the resumed session's first step ran.
+    expect(partialAtFirstStep).toBeNull();
   });
 
   it("a failed session leaves no stale thinking preview behind", async () => {

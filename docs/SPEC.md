@@ -597,7 +597,9 @@ Rules:
 4. loop:
      if Clock.now() > deadline_at -> break
      (draft_pick only) if draft.status != 'running' or draft.current_pick != context.pick_no -> break
-     model step: generateText(messages, tools) -> record assistant message + usage
+     model step: streamText(messages, tools) -> record assistant message + usage
+                 (streamed for the live transcript, v1.10; deltas staged in
+                  session_stream while the step runs, no limits set)
      if no tool calls -> break
      for each tool call: tool step -> validate args (zod) -> run engine/data function -> record result
      if the tool was the kind's ENDING TOOL and it succeeded -> break
