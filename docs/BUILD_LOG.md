@@ -686,6 +686,43 @@ What is done, what needs Jake, and what needs the season to start. Nothing below
 ### Still outstanding
 - Live smoke tests per model, the mock draft, and the simulated week all need credentials that live only in Vercel; they run against a preview deploy.
 
+## 2026-08-29 — Initial ingests; the draft is blocked on the FantasyPros plan
+
+Booked the three initial ingests on production once the key was set.
+
+- `ingest.players` — **12,225 players**, 11,985 with a position.
+- `ingest.schedule` — **272 games** for 2026, the full season.
+- `ingest.fp_rankings` — worked, and is **not enough**.
+
+**A silent success, fixed.** The first rankings run reported `done` having
+ingested nothing: zero rankings and zero `fp_usage` rows, so no request had even
+been attempted. The cause was `if (!fantasyprosApiKey) return;`, commented "skip
+rather than fail the tick" — reasoning that was already stale, since these jobs
+no longer run inline and the tick's stages are individually isolated. A missing
+key is a misconfiguration (§17 requires it) that blocks the draft (§5.7), so it
+now writes a `fp.key` health row and throws. Same for `ingest.fp_injuries`.
+
+**The real blocker.** With the key in place the ingest ran properly — eight
+calls, all successful — and produced 68 ranked players against a gate that needs
+200. This is the §5.7 **verify** item ("free-tier truncation measured"), now
+measured: the API's own payload says `tier: free, limit: 10, count: 518`. Every
+request is capped at ten rows, so the per-position calls cannot get past it
+either. Details in `docs/VERIFIED.md`.
+
+The spec gives no fallback for this, which is the case CLAUDE.md says to bring
+to Jake rather than decide alone — the options change the league's character:
+upgrade the FantasyPros plan (spec-faithful; §2 fixes FantasyPros as the
+rankings source), lower the §5.7 threshold (a 168-pick draft off 68 ranked
+players means the board runs dry around round four and auto-pick has nothing to
+go on), or seed the board from another source. Recorded here and surfaced on
+`/admin/rankings`; everything else continues.
+
+### Questions for Jake
+
+1. **FantasyPros plan.** The free tier caps every response at 10 players, so the
+   draft gate is unreachable. Upgrade, or change the gate? This blocks the draft
+   and nothing else — the rest of the league is running.
+
 ## 2026-08-29 — The scheduler is alive; three bugs only production could find
 
 Jake set `CRON_SECRET` and redeployed. Bringing the tick up surfaced three
