@@ -41,6 +41,7 @@ import {
   rankingBefore,
   summarizeBody,
   teamName,
+  transactionPlayerIds,
   winChanceFromMargin,
 } from "./broadcastLogic";
 
@@ -128,15 +129,7 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
 
   // The engine stores player ids in transaction payloads, so the names have to
   // be looked up before any of them can be turned into a sentence.
-  const referenced = [
-    ...new Set(
-      txns.flatMap((t) =>
-        ["playerId", "dropPlayerId"]
-          .map((key) => t.payload[key])
-          .filter((v): v is string => typeof v === "string" && v !== ""),
-      ),
-    ),
-  ];
+  const referenced = [...new Set(txns.flatMap((t) => transactionPlayerIds(t.payload)))];
   const playerNames =
     referenced.length === 0
       ? []
