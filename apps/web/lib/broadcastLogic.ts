@@ -216,7 +216,10 @@ export function describeTransaction(
   const names = (key: string): string[] => {
     const list = payload[key];
     if (!Array.isArray(list)) return [];
-    return list.filter((v): v is string => typeof v === "string" && v !== "").map((id) => nameOf(id) ?? id);
+    return list
+      .filter((v): v is string => typeof v === "string" && v !== "")
+      .map((id) => nameOf(id))
+      .filter((n): n is string => n !== null);
   };
   const added =
     resolved("playerId") ??
@@ -237,7 +240,9 @@ export function describeTransaction(
     }
     case "trade": {
       // trades.ts writes the proposer's view: `givePlayerIds` leave the team
-      // the rail attributes the transaction to, `getPlayerIds` arrive.
+      // the rail attributes the transaction to, `getPlayerIds` arrive. An id
+      // the resolver cannot name is left out rather than shown raw; when
+      // nothing resolves at all the generic sentence stands in.
       const gave = names("givePlayerIds");
       const got = names("getPlayerIds");
       if (gave.length > 0 && got.length > 0) return `Traded away ${gave.join(", ")} for ${got.join(", ")}.`;
@@ -279,12 +284,24 @@ export function describeTransaction(
       const round = num("round");
       const where =
         pickNo !== null ? ` at pick ${pickNo}${round !== null ? ` (round ${round})` : ""}` : "";
-      const verb =
-        text("made_by") === "autopick"
-          ? `Auto-picked ${who}${where} when the clock ran out.`
-          : `Drafted ${who}${where}.`;
+      if (text("made_by") === "autopick") {
+        // The autopick path (lib/draft.ts) stores a marker reason, not agent
+        // prose — "auto-pick: commissioner" | "auto-pick: deadline" |
+        // "auto-pick: session ended without a pick" — so it is translated,
+        // never quoted as if the agent said it.
+        const marker = text("reason");
+        const why =
+          marker === "auto-pick: deadline"
+            ? " when the clock ran out"
+            : marker === "auto-pick: session ended without a pick"
+              ? " after its session ended without a pick"
+              : marker === "auto-pick: commissioner"
+                ? " on the commissioner's flag"
+                : "";
+        return `Auto-picked ${who}${where}${why}.`;
+      }
       const reason = text("reason");
-      return reason ? `${verb} “${reason}”` : verb;
+      return reason ? `Drafted ${who}${where}. “${reason}”` : `Drafted ${who}${where}.`;
     }
     case "commissioner":
       return text("reason") ?? "The commissioner acted.";
