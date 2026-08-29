@@ -289,7 +289,7 @@ describe("the ledger itself", () => {
   });
 });
 
-describe("every step bills the AI Gateway", () => {
+describe("billing: the gateway pays unless the provider is BYOK (2026-08-29)", () => {
   it("createModelStep reports `gateway`, and sets no provider options at all", async () => {
     // The commissioner's decision on 2026-08-28: one billing path, so one
     // price list and one balance. Asserted on the model step's own output —

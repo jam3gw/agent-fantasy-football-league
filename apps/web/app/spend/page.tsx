@@ -241,8 +241,9 @@ export default async function SpendPage() {
           </Table>
         )}
         <p className="mt-3 text-xs text-muted">
-          List cost prices every step from the model catalog, so agents stay comparable. Every call bills the AI Gateway, so paid cost
-          tracks list cost; the two columns stay separate because the gateway&rsquo;s own reported cost is preferred when it sends one.
+          List cost prices every step from the model catalog, so agents stay comparable. Paid cost counts only what bills the
+          gateway&rsquo;s balance — the commissioner&rsquo;s own Anthropic, OpenAI and xAI keys pay for those providers&rsquo; calls
+          (§8.9), so their teams read near zero here by design. List cost is the column to compare teams on.
         </p>
       </Card>
 
