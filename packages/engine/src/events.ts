@@ -50,12 +50,18 @@ export interface CreateSessionInput {
 }
 
 /**
- * Idempotently create a queued session and the job that starts it.
+ * Kinds that belong to the draft rather than to a fantasy week (§8.7). Typed
+ * against the union so renaming a kind is a compile error here rather than a
+ * silently disabled exclusion. `/spend` reads this too, so the projection's
+ * "plus the draft" line and the rollups' week attribution cannot drift apart.
+ */
+export const PRE_SEASON_KINDS = new Set<SessionKind>(["draft_pick", "onboarding"]);
+
+/**
+ * Idempotently create a queued session. The queued row *is* the queue; the
+ * tick's sweeper is its only starter (§9.2).
  * Returns the session id, or null when the idempotency key already exists.
  */
-/** Kinds that belong to the draft rather than to a fantasy week (§8.7). */
-const PRE_SEASON_KINDS = new Set(["draft_pick", "onboarding"]);
-
 export async function createSession(
   db: EngineDb,
   settings: LeagueSettings,
@@ -65,6 +71,27 @@ export async function createSession(
   const deadlineAt =
     input.deadlineAt ??
     new Date(input.dueAt.getTime() + (guard.deadlineMinutes ?? 120) * 60_000);
+
+  const context: Record<string, unknown> = {
+    ...(input.context ?? {}),
+    due_at: input.dueAt.toISOString(),
+    deadline_at: deadlineAt.toISOString(),
+    tool_call_ceiling: guard.toolCallCeiling,
+  };
+  // Every in-season booking carries the fantasy week it belongs to. The spend
+  // rollups attribute a step to a week through this (§8.7), so a kind that
+  // omitted it — trade responses, votes, board replies, injury responses —
+  // dropped out of the week's totals entirely.
+  //
+  // The pre-season kinds are deliberately left without one: a draft is fourteen
+  // sessions per agent, and calling that "week 1" would put the whole draft
+  // against the weekly alarm on draft day. §8.7 counts the draft separately,
+  // under "plus the draft". The delete is load-bearing rather than an omission:
+  // `runOnboardingAction` passes `week` explicitly, so a caller's context can
+  // put the week back on exactly the kinds this excludes.
+  if (PRE_SEASON_KINDS.has(input.kind)) delete context.week;
+  else context.week = input.context?.week ?? settings.currentWeek;
+
   const rows = await db
     .insert(sessions)
     .values({
@@ -75,22 +102,7 @@ export async function createSession(
       modelId: input.modelId,
       status: "queued",
       createdAt: input.now,
-      context: {
-        // Every in-season booking carries the fantasy week it belongs to. The
-        // spend rollups attribute a step to a week through this (§8.7), so a
-        // kind that omitted it — trade responses, votes, board replies, injury
-        // responses — dropped out of the week's totals entirely.
-        //
-        // The pre-season kinds are deliberately left without one: a draft is
-        // fourteen sessions per agent, and calling that "week 1" would put the
-        // whole draft against the weekly alarm on draft day. §8.7 counts the
-        // draft separately, under "plus the draft".
-        ...(PRE_SEASON_KINDS.has(input.kind) ? {} : { week: input.context?.week ?? settings.currentWeek }),
-        ...(input.context ?? {}),
-        due_at: input.dueAt.toISOString(),
-        deadline_at: deadlineAt.toISOString(),
-        tool_call_ceiling: guard.toolCallCeiling,
-      },
+      context,
     })
     .onConflictDoNothing({ target: sessions.idempotencyKey })
     .returning({ id: sessions.id });

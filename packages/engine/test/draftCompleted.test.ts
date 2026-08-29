@@ -193,6 +193,48 @@ describe("createSession stamps what the scheduler and the ledger need", () => {
     expect(row.context.week).toBe(8);
   });
 
+  it("leaves the pre-season kinds without a week, even when the caller passes one", async () => {
+    // §8.7 counts the draft under "plus the draft", not against a week: a draft
+    // is fourteen sessions per agent, and calling that "week 1" puts the whole
+    // draft against the $40 weekly alarm on draft day. `runOnboardingAction`
+    // passes `week` explicitly, so the exclusion has to beat the caller — a
+    // spread that merged the caller's context last would silently lose to it.
+    const clock = new FixedClock("2026-09-01T15:00:00Z");
+    await seedLeague(db, { phase: "pre_draft", currentWeek: 1 });
+    const ids = await seedTeams(db);
+    const settings = await getSettings(db);
+
+    const onboarding = await createSession(db, settings, {
+      teamId: ids[0]!,
+      kind: "onboarding",
+      trigger: "commissioner",
+      idempotencyKey: "onboard-1",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { week: settings.currentWeek },
+    });
+    const onboardingRow = (await db.select().from(sessions).where(eq(sessions.id, onboarding!)))[0]!;
+    expect(onboardingRow.context.week).toBeUndefined();
+    expect("week" in onboardingRow.context).toBe(false);
+
+    const pick = await createSession(db, settings, {
+      teamId: ids[0]!,
+      kind: "draft_pick",
+      trigger: "draft",
+      idempotencyKey: "pick-1",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { pick_no: 1, week: 1 },
+    });
+    const pickRow = (await db.select().from(sessions).where(eq(sessions.id, pick!)))[0]!;
+    expect(pickRow.context.week).toBeUndefined();
+    // The rest of the caller's context still survives.
+    expect(pickRow.context.pick_no).toBe(1);
+    expect(typeof pickRow.context.deadline_at).toBe("string");
+  });
+
   it("books no second starter: the queued session row is the queue", async () => {
     const clock = new FixedClock("2026-10-20T15:00:00Z");
     await seedLeague(db, { phase: "regular", currentWeek: 7 });

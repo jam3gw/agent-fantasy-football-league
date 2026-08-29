@@ -592,3 +592,34 @@ describe("§4.1 — resuming a session that died mid-batch", () => {
     expect(result.toolCalls).toBe(2); // the restored one plus the ending tool
   });
 });
+
+describe("§9.2 — the tick's reclaim is authoritative", () => {
+  it("refuses to run a session the tick already reclaimed, and does not overwrite it", async () => {
+    // `reclaimStuckSessions` fails a running session that has gone quiet and
+    // hands its team's slot to the next one. If this invocation then wrote
+    // `running` (and later `succeeded`) over that row keyed only on id, the
+    // reclaim would leave no trace and the team would have two live runners.
+    toolRuns = [];
+    const sessionId = await makeSession("weekly_review");
+    await db
+      .update(sessions)
+      .set({ status: "failed", error: "abandoned: no progress", endedAt: clock.now() })
+      .where(eq(sessions.id, sessionId));
+
+    let calls = 0;
+    const result = await runSession(sessionId, {
+      ...deps([]),
+      modelStep: async () => {
+        calls++;
+        return step({ text: "hello" });
+      },
+    });
+
+    expect(calls, "no model step may run for a reclaimed session").toBe(0);
+    expect(result.status).toBe("failed");
+    expect(toolRuns).toEqual([]);
+    const row = (await db.select().from(sessions).where(eq(sessions.id, sessionId)))[0]!;
+    expect(row.status).toBe("failed");
+    expect(row.error).toBe("abandoned: no progress");
+  });
+});

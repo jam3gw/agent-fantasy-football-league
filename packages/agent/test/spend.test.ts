@@ -308,11 +308,64 @@ describe("every step bills the AI Gateway", () => {
       }) as never,
     });
 
-    const result = await step({ modelId: "openai/gpt-5.6-sol", messages: [], tools: [] }, 0);
+    // Real messages, so the assertions below can actually see what the step
+    // sends: with `messages: []` nothing is emitted per message and the
+    // provider-options checks pass whatever the code does.
+    const messages = [
+      { role: "system" as const, content: "system" },
+      { role: "user" as const, content: "brief" },
+      { role: "assistant" as const, content: "later turn" },
+    ];
+    const result = await step({ modelId: "openai/gpt-5.6-sol", messages, tools: [] }, 0);
     expect(result.billedTo).toBe("gateway");
-    // No BYOK credential and no `only` pinning can reach the gateway any more.
+    // No BYOK credential and no `only` pinning can reach the gateway any more,
+    // at the top level or hidden on a message.
     expect(seen).not.toBeNull();
     expect(Object.keys(seen!)).not.toContain("providerOptions");
+    expect(JSON.stringify(seen)).not.toContain("byok");
+    expect(JSON.stringify(seen)).not.toContain("only");
+    // A non-Anthropic model gets no explicit breakpoints: those providers cache
+    // prefixes on their own (§8.1).
+    for (const m of seen!.messages as Array<Record<string, unknown>>) {
+      expect(m.providerOptions).toBeUndefined();
+    }
+  });
+
+  it("keeps Anthropic prompt caching on, and only on the stable prefix", async () => {
+    // §8.1 / CLAUDE.md: "Prompt caching on." It is the one provider option the
+    // runner still sets, so removing BYOK must not have taken it with it — and
+    // nothing else in the suite exercises `withCaching`.
+    let seen: Record<string, unknown> | null = null;
+    const step = createModelStep({} as never, {
+      generate: (async (params: Record<string, unknown>) => {
+        seen = params;
+        return { text: "", toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, content: "" };
+      }) as never,
+    });
+
+    await step(
+      {
+        modelId: "anthropic/claude-sonnet-5",
+        messages: [
+          { role: "system", content: "system" },
+          { role: "user", content: "brief + snapshot" },
+          { role: "assistant", content: "a later turn" },
+          { role: "user", content: "a later user turn" },
+        ],
+        tools: [],
+      },
+      0,
+    );
+
+    const sent = seen!.messages as Array<Record<string, unknown>>;
+    const breakpoint = { anthropic: { cacheControl: { type: "ephemeral" } } };
+    // The system prompt and the brief are the stable prefix worth caching.
+    expect(sent[0]!.providerOptions).toEqual(breakpoint);
+    expect(sent[1]!.providerOptions).toEqual(breakpoint);
+    // Everything after it changes every step, so caching it would only cost.
+    expect(sent[2]!.providerOptions).toBeUndefined();
+    expect(sent[3]!.providerOptions).toBeUndefined();
+    // Caching changes cost, never routing.
     expect(JSON.stringify(seen)).not.toContain("byok");
   });
 
@@ -330,5 +383,18 @@ describe("every step bills the AI Gateway", () => {
       const result = await step({ modelId, messages: [], tools: [] }, 0);
       expect(result.billedTo, modelId).toBe("gateway");
     }
+  });
+
+  it("and the ledger row actually persists it", async () => {
+    // The step reporting `gateway` is only half of it: `recordSpend` is what
+    // writes `billed_to`, and /spend, /spend/[slug] and /benchmark all filter
+    // on that column. Without this, dropping the field from the insert would
+    // leave every one of those pages reading $0 with the suite still green.
+    const a = await makeTeam("a");
+    const s = await makeSession(a, "s-a", 7);
+    await spend(s, a, 1);
+    const rows = await db.select().from(spendLedger);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(rows.every((r) => r.billedTo === "gateway")).toBe(true);
   });
 });

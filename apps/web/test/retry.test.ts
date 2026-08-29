@@ -2,6 +2,7 @@
  * Session retry policy and provider-outage detection (§8.8).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
 import { initLeagueSettings, sessions, teams } from "@league/engine";
@@ -52,6 +53,19 @@ async function failedSession(opts: {
 }
 
 describe("session retries (§8.8)", () => {
+  it("never re-queues a draft pick: the draft owns its own retries", async () => {
+    // A retry booked here would be a `queued` draft_pick, and the tick refuses
+    // to start those (the draft workflow runs each pick inline, §10.2). It
+    // would sit in the queue for the rest of the season. `runDraftPick` takes
+    // the next attempt number itself, or the clock auto-picks (§10.4).
+    await failedSession({ key: "draft:47:1", kind: "draft_pick", deadlineOffsetMs: 120_000 });
+    const result = await requeueFailedSessions(db, clock);
+    expect(result.requeued).toBe(0);
+    expect(result.abandoned).toBe(1);
+    const queued = await db.select().from(sessions).where(eq(sessions.status, "queued"));
+    expect(queued).toEqual([]);
+  });
+
   it("re-queues a failed session with a :retry1 key", async () => {
     await failedSession({ key: "session:1:weekly_review:2026:2:x" });
     const result = await requeueFailedSessions(db, clock);

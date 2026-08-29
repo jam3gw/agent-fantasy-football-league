@@ -7,7 +7,8 @@ import "server-only";
  *  4. injury changes (handled inside the players ingest)
  *  5. expire stale offers and resolve trades whose review window ended
  */
-import { and, asc, eq, lte, ne, sql } from "drizzle-orm";
+import { and, asc, eq, lte, not, or, sql } from "drizzle-orm";
+import { parseDate } from "@league/shared";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import {
@@ -19,6 +20,7 @@ import {
   resolveEndedReviews,
   scheduledJobs,
   scoreWeek,
+  sessionEvents,
   sessions,
 } from "@league/engine";
 import { db, leagueClock } from "./db";
@@ -53,7 +55,6 @@ const INLINE_JOB_TYPES = new Set([
   "book_daily_jobs",
   "sessions.book",
   "reporter.run",
-  "session.run",
   "draft.run",
   "stats.finalize",
 ]);
@@ -65,8 +66,25 @@ const INLINE_JOB_TYPES = new Set([
  */
 const CLAIM_STALE_MS = 30 * 60_000;
 
-/** How long a running session may go without writing anything before it counts as dead. */
-const STUCK_SESSION_IDLE_MS = 15 * 60_000;
+/**
+ * How long a running session that has written *something* may go quiet before
+ * it counts as dead. It has to clear the platform's 800-second step cap plus
+ * the workflow runtime's retry backoff: the only span of a live session that
+ * writes nothing is a single model call, and §8.1 forbids capping one, so a
+ * call that starts just inside the 9-minute step budget can legally run to the
+ * 800-second kill and be re-dispatched after a backoff. Fifteen minutes left no
+ * margin for the backoff and would have failed live sessions.
+ */
+const STUCK_SESSION_IDLE_MS = 30 * 60_000;
+
+/**
+ * How long a claimed session may hold its slot without writing a single
+ * transcript row. A workflow that was actually accepted writes its first row
+ * within seconds of starting, so anything past this never started at all —
+ * `startRun` threw, or the invocation died between the claim and the workflow.
+ * Short, because that slot is doing nothing for anyone.
+ */
+const NEVER_STARTED_MS = 5 * 60_000;
 
 /** Queued sessions examined per tick. More than the cap, so expiries are seen too. */
 const MAX_QUEUED_SESSIONS_PER_TICK = 40;
@@ -221,15 +239,10 @@ export async function startQueuedSessions(
   const now = clock.now();
   const reclaimed = await reclaimStuckSessions(database, clock);
 
-  // Draft picks are excluded: the draft workflow creates each one and runs it
-  // inline against the 180-second clock (§10.2). It commits the row `queued`
-  // and only then starts it, so a tick landing in that window would otherwise
-  // claim it and run a second copy — two model calls racing `make_pick`, and
-  // whichever loses ends without a pick and gets auto-picked.
   const queued = await database
-    .select({ id: sessions.id, teamId: sessions.teamId, context: sessions.context })
+    .select({ id: sessions.id, teamId: sessions.teamId, kind: sessions.kind, context: sessions.context })
     .from(sessions)
-    .where(and(eq(sessions.status, "queued"), ne(sessions.kind, "draft_pick")))
+    .where(eq(sessions.status, "queued"))
     .orderBy(asc(sessions.createdAt))
     .limit(MAX_QUEUED_SESSIONS_PER_TICK);
 
@@ -237,6 +250,9 @@ export async function startQueuedSessions(
   let started = 0;
   let expired = 0;
   for (const session of queued) {
+    // Expiry applies to every kind, including the ones this tick never starts:
+    // this is the only place a queued session is ever retired, so excluding a
+    // kind from the *query* would leave its orphans queued for the season.
     const deadlineAt = parseDate(session.context.deadline_at);
     if (deadlineAt && now >= deadlineAt) {
       const rows = await database
@@ -247,6 +263,15 @@ export async function startQueuedSessions(
       if (rows.length > 0) expired++;
       continue;
     }
+
+    // Draft picks are never started here: the draft workflow creates each one
+    // and runs it inline against the 180-second clock (§10.2). It commits the
+    // row `queued` and only then starts it, so a tick landing in that window
+    // would otherwise claim it and run a second copy — two model calls racing
+    // `make_pick`, and whichever loses ends without a pick and gets
+    // auto-picked. They still reach the expiry branch above, which is what
+    // retires the ones the draft never got to.
+    if (session.kind === "draft_pick") continue;
 
     // Bookings are staggered a minute apart (§9.1); a session is not due yet.
     const dueAt = parseDate(session.context.due_at);
@@ -259,9 +284,7 @@ export async function startQueuedSessions(
     // Neither says anything about the next session in the list.
     if (outcome !== "claimed") continue;
 
-    // The slot is taken; hand the session to its durable run. Release the slot
-    // again if the workflow cannot even be started, so one bad start does not
-    // hold a slot until the deadline.
+    // The slot is taken; hand the session to its durable run.
     try {
       await startRun(session.id);
       started++;
@@ -269,7 +292,9 @@ export async function startQueuedSessions(
       // The row stays `running`. `start` can throw *after* the workflow was
       // accepted — a timeout reading the response — and putting the row back
       // in the queue would then give it a second runner alongside the live
-      // one. `reclaimStuckSessions` releases it if nothing ever ran.
+      // one. `reclaimStuckSessions`' never-started cutoff returns the slot in
+      // `NEVER_STARTED_MS` if nothing ever ran, which also stops a systematic
+      // start outage from burning one slot per tick until the long cutoff.
       break;
     }
   }
@@ -284,33 +309,49 @@ async function startAgentSessionWorkflow(sessionId: number): Promise<void> {
 
 /**
  * Fail sessions left `running` by an invocation that died — a function kill
- * between the slot claim and the workflow start, a `start` that threw after
- * the workflow was accepted, or a crash while building the context snapshot.
+ * between the slot claim and the workflow start, a `start` that threw, or a
+ * crash while building the context snapshot.
  *
- * Idleness alone is the test, not the deadline. Every transcript row bumps
- * `sessions.updated_at`, so a live session — even one spending ten minutes on
- * free tool calls, which write no ledger row — is writing constantly; one that
- * has written nothing for fifteen minutes is not coming back. Keeping the
- * deadline out of it also means `requeueFailedSessions` can still retry the
- * session inside its window (§8.8), which is the point of failing it rather
- * than skipping it.
+ * Idleness is the test, not the deadline: a session running its closing step is
+ * past its deadline by definition (§8.2 step 5), and a turn spent on free tool
+ * calls writes no ledger row, so the deadline says nothing about liveness.
+ * Keeping it out also means `requeueFailedSessions` can still retry the session
+ * inside its window (§8.8), which is the point of failing it rather than
+ * skipping it.
+ *
+ * Two cutoffs, because "never started" and "stopped writing" are different
+ * failures with very different costs:
+ *
+ *  - A row claimed by `claimSlot` that has no transcript row at all after a few
+ *    minutes was never picked up by a workflow. Its slot is doing nothing for
+ *    anyone, and a short cutoff is safe: a workflow that *was* accepted writes
+ *    its first row (the system prompt, or `resumed`) within seconds of starting.
+ *    This is what returns the slot when `startRun` throws.
+ *  - A row that has written something and then gone quiet gets the long cutoff.
+ *    It has to clear the platform's 800-second step cap plus the runtime's
+ *    retry backoff, because the one span that writes nothing is a model call,
+ *    and §8.1 forbids capping one.
  */
 async function reclaimStuckSessions(database: EngineDb, clock: Clock): Promise<number> {
   const now = clock.now();
   const idleCutoff = new Date(now.getTime() - STUCK_SESSION_IDLE_MS);
+  const silentCutoff = new Date(now.getTime() - NEVER_STARTED_MS);
+  const hasTranscript = sql`exists (select 1 from ${sessionEvents} where ${sessionEvents.sessionId} = ${sessions.id})`;
+
   const rows = await database
     .update(sessions)
-    .set({ status: "failed", error: "abandoned: no progress for 15 minutes", endedAt: now, updatedAt: now })
-    .where(and(eq(sessions.status, "running"), lte(sessions.updatedAt, idleCutoff)))
+    .set({ status: "failed", error: "abandoned: no progress", endedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(sessions.status, "running"),
+        or(
+          lte(sessions.updatedAt, idleCutoff),
+          and(lte(sessions.updatedAt, silentCutoff), not(hasTranscript)),
+        ),
+      ),
+    )
     .returning({ id: sessions.id });
   return rows.length;
-}
-
-/** A timestamp out of a session's JSON context, or null if it is not one. */
-function parseDate(raw: unknown): Date | null {
-  if (typeof raw !== "string") return null;
-  const at = new Date(raw);
-  return Number.isNaN(at.getTime()) ? null : at;
 }
 
 /** Mark newly kicked-off games live and put their unrostered players on waivers (§7.3). */

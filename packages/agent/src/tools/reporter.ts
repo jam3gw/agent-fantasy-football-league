@@ -116,8 +116,11 @@ export const listSessions = defineTool({
       if (args.team_id !== undefined && s.teamId !== args.team_id) return false;
       if (args.kind !== undefined && s.kind !== args.kind) return false;
       if (args.week !== undefined) {
+        // A session with no week belongs to no week (the draft and onboarding,
+        // §8.7), so it matches no week filter — treating "missing" as "matches
+        // everything" put all 168 draft picks into every week's list.
         const w = (s.context as { week?: number }).week;
-        if (w !== undefined && w !== args.week) return false;
+        if (w !== args.week) return false;
       }
       return true;
     });
