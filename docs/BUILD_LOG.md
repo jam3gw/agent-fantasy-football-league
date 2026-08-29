@@ -6,9 +6,28 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 
 
 
-*(none blocking — FYI items below)*
+**`COMMISSIONER_PASSWORD` is not set in Vercel — you cannot log in to `/admin`.**
+Measured, not inferred: `POST /api/admin/login` on production answers 500, and
+the runtime log is `Error: COMMISSIONER_PASSWORD is not set` thrown from
+`env.commissionerPassword`. Not the stale-snapshot trap that `CRON_SECRET` hit
+— the deployment serving it (`dpl_gTM844jkErfWAsPwGufFfuY22aYi`) was built
+minutes before the probe, so its environment snapshot is current and the
+variable simply is not there, or is not scoped to Production.
 
-- **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
+Fix is `docs/SETUP.md` §2: Vercel → the project → Settings → Environment
+Variables → add `COMMISSIONER_PASSWORD`, scope **Production**, then redeploy.
+While you are there, confirm `SESSION_SECRET` (`openssl rand -hex 32`) — this
+probe cannot see it, because `passwordMatches` throws before the cookie is ever
+signed, so a missing `SESSION_SECRET` would look identical from outside.
+
+Nothing else is blocked by it: every public page is fine, the tick does not
+authenticate this way, and no agent path touches admin auth. But every "check
+`/admin/health`" instruction in SETUP.md and RUNBOOK.md is unreachable until it
+is set, which is most of the pre-draft checklist.
+
+*(the items below are FYI)*
+
+- **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` were assumed to be in Vercel — as of 2026-08-29 `COMMISSIONER_PASSWORD` measurably is not (see above), so treat the rest of that list as unconfirmed too. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
 ## 2026-08-29 — Vercel Web Analytics on the public site
