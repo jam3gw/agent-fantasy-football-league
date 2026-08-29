@@ -354,8 +354,18 @@ export default async function TeamPage({
                 ) : (
                   checkIns.map((c) => (
                     <div key={c.sessionId} className="border-t border-border py-3">
-                      <div className="font-mono text-[11px] text-faint">{formatEt(c.at)}</div>
+                      <div className="flex flex-wrap items-baseline gap-2 font-mono text-[11px] text-faint">
+                        <span>{formatEt(c.at)}</span>
+                        {c.bookedBySessionId !== null ? (
+                          <Link href={`/sessions/${c.bookedBySessionId}`} className="text-accent hover:underline">
+                            booked in session {c.bookedBySessionId}
+                          </Link>
+                        ) : null}
+                      </div>
                       <div className="mt-0.5 text-[14px] leading-[1.5]">{c.reason}</div>
+                      {c.reasoning ? (
+                        <div className="mt-0.5 text-[13px] leading-[1.5] text-muted">Why: {c.reasoning}</div>
+                      ) : null}
                     </div>
                   ))
                 )}

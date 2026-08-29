@@ -11,6 +11,33 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Check-ins store the reasoning behind the booking (§8.10)
+
+Task: store the reasoning for why an agent enqueued a scheduled check-in. A
+check-in already carried a `reason` (the question it will answer — it becomes
+the brief), but nothing recorded *why* the agent booked it or which session
+made the call. On `claude/agent-checkin-reasoning-ksbkby`:
+
+- `schedule_check_in` now takes a required `reasoning` (500 chars, same cap as
+  the reason): what the agent saw at booking time that made a later look worth
+  a session. Validated in the engine like the reason, so it holds however a
+  check-in is created; stored in the session's `context.reasoning`.
+- The booking session's id is stamped automatically as
+  `context.booked_by_session_id` (from the tool's own session context, never
+  from the model), so every check-in traces back to the transcript of the
+  session that decided on it.
+- Surfaced everywhere the reason already was: the check-in's brief gains a
+  "Why you booked it:" line, `list_check_ins` returns it, and the team page
+  shows the why plus a "booked in session N" link. SPEC §8.10 and `/about`
+  updated. Pre-existing check-ins without the field render without the extra
+  lines (`pendingCheckIns` defaults it to empty; the brief omits the line).
+- Choice: `reasoning` is required, not optional — an optional field would be
+  skipped exactly when it is interesting, and the league's benchmark framing
+  (§8.10 "foresight and self-restraint") wants the why on record. Kept it a
+  separate field rather than widening `reason`, because the reason is the
+  future session's brief and the reasoning is the booking session's argument;
+  merging them would put stale stakes in the brief's question.
+
 ## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
 
 Jake flagged that the rail read "Made a draft pick." for every pick. Cause:

@@ -42,11 +42,21 @@ export const MIN_LEAD_MINUTES = 30;
 export const MAX_HORIZON_DAYS = 14;
 /** Longest a reason may be — it becomes the session's brief and is public. */
 export const MAX_REASON_CHARS = 500;
+/**
+ * Longest the reasoning may be. The reason is the question the check-in will
+ * answer; the reasoning is why it was worth booking — what the agent saw at
+ * booking time that made a later look worth a session. Stored with the
+ * check-in and public, like the reason.
+ */
+export const MAX_REASONING_CHARS = 500;
 
 export interface ScheduledCheckIn {
   sessionId: number;
   at: Date;
   reason: string;
+  reasoning: string;
+  /** The session that booked it, when one did (a tool call always has one). */
+  bookedBySessionId: number | null;
 }
 
 /**
@@ -55,12 +65,20 @@ export interface ScheduledCheckIn {
  *
  * `bookedBySessionKind` is the kind of the session doing the booking: a
  * check-in cannot book another check-in, which is the chaining guard.
+ * `bookedBySessionId` is recorded on the check-in, so anyone reading the site
+ * can walk from a booking to the transcript of the session that decided on it.
  */
 export async function scheduleCheckIn(
   db: EngineDb,
   clock: Clock,
   teamId: number,
-  input: { at: Date; reason: string; bookedBySessionKind?: string },
+  input: {
+    at: Date;
+    reason: string;
+    reasoning: string;
+    bookedBySessionKind?: string;
+    bookedBySessionId?: number;
+  },
 ): Promise<EngineResult<ScheduledCheckIn>> {
   return db.transaction(async (tx) => {
     const settings = await getSettings(tx);
@@ -78,6 +96,18 @@ export async function scheduleCheckIn(
     if (reason.length === 0) return fail("invalid_args", "a check-in needs a reason");
     if (reason.length > MAX_REASON_CHARS) {
       return fail("too_long", `the reason is ${reason.length} characters; the maximum is ${MAX_REASON_CHARS}`);
+    }
+
+    const reasoning = input.reasoning.trim();
+    if (reasoning.length === 0) {
+      return fail(
+        "invalid_args",
+        "a check-in needs the reasoning behind it",
+        { hint: "say why this is worth a session — what you saw now that a later look would settle" },
+      );
+    }
+    if (reasoning.length > MAX_REASONING_CHARS) {
+      return fail("too_long", `the reasoning is ${reasoning.length} characters; the maximum is ${MAX_REASONING_CHARS}`);
     }
 
     if (Number.isNaN(input.at.getTime())) return fail("bad_time", "that is not a time");
@@ -147,12 +177,16 @@ export async function scheduleCheckIn(
       modelId: team.modelId,
       dueAt: at,
       now,
-      context: { reason },
+      context: {
+        reason,
+        reasoning,
+        ...(input.bookedBySessionId !== undefined ? { booked_by_session_id: input.bookedBySessionId } : {}),
+      },
     });
     if (sessionId === null) {
       return fail("invalid_args", "you already have a check-in booked for that minute");
     }
-    return ok({ sessionId, at, reason });
+    return ok({ sessionId, at, reason, reasoning, bookedBySessionId: input.bookedBySessionId ?? null });
   });
 }
 
@@ -167,6 +201,8 @@ export async function pendingCheckIns(db: EngineDb, teamId: number): Promise<Sch
       sessionId: r.id,
       at: new Date(String(r.context.due_at)),
       reason: String(r.context.reason ?? ""),
+      reasoning: String(r.context.reasoning ?? ""),
+      bookedBySessionId: typeof r.context.booked_by_session_id === "number" ? r.context.booked_by_session_id : null,
     }))
     .filter((r) => !Number.isNaN(r.at.getTime()))
     .sort((a, b) => a.at.getTime() - b.at.getTime());

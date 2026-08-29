@@ -37,6 +37,7 @@ import {
   MIN_LEAD_MINUTES,
   MAX_HORIZON_DAYS,
   MAX_REASON_CHARS as MAX_CHECK_IN_REASON_CHARS,
+  MAX_REASONING_CHARS as MAX_CHECK_IN_REASONING_CHARS,
 } from "@league/engine";
 import type { LineupSlotsInput } from "@league/engine";
 import { formatEt } from "@league/shared";
@@ -504,6 +505,7 @@ export const writeDecisionLogTool = defineTool({
 const scheduleCheckInSchema = z.object({
   at: z.string().min(1),
   reason: z.string().min(1).max(MAX_CHECK_IN_REASON_CHARS),
+  reasoning: z.string().min(1).max(MAX_CHECK_IN_REASONING_CHARS),
 });
 
 export const scheduleCheckInTool = defineTool({
@@ -514,7 +516,9 @@ export const scheduleCheckInTool = defineTool({
     `${MIN_LEAD_MINUTES} minutes out and within ${MAX_HORIZON_DAYS} days. It is rounded up to the next ` +
     "five minutes, which is how often the league starts queued sessions, and the rounded time comes back " +
     "in the result. The reason becomes that " +
-    `session's brief, so write what you want to know. You may hold ${MAX_PENDING_CHECK_INS} check-ins at ` +
+    "session's brief, so write what you want to know. The reasoning is why you are booking it — what you " +
+    "see now that makes a later look worth a session; it is stored with the check-in and shown to your " +
+    `future self alongside the reason. You may hold ${MAX_PENDING_CHECK_INS} check-ins at ` +
     `once and book ${MAX_CHECK_INS_PER_WEEK} a week. They cost you the same as any other session, and a ` +
     "check-in cannot book another one.",
   schema: scheduleCheckInSchema,
@@ -524,7 +528,9 @@ export const scheduleCheckInTool = defineTool({
     const result = await scheduleCheckIn(ctx.db, ctx.clock, teamId, {
       at: new Date(args.at),
       reason: args.reason,
+      reasoning: args.reasoning,
       bookedBySessionKind: ctx.kind,
+      bookedBySessionId: ctx.sessionId,
     });
     if (!result.ok) return fromEngineFailure(result);
     return {
@@ -533,6 +539,7 @@ export const scheduleCheckInTool = defineTool({
       at: result.value.at.toISOString(),
       at_et: formatEt(result.value.at),
       reason: result.value.reason,
+      reasoning: result.value.reasoning,
     };
   },
 });
@@ -553,8 +560,8 @@ export const cancelCheckInTool = defineTool({
 export const listCheckInsTool = defineTool({
   name: "list_check_ins",
   description:
-    "Your own check-ins that have not run yet, soonest first, with the reason you gave for each. " +
-    "Read this before booking another one — a duplicate costs you a session.",
+    "Your own check-ins that have not run yet, soonest first, with the reason and reasoning you gave " +
+    "for each. Read this before booking another one — a duplicate costs you a session.",
   schema: z.object({}),
   execute: async (_args, ctx) => {
     const teamId = requireTeam(ctx);
@@ -569,6 +576,7 @@ export const listCheckInsTool = defineTool({
         at: r.at.toISOString(),
         at_et: formatEt(r.at),
         reason: r.reason,
+        reasoning: r.reasoning,
       })),
     };
   },

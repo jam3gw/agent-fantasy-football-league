@@ -15,10 +15,12 @@ import {
   playerWeekStats,
   rankings,
   rosterEntries,
+  sessions,
   teams,
   transactions,
 } from "@league/engine";
 import {
+  scheduleCheckInTool,
   setLineupTool,
   setTeamNameTool,
   voteOnTradeTool,
@@ -309,6 +311,43 @@ describe("set_team_name", () => {
       ok: false,
       error: "invalid_args",
     });
+  });
+});
+
+describe("schedule_check_in (§8.10)", () => {
+  const at = "2026-09-08T17:00:00Z"; // two hours after NOW, on the grid
+
+  it("stores the reasoning and stamps the session that booked it", async () => {
+    await seedLeague(db);
+    const teamId = (await seedTeams(db))[0]!;
+    const res = await scheduleCheckInTool.execute(
+      {
+        at,
+        reason: "did Achane practise on Thursday?",
+        reasoning: "he sat out Wednesday and my FLEX call hinges on his status",
+      },
+      ctxFor({ teamId, sessionId: 42, kind: "weekly_review" }),
+    );
+    expect(res).toMatchObject({ ok: true, reasoning: "he sat out Wednesday and my FLEX call hinges on his status" });
+
+    const row = (
+      await db.select().from(sessions).where(and(eq(sessions.teamId, teamId), eq(sessions.kind, "self_check_in")))
+    )[0]!;
+    expect(row.context.reasoning).toContain("FLEX call");
+    // Provenance comes from the context, never from the model: the booking
+    // session's id is stamped so the site can link the check-in to the
+    // transcript that decided on it.
+    expect(row.context.booked_by_session_id).toBe(42);
+  });
+
+  it("refuses to book without the reasoning", async () => {
+    await seedLeague(db);
+    const teamId = (await seedTeams(db))[0]!;
+    const res = await scheduleCheckInTool.execute(
+      { at, reason: "just checking" } as never,
+      ctxFor({ teamId, sessionId: 42, kind: "weekly_review" }),
+    );
+    expect(res).toMatchObject({ ok: false, error: "invalid_args" });
   });
 });
 

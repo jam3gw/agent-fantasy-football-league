@@ -33,6 +33,12 @@ let teamIds: number[];
 const NOW = "2026-10-20T15:00:00Z";
 const in2h = (h = 2) => new Date(new Date(NOW).getTime() + h * 3600_000);
 
+/** Book with the reasoning defaulted, so each test states only what it tests. */
+const book = (
+  teamId: number,
+  input: { at: Date; reason: string; reasoning?: string; bookedBySessionKind?: string; bookedBySessionId?: number },
+) => scheduleCheckIn(db, clock, teamId, { ...input, reasoning: input.reasoning ?? "the test needs a why" });
+
 beforeEach(async () => {
   ({ db, close } = await createTestDb());
   clock = new FixedClock(NOW);
@@ -45,10 +51,12 @@ afterEach(async () => {
 
 describe("scheduling", () => {
   it("books a queued session the tick will start, with the reason as its brief", async () => {
-    const r = await scheduleCheckIn(db, clock, teamIds[0]!, {
+    const r = await book(teamIds[0]!, {
       at: in2h(),
       reason: "check whether Achane practised before I commit to the FLEX",
+      reasoning: "his hamstring kept him out on Wednesday, and my FLEX call hinges on whether he goes",
       bookedBySessionKind: "weekly_review",
+      bookedBySessionId: 123,
     });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
@@ -58,6 +66,10 @@ describe("scheduling", () => {
     expect(row.status).toBe("queued");
     expect(row.teamId).toBe(teamIds[0]!);
     expect(row.context.reason).toContain("Achane");
+    // Why the booking happened is stored with it: the agent's own reasoning,
+    // and the session that decided on it, so the transcript is one hop away.
+    expect(row.context.reasoning).toContain("hamstring");
+    expect(row.context.booked_by_session_id).toBe(123);
     // The sweeper starts it from `due_at`, and the week is stamped so its cost
     // lands in this week's rollup (§8.7). `in2h()` is already on the grid.
     expect(row.context.due_at).toBe(in2h().toISOString());
@@ -65,12 +77,20 @@ describe("scheduling", () => {
     // It runs on the team's own model, like every other session for that team.
     const team = (await db.select().from(teams).where(eq(teams.id, teamIds[0]!)))[0]!;
     expect(row.modelId).toBe(team.modelId);
+
+    // And the listing carries all of it back, for the agent and the site.
+    const mine = await pendingCheckIns(db, teamIds[0]!);
+    expect(mine[0]).toMatchObject({
+      sessionId: r.value.sessionId,
+      reasoning: r.value.reasoning,
+      bookedBySessionId: 123,
+    });
   });
 
   it("is idempotent to the minute, so asking twice does not book twice", async () => {
     const at = in2h();
-    const first = await scheduleCheckIn(db, clock, teamIds[0]!, { at, reason: "one" });
-    const second = await scheduleCheckIn(db, clock, teamIds[0]!, { at, reason: "one again" });
+    const first = await book(teamIds[0]!, { at, reason: "one" });
+    const second = await book(teamIds[0]!, { at, reason: "one again" });
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(false);
     expect(await pendingCheckIns(db, teamIds[0]!)).toHaveLength(1);
@@ -79,7 +99,7 @@ describe("scheduling", () => {
 
 describe("the limits", () => {
   it("refuses a check-in sooner than the lead time", async () => {
-    const r = await scheduleCheckIn(db, clock, teamIds[0]!, {
+    const r = await book(teamIds[0]!, {
       at: new Date(new Date(NOW).getTime() + 60_000),
       reason: "right now",
     });
@@ -92,12 +112,12 @@ describe("the limits", () => {
   });
 
   it("refuses a check-in past the horizon, and a time that is not one", async () => {
-    const far = await scheduleCheckIn(db, clock, teamIds[0]!, {
+    const far = await book(teamIds[0]!, {
       at: new Date(new Date(NOW).getTime() + 30 * 24 * 3600_000),
       reason: "next month",
     });
     expect(!far.ok && far.error).toBe("bad_time");
-    const nonsense = await scheduleCheckIn(db, clock, teamIds[0]!, {
+    const nonsense = await book(teamIds[0]!, {
       at: new Date("not a date"),
       reason: "when?",
     });
@@ -106,41 +126,41 @@ describe("the limits", () => {
 
   it(`holds at ${MAX_PENDING_CHECK_INS} pending, and frees a slot when one is cancelled`, async () => {
     for (let i = 1; i <= MAX_PENDING_CHECK_INS; i++) {
-      const r = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(i), reason: `look ${i}` });
+      const r = await book(teamIds[0]!, { at: in2h(i), reason: `look ${i}` });
       expect(r.ok, `booking ${i}`).toBe(true);
     }
-    const over = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(9), reason: "one more" });
+    const over = await book(teamIds[0]!, { at: in2h(9), reason: "one more" });
     expect(!over.ok && over.error).toBe("check_in_limit");
     expect(!over.ok && over.hint).toContain("cancel_check_in");
 
     const mine = await pendingCheckIns(db, teamIds[0]!);
     expect(await cancelCheckIn(db, clock, teamIds[0]!, mine[0]!.sessionId)).toMatchObject({ ok: true });
-    expect(await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(9), reason: "now there is room" })).toMatchObject(
+    expect(await book(teamIds[0]!, { at: in2h(9), reason: "now there is room" })).toMatchObject(
       { ok: true },
     );
   });
 
   it(`holds at ${MAX_CHECK_INS_PER_WEEK} a week even as earlier ones finish`, async () => {
     for (let i = 1; i <= MAX_CHECK_INS_PER_WEEK; i++) {
-      const r = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(i), reason: `look ${i}` });
+      const r = await book(teamIds[0]!, { at: in2h(i), reason: `look ${i}` });
       expect(r.ok, `booking ${i}`).toBe(true);
       // Retire it so the pending cap is never what stops us.
       if (r.ok) {
         await db.update(sessions).set({ status: "succeeded" }).where(eq(sessions.id, r.value.sessionId));
       }
     }
-    const over = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(9), reason: "one more" });
+    const over = await book(teamIds[0]!, { at: in2h(9), reason: "one more" });
     expect(!over.ok && over.error).toBe("check_in_limit");
 
     // The allowance is per fantasy week, so next week starts clean.
     await updateSettings(db, { currentWeek: 8 });
-    expect(await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(9), reason: "new week" })).toMatchObject({
+    expect(await book(teamIds[0]!, { at: in2h(9), reason: "new week" })).toMatchObject({
       ok: true,
     });
   });
 
   it("refuses to let a check-in book another check-in", async () => {
-    const r = await scheduleCheckIn(db, clock, teamIds[0]!, {
+    const r = await book(teamIds[0]!, {
       at: in2h(),
       reason: "and again",
       bookedBySessionKind: "self_check_in",
@@ -151,22 +171,36 @@ describe("the limits", () => {
 
   it("refuses a paused or eliminated team", async () => {
     await db.update(teams).set({ paused: true }).where(eq(teams.id, teamIds[0]!));
-    expect(await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(), reason: "x" })).toMatchObject({ ok: false });
+    expect(await book(teamIds[0]!, { at: in2h(), reason: "x" })).toMatchObject({ ok: false });
 
     await db.update(teams).set({ paused: false, eliminated: true }).where(eq(teams.id, teamIds[1]!));
-    expect(await scheduleCheckIn(db, clock, teamIds[1]!, { at: in2h(), reason: "x" })).toMatchObject({ ok: false });
+    expect(await book(teamIds[1]!, { at: in2h(), reason: "x" })).toMatchObject({ ok: false });
   });
 
   it("refuses an empty or oversized reason", async () => {
-    expect(await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(), reason: "   " })).toMatchObject({ ok: false });
-    const long = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(), reason: "x".repeat(501) });
+    expect(await book(teamIds[0]!, { at: in2h(), reason: "   " })).toMatchObject({ ok: false });
+    const long = await book(teamIds[0]!, { at: in2h(), reason: "x".repeat(501) });
     expect(!long.ok && long.error).toBe("too_long");
+  });
+
+  it("refuses an empty or oversized reasoning, the same way", async () => {
+    const blank = await book(teamIds[0]!, { at: in2h(), reason: "who starts?", reasoning: "   " });
+    expect(!blank.ok && blank.error).toBe("invalid_args");
+    const long = await book(teamIds[0]!, { at: in2h(), reason: "who starts?", reasoning: "y".repeat(501) });
+    expect(!long.ok && long.error).toBe("too_long");
+  });
+
+  it("a check-in booked outside any session records no booking session", async () => {
+    const r = await book(teamIds[0]!, { at: in2h(), reason: "no provenance" });
+    expect(r.ok && r.value.bookedBySessionId).toBe(null);
+    const mine = await pendingCheckIns(db, teamIds[0]!);
+    expect(mine[0]!.bookedBySessionId).toBe(null);
   });
 });
 
 describe("cancelling", () => {
   it("cannot cancel another team's check-in", async () => {
-    const r = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(), reason: "mine" });
+    const r = await book(teamIds[0]!, { at: in2h(), reason: "mine" });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     // Ids are sequential, so this is the §15.5 case: guessing one must not work.
@@ -176,7 +210,7 @@ describe("cancelling", () => {
   });
 
   it("cannot cancel one that already ran", async () => {
-    const r = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(), reason: "mine" });
+    const r = await book(teamIds[0]!, { at: in2h(), reason: "mine" });
     if (!r.ok) throw new Error("setup");
     await db.update(sessions).set({ status: "succeeded" }).where(eq(sessions.id, r.value.sessionId));
     expect(await cancelCheckIn(db, clock, teamIds[0]!, r.value.sessionId)).toMatchObject({ ok: false });
@@ -188,7 +222,7 @@ describe("times land on the five-minute grid the sweeper runs on", () => {
     // 10:02 would sit until the 10:05 sweep anyway; booking it at 10:05 means
     // the time the agent is told is the time it runs.
     const asked = new Date("2026-10-20T17:32:41.500Z");
-    const r = await scheduleCheckIn(db, clock, teamIds[0]!, { at: asked, reason: "practice report" });
+    const r = await book(teamIds[0]!, { at: asked, reason: "practice report" });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.value.at.toISOString()).toBe("2026-10-20T17:35:00.000Z");
@@ -199,7 +233,7 @@ describe("times land on the five-minute grid the sweeper runs on", () => {
   });
 
   it("leaves a time already on the grid alone", async () => {
-    const r = await scheduleCheckIn(db, clock, teamIds[0]!, {
+    const r = await book(teamIds[0]!, {
       at: new Date("2026-10-20T17:35:00.000Z"),
       reason: "on the grid",
     });
@@ -207,11 +241,11 @@ describe("times land on the five-minute grid the sweeper runs on", () => {
   });
 
   it("two requests that round to the same slot are one booking", async () => {
-    const first = await scheduleCheckIn(db, clock, teamIds[0]!, {
+    const first = await book(teamIds[0]!, {
       at: new Date("2026-10-20T17:31:00Z"),
       reason: "first",
     });
-    const second = await scheduleCheckIn(db, clock, teamIds[0]!, {
+    const second = await book(teamIds[0]!, {
       at: new Date("2026-10-20T17:34:00Z"),
       reason: "same slot",
     });
@@ -225,7 +259,7 @@ describe("times land on the five-minute grid the sweeper runs on", () => {
     // time the check-in actually runs: whatever is accepted is at least the
     // minimum out. A request 26 minutes out becomes a booking at 30 — that is
     // the rule holding, not being dodged.
-    const nearly = await scheduleCheckIn(db, clock, teamIds[0]!, {
+    const nearly = await book(teamIds[0]!, {
       at: new Date(new Date(NOW).getTime() + 26 * 60_000),
       reason: "just under",
     });
@@ -237,7 +271,7 @@ describe("times land on the five-minute grid the sweeper runs on", () => {
 
     // And nothing rounding can do rescues "come back in a minute", which is
     // what the minimum exists to refuse.
-    const soon = await scheduleCheckIn(db, clock, teamIds[0]!, {
+    const soon = await book(teamIds[0]!, {
       at: new Date(new Date(NOW).getTime() + 60_000),
       reason: "right now",
     });
@@ -255,7 +289,7 @@ describe("preparation before the draft is its own allowance", () => {
     // booked on draft eve used to eat one of the five an agent gets in the
     // real week 1 and count against week 1's $40 alarm on draft day.
     for (let i = 1; i <= MAX_CHECK_INS_PRE_DRAFT; i++) {
-      const r = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(i), reason: `prep ${i}` });
+      const r = await book(teamIds[0]!, { at: in2h(i), reason: `prep ${i}` });
       expect(r.ok, `pre-draft booking ${i}`).toBe(true);
       if (r.ok) {
         const row = (await db.select().from(sessions).where(eq(sessions.id, r.value.sessionId)))[0]!;
@@ -265,18 +299,18 @@ describe("preparation before the draft is its own allowance", () => {
       }
     }
 
-    const over = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(9), reason: "one more" });
+    const over = await book(teamIds[0]!, { at: in2h(9), reason: "one more" });
     expect(!over.ok && over.error).toBe("check_in_limit");
     expect(!over.ok && over.message).toContain("before the draft");
 
     // The season starts with the weekly allowance untouched.
     await updateSettings(db, { phase: "regular", currentWeek: 1 });
     for (let i = 1; i <= MAX_CHECK_INS_PER_WEEK; i++) {
-      const r = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(10 + i), reason: `week one ${i}` });
+      const r = await book(teamIds[0]!, { at: in2h(10 + i), reason: `week one ${i}` });
       expect(r.ok, `week-1 booking ${i}`).toBe(true);
       if (r.ok) await db.update(sessions).set({ status: "succeeded" }).where(eq(sessions.id, r.value.sessionId));
     }
-    const overWeek = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(20), reason: "past the week" });
+    const overWeek = await book(teamIds[0]!, { at: in2h(20), reason: "past the week" });
     expect(!overWeek.ok && overWeek.message).toContain("this week");
   });
 });
