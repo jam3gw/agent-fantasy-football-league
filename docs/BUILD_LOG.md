@@ -101,6 +101,10 @@ cadence) and at worst duplicates one daily email — the same shape
 `sessions.sweep` has run all season; making it conditional buys nothing the
 pre-stamp has not already narrowed.
 
+Round two verified all six fixes — the mock genuinely exercises the route's
+catch, recovery clearing touches only capacity's keys, the snapshot hour
+confirmed live at 10:00 UTC — and reported nothing new. Loop closed.
+
 ## 2026-08-29 — thinking confirmed per model; thinking logs made durable and visible (commissioner request)
 
 Jake asked to (1) confirm thinking is enabled for the twelve models, (2) make
