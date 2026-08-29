@@ -7,7 +7,7 @@ import "server-only";
  *  4. injury changes (handled inside the players ingest)
  *  5. expire stale offers and resolve trades whose review window ended
  */
-import { and, asc, eq, lte, not, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, lte, ne, not, or, sql } from "drizzle-orm";
 import { parseDate } from "@league/shared";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
@@ -44,6 +44,8 @@ export interface TickSummary {
   sessionsReclaimed: number;
   /** Whether this tick swept the session queue (§9.1: every five minutes). */
   queueSwept: boolean;
+  /** Whether this tick had to book the first `book_daily_jobs` (§9.1). */
+  queuePrimed: boolean;
   outages: number;
 }
 
@@ -126,8 +128,17 @@ export async function runTick(): Promise<TickSummary> {
     sessionsExpired: 0,
     sessionsReclaimed: 0,
     queueSwept: false,
+    queuePrimed: false,
     outages: 0,
   };
+
+  // 0. Prime the queue. Every recurring job is booked by `book_daily_jobs`,
+  // and `book_daily_jobs` books the next one — but nothing booked the *first*
+  // one, so on a fresh database the queue stayed empty for ever: no ingest, no
+  // sessions, no season, and no error anywhere to say why. This is idempotent
+  // and self-healing: it does nothing on any tick where the queue is primed,
+  // and recovers one that has somehow drained.
+  summary.queuePrimed = await primeJobQueue(database, clock);
 
   // 1. Claim due jobs. SKIP LOCKED means two overlapping ticks never double-run one.
   const claimed = await database.execute(sql`
@@ -225,6 +236,32 @@ export async function runTick(): Promise<TickSummary> {
     .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: clock.now() } });
 
   return summary;
+}
+
+/**
+ * Make sure the recurring-job chain is running. `book_daily_jobs` re-books
+ * every recurring job for the next 48 hours and re-books itself, so the chain
+ * sustains itself once started — it just was never started.
+ */
+async function primeJobQueue(database: EngineDb, clock: Clock): Promise<boolean> {
+  const pending = await database
+    .select({ id: scheduledJobs.id })
+    .from(scheduledJobs)
+    .where(and(eq(scheduledJobs.type, "book_daily_jobs"), inArray(scheduledJobs.status, ["due", "claimed"])))
+    .limit(1);
+  if (pending.length > 0) return false;
+
+  const now = clock.now();
+  await database
+    .insert(scheduledJobs)
+    .values({
+      type: "book_daily_jobs",
+      dueAt: now,
+      payload: { reason: "queue was empty" },
+      idempotencyKey: `job:book_daily_jobs:prime:${now.toISOString().slice(0, 13)}`,
+    })
+    .onConflictDoNothing({ target: scheduledJobs.idempotencyKey });
+  return true;
 }
 
 /**

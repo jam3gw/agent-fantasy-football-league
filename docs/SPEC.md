@@ -1248,7 +1248,9 @@ Do the draft milestone (M4) as early as the engine allows. The draft is the firs
 - [ ] All environment variables set in Vercel (production).
 - [ ] Custom domain attached; `SITE_DOMAIN` set; agent web tools block it.
 - [ ] Neon backups/PITR enabled.
-- [ ] Cron tick running every minute (check `/admin/health`).
+- [ ] `CRON_SECRET` set in the Vercel project **for Production**. Without it Vercel Cron sends no bearer token, the tick answers 401 every minute, and nothing in the league runs — `/admin/health` shows a red banner saying exactly this.
+- [ ] Cron tick running every minute: `/admin/health` shows no scheduler banner and `cron.tick` has a recent success.
+- [ ] The job queue is primed — `/admin/jobs` lists upcoming recurring jobs. The tick books the first `book_daily_jobs` itself, so this should be true within a minute of the tick running.
 - [ ] Sleeper players, trending, schedule, and stats feeds green for the 2026 season.
 - [ ] FantasyPros key set; base URL verified; free-tier truncation measured; player id map loaded.
 - [ ] Scoring fit verified and recorded in `docs/VERIFIED.md`.
