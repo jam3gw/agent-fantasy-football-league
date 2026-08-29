@@ -45,7 +45,14 @@ body {
   color: var(--foreground);
 }
 
-/* Wide tables scroll inside their own container rather than the page. */
+/*
+ * Wide tables scroll inside their own container rather than the page.
+ * `min-width: 0` matters as much as the overflow: without it a scroller that
+ * is itself a grid or flex child is sized by its content and pushes the page
+ * sideways, which is the one thing this is meant to prevent.
+ */
 .table-scroll {
   overflow-x: auto;
+  min-width: 0;
+  overscroll-behavior-x: contain;
 }

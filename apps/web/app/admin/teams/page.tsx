@@ -159,7 +159,7 @@ export default async function AdminTeamsPage({
                 placeholder="provider/model-id"
               />
             </Field>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Label (optional)">
                 <input name="modelLabel" className="w-full rounded border border-border bg-background px-2 py-1.5" />
               </Field>

@@ -258,7 +258,7 @@ export default async function AdminSettingsPage({
                 ))
               )}
             </Table>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <label className="block">
                 <span className="mb-1 block text-muted">Add a tool</span>
                 <input
