@@ -556,14 +556,38 @@ first screenful, and now makes it an ordinary scroller; playoff games were
 labelled with the league week instead of the round; and the mirrored lineup
 rows lost all team attribution when they stack on a phone.
 
+**Round two found that two of the round-one fixes did not do what they said.**
+The "unknown schedule" guard suppressed the `final` flag but not the win
+chance, so a week with no ingested games printed a confident number derived
+from the score alone; and six call sites still read `slotsToPlay === 0` as
+"finished", which is exactly the bug round one had reported. Both are fixed by
+making the uncertainty part of the type: `slotsToPlay` is now `number | null`,
+null meaning "no schedule, no idea", and the compiler found every call site.
+Round two also caught that the leaderboard bar recolour had made ranks 4-12
+*brighter* than 2nd and 3rd (4.43:1 against 3.78:1 — the scale is now
+monotonic), that the identical bar in the compare panel was left at 2.76:1,
+that the active nav underline was 2.26:1 on the band, that the timeline's
+first-trade card could be hidden for ever by a 20-row window shared with waiver
+claims (now one exact query each), and that awaiting the benchmark rows ahead
+of the other home-page reads had put eleven queries in series in front of them.
+The remaining-points arithmetic — the round-one bug with the widest blast
+radius — had no test, because it lived in the database module; it is now a pure
+function with five, including the case where a player has already outscored his
+projection.
+
+A full WCAG sweep over the final palette: twenty text pairs and five graphical
+ones, zero failures. Enforcing AA has left `--faint` close to `--muted`; that
+is the honest consequence of the design's original value failing at 2.57:1.
+
 **How it was checked.** Six independent reviewers over separate dimensions
 (§12.1 conformance, derived-logic correctness, data layer, security and the
 server/client boundary, accessibility and contrast, design fidelity), each
 finding then put to two skeptics prompted to refute it. Thirty-eight findings,
 most refuted; the ones above were confirmed by reading the code directly.
-Verified against a real Postgres with a seeded week-3 league: all seven screens
-render at 1320 px and 375 px with zero horizontal overflow and exactly one
-`<h1>` each. 40 test files, 488 tests.
+Two rounds; the second reviewed the first round's fixes. Verified against a
+real Postgres with a seeded week-3 league: all seven screens render at 1320 px
+and 375 px with zero horizontal overflow and exactly one `<h1>` each, and that
+`<h1>` now names the page. 40 test files, 493 tests.
 
 **Two steps of the review loop could not run here** and are not claimed: a real
 agent session against a preview deploy (§CLAUDE.md step 4 — no credentials in

@@ -197,12 +197,15 @@ export function LeaderboardBand({ rows }: { rows: LeaderRow[] }) {
                         className="h-[22px] rounded-[3px]"
                         style={{
                           width: `${Math.max(0, Math.min(100, share))}%`,
-                          // On the near-black band the base green is 1.93:1
-                          // against the track and reads as an empty bar, so
-                          // every rank below the podium uses the lighter green
-                          // and only the leaders are picked out further.
+                          /*
+                           * Dimmer as the rank falls, and every step still
+                           * legible: 6.33:1, 4.43:1 and 3.78:1 against the
+                           * composited track. The design system's base green
+                           * is 1.94:1 there and read as an empty row, which is
+                           * why the bottom of the scale is not it.
+                           */
                           background:
-                            i === 0 ? "var(--green-lighter)" : i < 3 ? "var(--green-light)" : "#5d9a5a",
+                            i === 0 ? "var(--green-lighter)" : i < 3 ? "#5d9a5a" : "var(--green-light)",
                         }}
                       />
                     </div>

@@ -138,7 +138,7 @@ export function ComparePanel({ teams }: { teams: CompareTeam[] }) {
                     className="h-2 rounded-[3px]"
                     style={{
                       width: `${known && top > 0 ? (a / top) * 100 : 0}%`,
-                      background: aWins ? "var(--green-lighter)" : "var(--ink-soft)",
+                      background: aWins ? "var(--green-lighter)" : "var(--band-faint)",
                     }}
                   />
                 </div>
@@ -147,7 +147,7 @@ export function ComparePanel({ teams }: { teams: CompareTeam[] }) {
                     className="h-2 rounded-[3px]"
                     style={{
                       width: `${known && top > 0 ? (b / top) * 100 : 0}%`,
-                      background: bWins ? "var(--green-lighter)" : "var(--ink-soft)",
+                      background: bWins ? "var(--green-lighter)" : "var(--band-faint)",
                     }}
                   />
                 </div>

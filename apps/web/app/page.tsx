@@ -68,7 +68,7 @@ function heroCopy(
   week: number,
   phase: string,
 ): { eyebrow: string; headline: string; standfirst: string } {
-  const liveCards = cards.filter((c) => !c.final && c.slotsToPlay > 0);
+  const liveCards = cards.filter((c) => !c.final && (c.slotsToPlay ?? 0) > 0);
 
   if (phase === "pre_draft" || phase === "drafting") {
     return {
@@ -130,7 +130,7 @@ function heroCopy(
 function GameTile({ card }: { card: GameCard }) {
   const awayLeads = card.awayPoints > card.homePoints;
   const homeLeads = card.homePoints > card.awayPoints;
-  const live = !card.final && card.slotsToPlay > 0;
+  const live = !card.final && (card.slotsToPlay ?? 0) > 0;
   const chance = card.awayWinChance;
   const barPct = chance !== null ? chance * 100 : awayLeads ? 100 : homeLeads ? 0 : 50;
   // Name the side, or "DST, K to play" reads as though it belonged to
@@ -158,14 +158,16 @@ function GameTile({ card }: { card: GameCard }) {
             live ? "text-accent" : "text-faint"
           }`}
         >
-          {live ? "Live" : card.final ? "Final" : "Scheduled"}
+          {live ? "Live" : card.final ? "Final" : card.slotsToPlay === null ? "In progress" : "Scheduled"}
         </span>
         <span className="text-[11px] text-faint">
           {live
             ? `${card.slotsToPlay} slot${card.slotsToPlay === 1 ? "" : "s"} left`
             : card.final
               ? "final"
-              : "not started"}
+              : card.slotsToPlay === null
+                ? "schedule not loaded"
+                : "not started"}
         </span>
       </div>
 
@@ -220,14 +222,17 @@ export default async function HomePage() {
 
   // The benchmark aggregation is eleven queries; the leaderboard band and the
   // power rankings both want it, so it is read once and handed to both rather
-  // than each fetching its own copy.
-  const rows = await benchmarkRows();
-  const [cards, activity, power, timeline, report] = await Promise.all([
+  // than each fetching its own copy. It still starts alongside the other reads
+  // rather than in front of them — awaiting it first would put eleven queries
+  // in series ahead of everything else on the page.
+  const rowsPromise = benchmarkRows();
+  const [cards, activity, power, timeline, report, rows] = await Promise.all([
     gameCards(week, season),
     leagueActivity(12),
-    powerRankings(6, rows),
+    rowsPromise.then((r) => powerRankings(6, r)),
     seasonTimeline(8),
     safe(latestReporterPost, undefined),
+    rowsPromise,
   ]);
 
   const nameOf = new Map(rows.map((r) => [r.teamId, r.name ?? r.modelLabel ?? r.slug]));
@@ -448,7 +453,7 @@ export default async function HomePage() {
                         ? "var(--green)"
                         : event.tone === "light"
                           ? "var(--green-light)"
-                          : "var(--slate-soft)"
+                          : "var(--slate-soft-decorative)"
                     }`,
                   }}
                 >

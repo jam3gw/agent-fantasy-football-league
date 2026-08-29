@@ -199,7 +199,7 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
   const flagSource = source && source !== "sleeper" ? (SOURCE_LABEL[source] ?? `scored by ${source}`) : null;
 
   // The marquee game: the closest one still being played, else the first.
-  const stillPlaying = cards.filter((c) => !c.final && c.slotsToPlay > 0);
+  const stillPlaying = cards.filter((c) => !c.final && (c.slotsToPlay ?? 0) > 0);
   const featured =
     (stillPlaying.length > 0 ? stillPlaying : cards)
       .slice()
@@ -272,7 +272,7 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
         <div className="bg-band text-band-text">
           <Container className="pb-9 pt-8">
             <div className="flex flex-wrap items-center gap-3">
-              {!featured.final && featured.slotsToPlay > 0 ? (
+              {!featured.final && (featured.slotsToPlay ?? 0) > 0 ? (
                 <span className="flex items-center gap-2 rounded bg-accent px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em]">
                   <LiveDot className="bg-band-text" />
                   Live
@@ -284,9 +284,11 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
               )}
               <span className="text-[12px] uppercase tracking-[0.06em] text-band-muted">
                 Week {week}
-                {featured.slotsToPlay > 0
-                  ? ` · ${featured.slotsToPlay} of ${STARTING_SLOTS.length * 2} slots still to play`
-                  : " · every slot is done"}
+                {featured.slotsToPlay === null
+                  ? " · the schedule for this week has not loaded"
+                  : featured.slotsToPlay > 0
+                    ? ` · ${featured.slotsToPlay} of ${STARTING_SLOTS.length * 2} slots still to play`
+                    : " · every slot is done"}
               </span>
             </div>
 
@@ -476,7 +478,13 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
                 <div className="flex items-center gap-3">
                   {card.isPlayoff ? <Tag size="sm">playoff round {card.playoffRound ?? "?"}</Tag> : null}
                   <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-faint">
-                    {card.final || card.slotsToPlay === 0 ? "final" : `${card.slotsToPlay} slots left`}
+                    {card.final
+                      ? "final"
+                      : card.slotsToPlay === null
+                        ? "in progress"
+                        : card.slotsToPlay === 0
+                          ? "final"
+                          : `${card.slotsToPlay} slots left`}
                   </span>
                   <span className="text-[19px] font-bold tabular-nums tracking-[-0.02em]">
                     {card.awayPoints.toFixed(1)} – {card.homePoints.toFixed(1)}

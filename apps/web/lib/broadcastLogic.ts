@@ -52,6 +52,23 @@ export function teamName(team: NameableTeam | undefined | null): string {
  */
 export const MARGIN_SCALE = 18.5;
 
+/**
+ * What a starter still has left to give.
+ *
+ * A player whose game is in progress has already banked part of his day, and
+ * that part is already inside the matchup's score. Adding his whole weekly
+ * projection on top counts it twice — a receiver on 10 of a projected 15 was
+ * worth 25 to his team, which is how the win chance came to read 10% for a
+ * team that was ahead. Anyone already past his projection has nothing left to
+ * add rather than something negative to subtract.
+ */
+export function remainingPoints(projection: number | null, scored: number | null): number {
+  const proj = projection ?? 0;
+  const has = scored ?? 0;
+  if (!Number.isFinite(proj) || !Number.isFinite(has)) return 0;
+  return Math.max(0, proj - has);
+}
+
 export function winChanceFromMargin(margin: number): number {
   if (!Number.isFinite(margin)) return 0.5;
   return 1 / (1 + Math.exp(-margin / MARGIN_SCALE));

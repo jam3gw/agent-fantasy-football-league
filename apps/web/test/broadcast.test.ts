@@ -14,9 +14,38 @@ import {
   rankingBefore,
   summarizeBody,
   teamName,
+  remainingPoints,
   winChanceFromMargin,
   type FinalGame,
 } from "../lib/broadcastLogic";
+
+describe("what a starter still has to give", () => {
+  it("is the whole projection before his game starts", () => {
+    expect(remainingPoints(15, 0)).toBe(15);
+    expect(remainingPoints(15, null)).toBe(15);
+  });
+
+  it("is only what is left once he is part-way through", () => {
+    // The 10 he has scored is already inside the matchup total; counting the
+    // full 15 on top of it was the bug that made a leading team read 10%.
+    expect(remainingPoints(15, 10)).toBe(5);
+  });
+
+  it("is nothing once he has passed his projection", () => {
+    expect(remainingPoints(15, 22)).toBe(0);
+  });
+
+  it("is nothing rather than NaN when the feed has no projection", () => {
+    expect(remainingPoints(null, 8)).toBe(0);
+    expect(remainingPoints(Number.NaN, 8)).toBe(0);
+  });
+
+  it("never returns a negative, so a big day cannot drag a team's own total down", () => {
+    for (const [proj, scored] of [[0, 30], [5, 5], [12, 40]]) {
+      expect(remainingPoints(proj, scored)).toBeGreaterThanOrEqual(0);
+    }
+  });
+});
 
 describe("win chance", () => {
   it("is a coin flip when the projected margin is zero", () => {

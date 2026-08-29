@@ -34,7 +34,7 @@ export function PrimaryNav({ currentWeek }: { currentWeek: number }) {
             aria-current={active ? "page" : undefined}
             className={`flex flex-shrink-0 items-center px-3.5 text-[13px] font-semibold uppercase tracking-[0.06em] transition-colors ${
               active
-                ? "text-band-text shadow-[inset_0_-3px_0_0_var(--accent)]"
+                ? "text-band-text shadow-[inset_0_-3px_0_0_var(--green-lighter)]"
                 : "text-band-muted hover:text-band-text"
             }`}
           >

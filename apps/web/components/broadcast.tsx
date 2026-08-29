@@ -61,16 +61,34 @@ export function SectionHeader({
   as?: "h1" | "h2" | "h3";
   className?: string;
 }) {
+  const eyebrow = label ? (
+    <span className="mb-3 block text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">
+      {label}
+    </span>
+  ) : null;
+  const title = heading ? (
+    <span className="block text-[clamp(1.75rem,3.5vw,2.5rem)] font-bold leading-[1.2] tracking-[-0.02em] text-foreground">
+      {heading}
+    </span>
+  ) : null;
+
   return (
     <div className={className}>
-      {label ? (
-        <p className="mb-3 text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">{label}</p>
-      ) : null}
+      {/*
+        The eyebrow names the page and the heading says what is on it, so when
+        this is the page title both belong inside the one heading element —
+        an outline reading "Through week 2." with "Standings" nowhere in it
+        names nothing. Elsewhere the eyebrow stays a plain label above the
+        heading. Identical pixels either way.
+      */}
       {heading ? (
-        <Heading className="mb-6 text-[clamp(1.75rem,3.5vw,2.5rem)] font-bold leading-[1.2] tracking-[-0.02em] text-foreground">
-          {heading}
+        <Heading className="mb-6">
+          {eyebrow}
+          {title}
         </Heading>
-      ) : null}
+      ) : (
+        eyebrow
+      )}
       {intro ? (
         <p className="mb-14 max-w-[640px] text-[17px] leading-[1.7] text-muted">{intro}</p>
       ) : null}
@@ -195,7 +213,7 @@ export function FormChip({ result }: { result: "W" | "L" | "T" }) {
       ? "bg-[rgba(47,93,52,0.14)] text-accent"
       : result === "L"
         ? "bg-[rgba(138,59,48,0.1)] text-danger"
-        : "bg-border text-muted";
+        : "bg-border text-foreground";
   return (
     <span
       className={`flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold ${tone}`}

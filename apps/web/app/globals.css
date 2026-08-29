@@ -26,9 +26,12 @@
    * quietest text on the page. The system's own value is kept below as
    * `--slate-soft-decorative` for the places it is a shape, not a word.
    */
-  --slate-soft: #767065;
-  /* 4.63:1 on paper and 4.83:1 on a card, but only 4.17:1 on `--bg-alt` — use
-     `--muted` for quiet text sitting on the alt band. */
+  --slate-soft: #736c60;
+  /* 4.89:1 on paper, 5.11:1 on a card, 4.75:1 on the standings' playoff tint.
+     Still under AA on `--bg-alt` (4.41:1), so quiet text sitting on the alt
+     band uses `--muted`. Enforcing AA has left this tier close to `--muted`;
+     that is the honest consequence of the original value failing at 2.57:1,
+     not an accident. */
   --slate-soft-decorative: #a39c8c;
   --black: #1c1a16;
   --black-alt: #242019;
@@ -162,11 +165,6 @@ a:hover {
   animation: soft-pulse 1.8s ease-in-out infinite;
 }
 
-/*
- * Someone who has asked not to see motion should not be handed a scrolling
- * ticker and a blinking dot. Both stop; the ticker keeps its first copy of the
- * games in view, which is the whole week either way.
- */
 /*
  * Someone who has asked not to see motion should not be handed a scrolling
  * ticker and a blinking dot. Stopping the animation alone would strand every
