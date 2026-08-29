@@ -686,6 +686,42 @@ What is done, what needs Jake, and what needs the season to start. Nothing below
 ### Still outstanding
 - Live smoke tests per model, the mock draft, and the simulated week all need credentials that live only in Vercel; they run against a preview deploy.
 
+## 2026-08-29 — Merged to main; one production data edit
+
+`main` is at `6aa5bde`. CI run 28 green (lint, typecheck, 440 tests, and a
+production `next build`); Vercel production deploy READY; migrations and the
+seed ran inside the build as designed.
+
+Verified against the live deployment: `/robots.txt` and `/sitemap.xml` serve,
+`/admin/health` redirects to the login, and `/api/cron/tick` answers 401 without
+the bearer token — which is also the confirmation that `CRON_SECRET` is still
+missing from the Vercel project. Nothing has ingested: production holds the 12
+teams, the settings row, 12 model prices and 6 alarm rules, and zero players,
+jobs, sessions or health rows. That is step 1 of `docs/SETUP.md` and it is Jake's.
+
+**Production data edit** (noted here per the standing rules). The seed is
+create-if-absent, so fixing `web_search`'s price in the seed did nothing for the
+database that already had the old row. Two statements against Neon `main`:
+
+- `update tool_costs set usd_per_call = 0.008 where tool_name = 'web_search' and usd_per_call = 0`
+- `delete from tool_costs where tool_name = 'read_url'`
+
+The first makes production match the seed: at $0 the ledger recorded no cost for
+search at all, so `/benchmark`'s cost-per-point excluded the one tool an agent
+can call without limit. The second removes a row for a tool that does not exist
+— the old seed invented it. No rows were at risk: `tool_costs` is a two-row
+configuration table with no foreign-key dependents, and both values are editable
+on `/admin/settings`. The seed was deliberately left create-if-absent so it never
+overwrites a price the commissioner has set.
+
+**A correction to my own reasoning during this session.** I diagnosed CI runs 26
+and 27 as wedged on a lint step and pushed a job timeout on that basis. The
+container clock showed only three minutes had passed, not thirty — my `sleep`
+calls were not consuming the wall-clock time I assumed. Both runs finished
+normally in about eight minutes. The 25-minute timeout is still worth having on
+an unattended project, so it stayed, but the commit message asserting a wedged
+runner was amended before merge.
+
 ## 2026-08-29 — Three audits of what was already built, and what they found
 
 Ran three independent audits with fresh context — spec coverage against §15/§17,
