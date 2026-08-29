@@ -95,8 +95,19 @@ finding fixed rather than argued —
 - The thinking block renders capped at the same `max-h-[32rem]` scroll the
   JSON blocks use, so a 40 KB trace cannot make transcript pages megabytes
   of DOM.
-The reviewer also noted the repo rule that a real session must run against a
-deployed build before merge. From this sandbox no preview session can be
+**Review round 2**: three new findings on the round-1 retry, all fixed —
+the "no output yet" retry gate was blind to tool-call stream parts (a pure
+tool-call step that errors mid-call would have been silently retried and
+double-billed; the gate now tracks every content-bearing part type); a
+permanently rejected option degraded silently (the drop now rides the step
+result as `visibilityOptionDropped` and the loop records an `info` event, so
+the transcript shows the degradation instead of it reading as "this model
+has no reasoning"); and the block separator appended eagerly could leave a
+dangling blank line after a text-withheld final block (now lazy). All three
+pinned by tests; agent suite at 150.
+
+The round-1 reviewer also noted the repo rule that a real session must run
+against a deployed build before merge. From this sandbox no preview session can be
 started (previews get no cron; the tick and admin need secrets that live in
 Vercel). The commissioner has asked for exactly that end-to-end run — a
 smoke round — so it runs on production immediately after the merge, with the
