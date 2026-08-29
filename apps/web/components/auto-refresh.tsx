@@ -18,7 +18,7 @@
  *
  * Renders nothing. Mounted once in the root layout.
  */
-import { useEffect, useRef } from "react";
+import { useRef } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 
@@ -39,22 +39,24 @@ export function AutoRefresh({ intervalMs = DEFAULT_INTERVAL_MS }: { intervalMs?:
   /** Wall-clock time of the last stamp movement; null = nothing pending. */
   const movedAt = useRef<number | null>(null);
 
-  const { data } = useSWR("/api/public/pulse", fetchStamp, {
+  useSWR("/api/public/pulse", fetchStamp, {
     refreshInterval: intervalMs,
     revalidateOnFocus: true,
     dedupingInterval: Math.floor(intervalMs / 2),
+    // Deliberately onSuccess and not an effect over `data`: SWR keeps the same
+    // `data` reference (and skips the re-render) when a poll returns an equal
+    // stamp, so an effect would fire once per movement and the refresh window
+    // below could never tick. onSuccess runs on every successful fetch.
+    onSuccess: (data) => {
+      // The first stamp is the baseline for the page as rendered; only a later
+      // movement means the page may be behind.
+      if (last.current !== null && last.current !== data.stamp) movedAt.current = Date.now();
+      last.current = data.stamp;
+      if (movedAt.current === null) return;
+      router.refresh();
+      if (Date.now() - movedAt.current > REFRESH_WINDOW_MS) movedAt.current = null;
+    },
   });
-
-  useEffect(() => {
-    if (!data) return;
-    // The first stamp is the baseline for the page as rendered; only a later
-    // movement means the page may be behind.
-    if (last.current !== null && last.current !== data.stamp) movedAt.current = Date.now();
-    last.current = data.stamp;
-    if (movedAt.current === null) return;
-    router.refresh();
-    if (Date.now() - movedAt.current > REFRESH_WINDOW_MS) movedAt.current = null;
-  }, [data, router]);
 
   return null;
 }

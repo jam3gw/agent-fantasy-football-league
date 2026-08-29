@@ -512,6 +512,10 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
 
       await recordEvent(db, clock, sessionId, seq++, "assistant", {
         text: result.text,
+        // The 0-based step this message came from — what the live view compares
+        // against `session_stream.step_no` to tell a superseded partial from
+        // the next step's genuinely new thinking.
+        step_no: steps - 1,
         tool_calls: result.toolCalls.map((c) => ({ name: c.toolName, args: c.args, id: c.toolCallId })),
         usage: result.usage,
         cost_usd: costUsd,

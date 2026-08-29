@@ -29,16 +29,19 @@ export async function computePulseStamp(database: EngineDb): Promise<string> {
   // resolves against the OUTER league_settings row and turns the whole
   // statement into an aggregate — every inner column below is verified to
   // exist on its inner table, and the tests exercise each one.
+  // Timestamps go through extract(epoch ...) so the stamp keeps microsecond
+  // precision as a plain number: stringifying a driver-mapped Date truncates
+  // to seconds, and two writes inside one second would stamp identically.
   const rows = await database
     .select({
-      settings: leagueSettings.updatedAt,
+      settings: sql<unknown>`extract(epoch from updated_at)`,
       events: sql<unknown>`(select max(id) from session_events)`,
       tx: sql<unknown>`(select max(id) from transactions)`,
       board: sql<unknown>`(select max(id) from board_posts)`,
       reporter: sql<unknown>`(select max(id) from reporter_posts)`,
-      sessions: sql<unknown>`(select max(updated_at) from sessions)`,
-      matchups: sql<unknown>`(select max(updated_at) from matchups)`,
-      draft: sql<unknown>`(select max(updated_at) from draft)`,
+      sessions: sql<unknown>`(select extract(epoch from max(updated_at)) from sessions)`,
+      matchups: sql<unknown>`(select extract(epoch from max(updated_at)) from matchups)`,
+      draft: sql<unknown>`(select extract(epoch from max(updated_at)) from draft)`,
       commissioner: sql<unknown>`(select max(id) from commissioner_actions)`,
     })
     .from(leagueSettings)

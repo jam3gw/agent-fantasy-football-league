@@ -94,6 +94,26 @@ exact same components as the static page (extracted to
    → 5 s past 32 KB).
 10. SPEC §8.2 still said `generateText`; updated to match §12.1 v1.10.
 
+**Review round 2** (fresh context; verified the ten fixes, found 1 HIGH + 3
+minor; all addressed):
+1. HIGH, round-1 item 1 was still broken: the refresh-window logic lived in a
+   `useEffect` keyed on SWR's `data`, and SWR keeps the same `data` reference
+   (and skips the re-render) when a poll returns an equal stamp — so the
+   window fired exactly once per movement, behaviorally the pre-fix code.
+   Moved into SWR's `onSuccess`, which runs on every successful fetch; the
+   live transcript view already used that pattern.
+2. Stamp stringification of driver-mapped Dates truncated to seconds; two
+   writes inside one second could stamp identically. Timestamps now go
+   through `extract(epoch from ...)` in SQL (microsecond precision, driver
+   independent), with a sub-second test.
+3. The "tests exercise every column" claim was ahead of the tests: added
+   movement tests for reporter_posts and the settings singleton.
+4. Thinking-panel suppression keyed on "any assistant event" could blank one
+   poll of genuinely new thinking during a fast tool turnaround. Assistant
+   events now record their `step_no`, and the client suppresses only a
+   partial whose step an arrived event actually supersedes (events without
+   step_no — recorded before it existed — suppress conservatively).
+
 **Verified here.** Full suite green (510 tests, 6 new: streaming/partial-sink
 lifecycle, pulse stamp movement). `pnpm build` run against the Neon `dev`
 branch — migration 0003 applied there and the build prerendered every page.
