@@ -22,6 +22,8 @@ export const metadata = { title: "Health" };
 
 const WEEK_MS = 7 * 24 * 3600_000;
 /** §13.4: the live feed is "delayed" once Sleeper has been silent for 10 minutes. */
+/** The tick runs every minute; three missed in a row is a real outage, not a blip. */
+const TICK_STALE_MS = 3 * 60_000;
 const LIVE_STALE_MS = 10 * 60_000;
 /** Rows in the queue card. Comfortably over the cap plus a full booking sweep. */
 const SESSION_QUEUE_LIMIT = 60;
@@ -90,6 +92,14 @@ export default async function AdminHealthPage({
     id === null ? "Reporter" : (allTeams.find((t) => t.id === id)?.name ?? `Team ${id}`);
   const ruleFor = (id: number) => rules.find((r) => r.id === id);
 
+  // The tick is the one thing whose failure this page could not report: every
+  // row here is written by the tick, so when the tick is dead the page is
+  // simply empty and looks calm. It is checked separately and loudly.
+  const tick = feeds.find((f) => f.key === "cron.tick");
+  const tickLastAt = tick?.lastSuccessAt ?? null;
+  const tickSilentMs = tickLastAt ? now.getTime() - tickLastAt.getTime() : null;
+  const tickDead = tickSilentMs === null || tickSilentMs > TICK_STALE_MS;
+
   const livePoll = feeds.find((f) => f.key === "live.poll");
   const liveStale =
     liveGames.length > 0 &&
@@ -116,6 +126,26 @@ export default async function AdminHealthPage({
     <>
       <PageTitle title="Health" subtitle="Feeds, sessions, jobs, quotas and cost alarms. Everything here is read from the database, live." />
       {msg ? <Banner tone="accent">{msg}</Banner> : null}
+
+      {tickDead ? (
+        <Banner tone="danger">
+          {tickLastAt === null ? (
+            <>
+              <strong>The scheduler has never run.</strong> Nothing is ingesting data, no sessions will start, and the
+              season cannot begin. Every row on this page is written by the tick, so an empty page is this, not calm.
+              The usual cause is <span className="font-mono">CRON_SECRET</span> missing from the Vercel project: the
+              cron fires every minute and the tick answers 401. Set it in Settings → Environment Variables for
+              Production, redeploy, and this banner clears within a minute.
+            </>
+          ) : (
+            <>
+              <strong>The scheduler has not run for {Math.round((tickSilentMs ?? 0) / 60_000)} minutes.</strong> It runs
+              every minute (§9.1). Nothing is being ingested, scored, or started while it is down. Check the Vercel cron
+              and that <span className="font-mono">CRON_SECRET</span> still matches. Last success {formatEt(tickLastAt)}.
+            </>
+          )}
+        </Banner>
+      ) : null}
 
       {brokenModels.length > 0 ? (
         <Banner tone="danger">

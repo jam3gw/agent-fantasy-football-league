@@ -11,6 +11,48 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Full audit: three findings that would each have stopped the season
+
+Jake asked what is missing. Rather than answer from the build log I checked
+production directly, and found the league was already in the failure state.
+
+**1. The cron has been getting 401 every minute since the merge.** Vercel's
+runtime logs show `GET /api/cron/tick 401` at 01:52, 01:53, 01:54 and on, every
+minute, against production. `CRON_SECRET` is not set in the Vercel project, so
+Vercel Cron sends no bearer token and the route correctly refuses it. The
+scheduler has therefore never run: production has the twelve teams and the
+settings the seed wrote, and **zero players, zero games, zero jobs, zero health
+rows**. This is Jake's to fix — one environment variable — but it had been
+failing silently for an hour.
+
+**2. Even with the secret set, the queue never starts.** Every recurring job is
+booked by `book_daily_jobs`, and `book_daily_jobs` re-books itself, so the chain
+sustains itself once running — but nothing ever booked the *first* one.
+`bookRecurringJobs` is called only from that job's own handler, from `planWeek`
+(which needs a `week.plan` job), and from the admin "book job" button. On a
+fresh database the queue stays empty for ever: no ingest, no sessions, no
+season. `runTick` now primes it, idempotently, and re-primes a queue that has
+somehow drained.
+
+**3. The health page could not report either of them.** Every row on
+`/admin/health` is written by the tick, so when the tick is dead the page is not
+alarming — it is *empty*, which reads as calm. There is now a banner computed
+from the tick's own liveness: "the scheduler has never run", or "has not run for
+N minutes", naming `CRON_SECRET` as the usual cause. The one failure the page
+could not see was the one that matters most.
+
+The third is the general lesson and worth stating plainly: **a monitoring
+surface that is written by the thing it monitors cannot report that thing's
+death.** Everything else on that page is fine — it degrades to "never" per feed
+— but the tick needed to be checked against the clock instead.
+
+Also confirmed while auditing: production is 10 MB against Neon's 512 MB
+free-tier branch limit, with the ingests not yet run. Player and stats rows are
+the bulk of it; worth re-checking after the first full week rather than
+assuming.
+
+Test suite: **416 tests green**.
+
 ## 2026-08-29 — Draw the order before onboarding; preparation gets its own allowance
 
 Both from Jake, and both make preparation time actually worth something.

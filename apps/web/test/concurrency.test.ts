@@ -656,3 +656,46 @@ describe("§9.1 — the queue is swept every five minutes, not every minute", ()
     expect(elapsed - 1).toBeLessThanOrEqual(45);
   });
 });
+
+describe("§9.1 — the job queue primes itself", () => {
+  it("books the first book_daily_jobs on a fresh database, and only once", async () => {
+    // Every recurring job is booked by `book_daily_jobs`, which re-books itself
+    // — but nothing booked the first one. On a fresh database the queue stayed
+    // empty for ever: no ingest, no sessions, no season, and nothing anywhere
+    // saying why. Production ran for an hour in exactly that state.
+    const prime = async (at: Date) => {
+      const pending = await db
+        .select({ id: scheduledJobs.id })
+        .from(scheduledJobs)
+        .where(and(eq(scheduledJobs.type, "book_daily_jobs"), inArray(scheduledJobs.status, ["due", "claimed"])))
+        .limit(1);
+      if (pending.length > 0) return false;
+      await db
+        .insert(scheduledJobs)
+        .values({
+          type: "book_daily_jobs",
+          dueAt: at,
+          payload: { reason: "queue was empty" },
+          idempotencyKey: `job:book_daily_jobs:prime:${at.toISOString().slice(0, 13)}`,
+        })
+        .onConflictDoNothing({ target: scheduledJobs.idempotencyKey });
+      return true;
+    };
+
+    expect(await db.select().from(scheduledJobs)).toHaveLength(0);
+    expect(await prime(clock.now())).toBe(true);
+    expect(await db.select().from(scheduledJobs)).toHaveLength(1);
+
+    // Primed already: every later tick is a no-op.
+    expect(await prime(clock.now())).toBe(false);
+    clock.advance(60_000);
+    expect(await prime(clock.now())).toBe(false);
+    expect(await db.select().from(scheduledJobs)).toHaveLength(1);
+
+    // Once the chain has run and the job is done, an empty queue re-primes —
+    // so a queue that somehow drains recovers on its own.
+    await db.update(scheduledJobs).set({ status: "done" }).where(eq(scheduledJobs.type, "book_daily_jobs"));
+    clock.advance(3600_000);
+    expect(await prime(clock.now())).toBe(true);
+  });
+});
