@@ -16,7 +16,10 @@ import {
   playerWeekProj,
   playerWeekStats,
   players,
+  proposeTrade,
   rankings,
+  respondToTrade,
+  rosterEntries,
   scratchpads,
   teams,
   tradeVotes,
@@ -678,6 +681,52 @@ describe("get_trade", () => {
         const res = ok(await getTradeTool.execute({ trade_id: tradeId }, ctxFor({ teamId: viewer })));
         expect(res.message).toBe("CANDID VALUATION");
       }
+    }
+  });
+
+  it("hides an accept-time failure, which never entered review, unlike a review-path failure (§3.5)", async () => {
+    await seedLeague(db);
+    const teamIds = await seedTeams(db);
+    const [a, b, c] = teamIds as [number, number, number];
+    const p1 = await makePlayer(db, { fullName: "Moved Away", position: "RB" });
+    const p2 = await makePlayer(db, { fullName: "Stays Put", position: "WR" });
+    await rosterPlayer(db, a, p1);
+    await rosterPlayer(db, b, p2);
+    const clock = new FixedClock(NOW);
+    const engineDb = db as unknown as EngineDb;
+    const proposed = await proposeTrade(engineDb, clock, a, {
+      toTeamId: b,
+      givePlayerIds: [p1],
+      getPlayerIds: [p2],
+      message: "CANDID VALUATION",
+    });
+    expect(proposed.ok).toBe(true);
+    const tradeId = (proposed as { ok: true; value: { tradeId: number } }).value.tradeId;
+
+    // The give-side player leaves team A before the counterparty accepts, so
+    // the accept-time re-check fails: proposed → failed, no review.
+    await db.delete(rosterEntries).where(eq(rosterEntries.playerId, p1));
+    const accepted = await respondToTrade(engineDb, clock, b, tradeId, "accept");
+    expect(accepted.ok).toBe(false);
+    const row = (await db.select().from(trades).where(eq(trades.id, tradeId)))[0]!;
+    expect(row.status).toBe("failed");
+    expect(row.reviewEndsAt).toBeNull();
+
+    for (const viewer of [c, null]) {
+      const res = await getTradeTool.execute({ trade_id: tradeId }, ctxFor({ teamId: viewer }));
+      expect(res.ok, `seen by ${viewer === null ? "reporter" : "third team"}`).toBe(false);
+      expect((res as { error: string }).error).toBe("not_visible");
+      expect(JSON.stringify(res)).not.toContain("CANDID VALUATION");
+    }
+    const asParty = ok(await getTradeTool.execute({ trade_id: tradeId }, ctxFor({ teamId: a })));
+    expect(asParty.message).toBe("CANDID VALUATION");
+
+    // The same status with reviewEndsAt set is a review-path failure — league
+    // business, visible to a third team and the reporter.
+    await db.update(trades).set({ reviewEndsAt: new Date("2026-09-14T10:00:00.000Z") }).where(eq(trades.id, tradeId));
+    for (const viewer of [c, null]) {
+      const res = ok(await getTradeTool.execute({ trade_id: tradeId }, ctxFor({ teamId: viewer })));
+      expect(res.status).toBe("failed");
     }
   });
 });

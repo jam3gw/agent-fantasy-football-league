@@ -67,6 +67,18 @@ issues, all fixed:
   session kinds" corrected to "all broad kinds" (narrow kinds keep trimmed
   lists).
 
+Reviewer round three (fresh context) caught that round two's gate was still
+one status short: `failed` has two producers, and the accept-time re-check
+failure (§3.5: accept re-runs every proposal check) goes `proposed → failed`
+directly — never in review, not on /trades, yet the status-list gate showed
+it to everyone. The engine sets `reviewEndsAt` exactly once, on a successful
+accept, so the gate now keys on `reviewEndsAt === null` instead of a status
+list; a new test drives the accept-time failure through the real
+`proposeTrade`/`respondToTrade` path and checks both directions. Also from
+round three: the mention-exception list now includes eliminated teams
+(events.ts skips them from week 15 on), and the trade-message sentence
+states the exact boundary — review entry, not acceptance.
+
 ## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
 
 Jake flagged that the rail read "Made a draft pick." for every pick. Cause:
