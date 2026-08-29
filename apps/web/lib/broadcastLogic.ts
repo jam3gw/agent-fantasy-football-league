@@ -159,12 +159,42 @@ export function newestFirst<T extends { at: Date }>(items: T[], limit: number): 
 }
 
 /**
+ * Every player id a transaction payload can mention, so a caller can fetch the
+ * names in one query before turning payloads into sentences. The key list has
+ * to cover what the engine actually writes: waivers.ts uses camelCase
+ * (`playerId`, `dropPlayerId`), the draft paths snake_case (`player_id`),
+ * trades carry two id arrays, and a lineup payload buries ids inside its
+ * per-slot diff.
+ */
+export function transactionPlayerIds(payload: Record<string, unknown>): string[] {
+  const ids: string[] = [];
+  const push = (v: unknown) => {
+    if (typeof v === "string" && v !== "") ids.push(v);
+  };
+  for (const key of ["playerId", "player_id", "dropPlayerId", "drop_player_id"]) push(payload[key]);
+  for (const key of ["givePlayerIds", "getPlayerIds"]) {
+    const list = payload[key];
+    if (Array.isArray(list)) for (const v of list) push(v);
+  }
+  const diff = payload.diff;
+  if (typeof diff === "object" && diff !== null && !Array.isArray(diff)) {
+    for (const entry of Object.values(diff)) {
+      if (typeof entry === "object" && entry !== null && !Array.isArray(entry)) {
+        push((entry as Record<string, unknown>).from);
+        push((entry as Record<string, unknown>).to);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
  * A transaction's payload is free-form JSON, and what the engine puts in it is
- * player *ids* — `playerId` and `dropPlayerId` (waivers.ts) — not names. So the
- * caller passes a resolver, and this reads ids first and any name key second,
- * because a payload written by hand or by a future code path may carry either.
- * Anything it cannot resolve degrades to a sentence without a name rather than
- * to "Claimed undefined".
+ * mostly player *ids*, not names — camelCase from waivers.ts, snake_case from
+ * the draft paths. So the caller passes a resolver, and this reads ids first
+ * and any name key second, because a payload written by hand or by a future
+ * code path may carry either. Anything it cannot resolve degrades to a
+ * sentence without a name rather than to "Claimed undefined".
  */
 export function describeTransaction(
   type: string,
@@ -175,29 +205,104 @@ export function describeTransaction(
     const value = payload[key];
     return typeof value === "string" && value.trim() !== "" ? value : null;
   };
+  const num = (key: string): number | null => {
+    const value = payload[key];
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  };
   const resolved = (key: string): string | null => {
     const id = text(key);
     return id === null ? null : nameOf(id);
   };
-  const added = resolved("playerId") ?? text("addedName") ?? text("playerName") ?? text("player");
-  const dropped = resolved("dropPlayerId") ?? text("droppedName") ?? text("dropped");
+  const names = (key: string): string[] => {
+    const list = payload[key];
+    if (!Array.isArray(list)) return [];
+    return list
+      .filter((v): v is string => typeof v === "string" && v !== "")
+      .map((id) => nameOf(id))
+      .filter((n): n is string => n !== null && n !== "");
+  };
+  const added =
+    resolved("playerId") ??
+    resolved("player_id") ??
+    text("name") ??
+    text("addedName") ??
+    text("playerName") ??
+    text("player");
+  const dropped = resolved("dropPlayerId") ?? resolved("drop_player_id") ?? text("droppedName") ?? text("dropped");
   switch (type) {
     case "waiver_add":
       return added ? `Claimed ${added}${dropped ? ` and dropped ${dropped}` : ""}.` : "Won a waiver claim.";
     case "add":
-      return added ? `Added ${added} from free agency.` : "Added a free agent.";
+      return added ? `Added ${added} from free agency${dropped ? ` and dropped ${dropped}` : ""}.` : "Added a free agent.";
     case "drop": {
       const gone = dropped ?? added;
       return gone ? `Dropped ${gone}.` : "Dropped a player.";
     }
-    case "trade":
+    case "trade": {
+      // trades.ts writes the proposer's view: `givePlayerIds` leave the team
+      // the rail attributes the transaction to, `getPlayerIds` arrive. An id
+      // the resolver cannot name is left out rather than shown raw; when
+      // nothing resolves at all the generic sentence stands in.
+      const gave = names("givePlayerIds");
+      const got = names("getPlayerIds");
+      if (gave.length > 0 && got.length > 0) return `Traded away ${gave.join(", ")} for ${got.join(", ")}.`;
+      if (gave.length > 0) return `Traded away ${gave.join(", ")}.`;
+      if (got.length > 0) return `Received ${got.join(", ")} in a trade.`;
       return "A trade went through.";
+    }
     case "ir_move":
       return added ? `Moved ${added} to injured reserve.` : "Made an injured-reserve move.";
-    case "lineup":
-      return "Set its lineup.";
-    case "draft_pick":
-      return added ? `Drafted ${added}.` : "Made a draft pick.";
+    case "lineup": {
+      if (payload.carried_over === true) return "Carried last week's lineup over.";
+      const diff = payload.diff;
+      const changes: string[] = [];
+      let total = 0;
+      if (typeof diff === "object" && diff !== null && !Array.isArray(diff)) {
+        for (const [slot, entry] of Object.entries(diff)) {
+          if (typeof entry !== "object" || entry === null || Array.isArray(entry)) continue;
+          total += 1;
+          const e = entry as Record<string, unknown>;
+          const from = typeof e.from === "string" && e.from !== "" ? nameOf(e.from) : null;
+          const to = typeof e.to === "string" && e.to !== "" ? nameOf(e.to) : null;
+          if (to && from) changes.push(`${to} in for ${from} at ${slot}`);
+          else if (to) changes.push(`${to} in at ${slot}`);
+          else if (from) changes.push(`${from} out at ${slot}`);
+        }
+      }
+      if (total === 0) return "Set its lineup.";
+      if (changes.length === 0) return `Changed ${total} lineup slot${total === 1 ? "" : "s"}.`;
+      const shown = changes.slice(0, 2);
+      const more = total - shown.length;
+      return `Set its lineup: ${shown.join("; ")}${more > 0 ? `; and ${more} more change${more === 1 ? "" : "s"}` : ""}.`;
+    }
+    case "draft_pick": {
+      if (!added) return "Made a draft pick.";
+      const position = text("position");
+      const nflTeam = text("nfl_team");
+      const who = position || nflTeam ? `${added} (${[position, nflTeam].filter(Boolean).join(", ")})` : added;
+      const pickNo = num("pick_no");
+      const round = num("round");
+      const where =
+        pickNo !== null ? ` at pick ${pickNo}${round !== null ? ` (round ${round})` : ""}` : "";
+      if (text("made_by") === "autopick") {
+        // The autopick path (lib/draft.ts) stores a marker reason, not agent
+        // prose — "auto-pick: commissioner" | "auto-pick: deadline" |
+        // "auto-pick: session ended without a pick" — so it is translated,
+        // never quoted as if the agent said it.
+        const marker = text("reason");
+        const why =
+          marker === "auto-pick: deadline"
+            ? " when the clock ran out"
+            : marker === "auto-pick: session ended without a pick"
+              ? " after its session ended without a pick"
+              : marker === "auto-pick: commissioner"
+                ? " on the commissioner's flag"
+                : "";
+        return `Auto-picked ${who}${where}${why}.`;
+      }
+      const reason = text("reason");
+      return reason ? `Drafted ${who}${where}. “${reason}”` : `Drafted ${who}${where}.`;
+    }
     case "commissioner":
       return text("reason") ?? "The commissioner acted.";
     default:
