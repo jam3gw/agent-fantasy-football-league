@@ -159,6 +159,52 @@ export async function GET(request: Request): Promise<Response> {
         );
       }
 
+      case "catalog": {
+        // Search the gateway's live model catalog, for picking a swap target.
+        const q = (new URL(request.url).searchParams.get("q") ?? "").toLowerCase();
+        const { fetchGatewayModelIds } = await import("@league/agent");
+        const catalog = await fetchGatewayModelIds();
+        return Response.json({
+          ok: catalog.ok,
+          error: catalog.error ?? null,
+          matches: catalog.ids.filter((id) => id.toLowerCase().includes(q)).slice(0, 40),
+        });
+      }
+
+      case "swap": {
+        // Mirrors swapModelAction: catalog-verified, recorded as a public
+        // commissioner transaction. Mock-branch rehearsal of the same swap
+        // the commissioner asked for on production.
+        const url = new URL(request.url);
+        const teamId = Number(url.searchParams.get("team"));
+        const modelId = url.searchParams.get("model") ?? "";
+        const label = url.searchParams.get("label") ?? modelId;
+        if (!Number.isFinite(teamId) || !modelId) {
+          return Response.json({ ok: false, error: "team and model are required" }, { status: 400 });
+        }
+        const { checkGatewayModelId } = await import("@league/agent");
+        const { recordTransaction, teams: teamsTable } = await import("@league/engine");
+        const { eq: eqOp } = await import("drizzle-orm");
+        const onGateway = await checkGatewayModelId(modelId);
+        if (onGateway === "not_found") {
+          return Response.json({ ok: false, error: `the gateway has no model called ${modelId}` }, { status: 400 });
+        }
+        const team = (await database.select().from(teamsTable).where(eqOp(teamsTable.id, teamId)))[0];
+        if (!team) return Response.json({ ok: false, error: `team ${teamId} not found` }, { status: 404 });
+        const provider = modelId.split("/")[0] ?? "unknown";
+        await database
+          .update(teamsTable)
+          .set({ modelId, modelLabel: label, provider })
+          .where(eqOp(teamsTable.id, teamId));
+        await recordTransaction(database, {
+          type: "commissioner",
+          week: null,
+          teamIds: [teamId],
+          payload: { action: "model_swapped", teamId, from: team.modelId, to: modelId, reason: "price point (mock rehearsal)" },
+        });
+        return Response.json({ ok: true, from: team.modelId, to: modelId, verified: onGateway });
+      }
+
       case "tick": {
         const summary = await runTick();
         return Response.json({ ok: true, ...summary });
