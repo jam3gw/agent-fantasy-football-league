@@ -1,0 +1,32 @@
+{
+  "name": "agent-fantasy-football-league",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "lint": "pnpm -r --no-bail lint",
+    "typecheck": "pnpm -r --no-bail typecheck",
+    "test": "vitest run",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4",
+    "@eslint/js": "^9.39.2",
+    "eslint": "^9.39.2",
+    "typescript-eslint": "^8.46.4"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "sharp",
+      "@tailwindcss/oxide",
+      "unrs-resolver"
+    ]
+  },
+  "dependencies": {
+    "next": "16.2.4"
+  }
+}

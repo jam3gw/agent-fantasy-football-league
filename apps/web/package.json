@@ -1,0 +1,44 @@
+{
+  "name": "@league/web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "pnpm --filter @league/agent briefs && pnpm --filter @league/engine migrate && tsx scripts/seed.mts && next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "seed": "tsx scripts/seed.mts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.3.16",
+    "@league/agent": "workspace:*",
+    "@league/data": "workspace:*",
+    "@league/engine": "workspace:*",
+    "@league/shared": "workspace:*",
+    "@neondatabase/serverless": "^1.1.0",
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
+    "@workflow/next": "^4.1.9",
+    "drizzle-orm": "^0.44.7",
+    "next": "16.2.4",
+    "postgres": "^3.4.9",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "server-only": "^0.0.1",
+    "workflow": "^4.8.5"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.4",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.12",
+    "typescript": "^5",
+    "vitest": "^3.2.4"
+  }
+}
