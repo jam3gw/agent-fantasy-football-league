@@ -11,6 +11,63 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — SWR auto-refresh + live thinking stream (SPEC v1.10, commissioner request)
+
+Jake asked for two things: SWR so the site auto-refreshes, and live logs — a
+stream of what an agent is thinking *while it thinks it*. Branch
+`claude/swr-live-logs-3adcdw`.
+
+**Auto-refresh.** `swr` added to `@league/web`. A root-layout client component
+(`components/auto-refresh.tsx`) polls `/api/public/pulse` every 20 s and calls
+`router.refresh()` only when the stamp moves, so an idle league costs one tiny
+query per open tab and no re-renders. The stamp (`lib/pulse.ts`) is the maxima
+of the ids/updated_at columns behind everything a spectator can see:
+session_events, transactions, board_posts, reporter_posts, sessions.updated_at,
+matchups.updated_at, draft.updated_at. SWR gives us tab-hidden pausing and
+focus revalidation for free — the reason it beats the hand-rolled interval the
+draft room had, which is now also on SWR (same 3 s cadence, §10.2 unchanged).
+Server components and the §12.1 revalidate windows are untouched: refresh just
+re-fetches the RSC payload, so a page is never staler than its window *plus*
+nobody has to reload.
+
+**Live thinking stream.** `createModelStep` now uses `streamText` instead of
+`generateText` (§8.1 unchanged: no limits of any kind; the step still returns
+one complete assistant message). Reasoning and text deltas accumulate and are
+staged through a throttled sink (500 ms) into the new one-row-per-session
+`session_stream` table (migration 0003); the session loop deletes the row the
+moment the step's assistant event is durable, and on session failure. The new
+public `/api/public/sessions/[id]/live` returns the session header, transcript
+events after a cursor, and that partial. `/sessions/[id]` renders a live SWR
+view (2.5 s poll) for queued/running sessions — accumulated events use the
+exact same components as the static page (extracted to
+`components/transcript.tsx`) — and the static ISR page for finished ones.
+
+**Choices.**
+- Partial-sink writes swallow their own errors: a preview must never kill a
+  paid model step mid-stream. The durable transcript path is unchanged.
+- `streamText` reports provider failures as stream `error` parts instead of
+  throwing; the step rethrows them so the session loop's failure handling is
+  identical to before.
+- The stream throttle uses `Date.now()`, not `Clock` — it is a mechanical
+  write-rate limiter, not league time.
+- Migration note: hand-written 0002 shipped without a drizzle snapshot, so
+  drizzle-kit re-diffed the FantasyPros drops into 0003. 0003's SQL is trimmed
+  to the `session_stream` create only; 0003_snapshot.json now records the true
+  schema, so future generates diff cleanly.
+
+**Verified here.** Full suite green (510 tests, 6 new: streaming/partial-sink
+lifecycle, pulse stamp movement). `pnpm build` run against the Neon `dev`
+branch — migration 0003 applied there and the build prerendered every page.
+(Neon's HTTP driver is reachable from this sandbox now; the 2026-08-28
+allowlist note below is stale.) Postgres over TCP (5432) is still blocked
+here, so the new routes could not be curled against a running server —
+they use the same driver and helpers as every existing public route, and
+production applies 0003 automatically via the build's migrate step.
+**Not verifiable here:** real streamed deltas from the gateway (no
+`AI_GATEWAY_API_KEY` in this environment). The stream-part shapes were checked
+against the installed `ai@7.0.84` types; first real session on the preview
+deploy will show the thinking panel — worth eyeballing after merge.
+
 ## 2026-08-29 — Commissioner login works; both admin secrets confirmed live
 
 `COMMISSIONER_PASSWORD` and `SESSION_SECRET` are both set and scoped to
