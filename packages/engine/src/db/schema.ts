@@ -5,7 +5,6 @@
  */
 import {
   boolean,
-  date,
   index,
   integer,
   jsonb,
@@ -107,7 +106,6 @@ export const leagueSettings = pgTable("league_settings", {
   draftClockSeconds: integer("draft_clock_seconds").notNull().default(180),
   draftRounds: integer("draft_rounds").notNull().default(14),
   scheduleSeed: text("schedule_seed"),
-  fantasyprosDailyAllowance: integer("fantasypros_daily_allowance").notNull().default(3),
   phase: text("phase").$type<Phase>().notNull().default("pre_draft"),
   /** Editable loop-guard and misc settings (SPEC §8.3: settings, not constants). */
   extra: jsonb("extra").$type<Record<string, unknown>>().notNull().default({}),
@@ -252,7 +250,7 @@ export const playerWeekStats = pgTable(
     stats: jsonb("stats").$type<Record<string, number>>().notNull(),
     ptsPpr: numeric("pts_ppr", { precision: 8, scale: 2, mode: "number" }),
     enginePts: numeric("engine_pts", { precision: 8, scale: 2, mode: "number" }),
-    source: text("source").$type<"sleeper" | "fantasypros" | "nflverse">().notNull().default("sleeper"),
+    source: text("source").$type<"sleeper" | "nflverse">().notNull().default("sleeper"),
     final: boolean("final").notNull().default(false),
     updatedAt: updatedAt(),
   },
@@ -548,7 +546,6 @@ export const rankings = pgTable(
   "rankings",
   {
     playerId: text("player_id").notNull(),
-    fpPlayerId: text("fp_player_id"),
     set: text("set").$type<"draft" | "weekly" | "ros">().notNull(),
     week: integer("week").notNull().default(0),
     rank: integer("rank"),
@@ -561,17 +558,6 @@ export const rankings = pgTable(
   },
   (t) => [primaryKey({ columns: [t.playerId, t.set, t.week] })],
 );
-
-export const rankingsUnmatched = pgTable("rankings_unmatched", {
-  id: serial("id").primaryKey(),
-  fpPlayerId: text("fp_player_id").notNull(),
-  fpName: text("fp_name").notNull(),
-  fpTeam: text("fp_team"),
-  fpPosition: text("fp_position"),
-  raw: jsonb("raw").$type<Record<string, unknown>>(),
-  resolvedPlayerId: text("resolved_player_id"),
-  createdAt: createdAt(),
-});
 
 export const teamWeekResults = pgTable(
   "team_week_results",
@@ -691,36 +677,6 @@ export const scoringDiscrepancies = pgTable("scoring_discrepancies", {
   enginePts: numeric("engine_pts", { precision: 8, scale: 2, mode: "number" }),
   diff: numeric("diff", { precision: 8, scale: 2, mode: "number" }),
   createdAt: createdAt(),
-});
-
-export const fpUsage = pgTable(
-  "fp_usage",
-  {
-    id: serial("id").primaryKey(),
-    teamId: integer("team_id"),
-    dayEt: date("day_et").notNull(),
-    requestNo: integer("request_no").notNull(),
-    endpoint: text("endpoint").notNull(),
-    params: jsonb("params").$type<Record<string, unknown>>().notNull().default({}),
-    cacheHit: boolean("cache_hit").notNull().default(false),
-    sessionId: integer("session_id"),
-    createdAt: createdAt(),
-  },
-  (t) => [index("fp_usage_team_day_idx").on(t.teamId, t.dayEt)],
-);
-
-export const fpCache = pgTable("fp_cache", {
-  urlKey: text("url_key").primaryKey(),
-  body: jsonb("body").$type<unknown>().notNull(),
-  fetchedAt: tstz("fetched_at").notNull(),
-  expiresAt: tstz("expires_at").notNull(),
-});
-
-export const fpPlayerMap = pgTable("fp_player_map", {
-  fpPlayerId: text("fp_player_id").primaryKey(),
-  playerId: text("player_id").notNull(),
-  matchedBy: text("matched_by").$type<"yahoo_id" | "espn_id" | "name" | "manual">().notNull(),
-  updatedAt: updatedAt(),
 });
 
 export const reporterPosts = pgTable("reporter_posts", {

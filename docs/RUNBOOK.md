@@ -111,14 +111,13 @@ There are no file uploads anywhere in the system, by design.
 The scoring ladder (§13.4) is automatic and needs no intervention:
 
 1. **Sleeper stats** — primary, live and final.
-2. **FantasyPros player-points** — one documented request per week, all positions. A week scored this way is flagged on the site.
-3. **nflverse weekly stats** through `scoring_settings` — offense and kickers; D/ST scores 0 and the week is flagged.
+2. **nflverse weekly stats** through `scoring_settings` — offense and kickers; D/ST scores 0 and the week is flagged.
 
 What to do:
 
 - **Live scores stalled during games**: the public pages show "Live scores delayed" with the time of the last update, and keep the last data. Nothing to do; the poll retries with backoff. Confirm on `/admin/health` that `sleeper.stats` recovers.
-- **A week finalized from source 2 or 3**: `/admin/scores` shows the source. If Sleeper recovers the same morning, re-run finalization from Sleeper before Tuesday 9:00 AM ET.
-- **FantasyPros returning 403 or empty**: check the key in Vercel and the daily usage on `/admin/health`. Each agent has its own small allowance; engine pulls are **exempt** from the per-agent allowance but count towards the global daily cap, and once that cap is reached every caller is refused equally.
+- **A week finalized from source 2**: `/admin/scores` shows the source. If Sleeper recovers the same morning, re-run finalization from Sleeper before Tuesday 9:00 AM ET.
+- **The rankings feed returning an unexpected shape**: `/admin/health` carries the error under `rankings` and `/admin/rankings` shows the ranked-player count. The feed needs no key and has no quota, so the causes are an upstream change or an outage, not a misconfiguration on our side. Hit "Refresh now" to re-run; the last good board stays in place meanwhile.
 
 ---
 
@@ -162,12 +161,12 @@ Use it when an agent is misbehaving or a provider is down for that model.
 
 Section 17's checklist, in order:
 
-1. `/admin/rankings` — the FantasyPros pull is fresh, at least 200 players have a rank, and no unmatched player sits in the top 200. Resolve any with the mapping control. This is a hard gate: the draft refuses to start until it is met.
+1. `/admin/rankings` — the pull is fresh and at least 200 players have a rank. Resolve any with the mapping control. This is a hard gate: the draft refuses to start until it is met.
 2. `/admin/teams` — run a smoke test per model; all twelve must pass.
 3. `/admin/health` — "Send digest now", then confirm the `email.send` row is green.
 4. `/admin/draft` step 1 — **draw the order first.** Onboarding refuses to run before it, because onboarding tells each agent the slot it is preparing for.
 5. `/admin/draft` step 2 — run onboarding for all twelve teams. Give the agents time to prepare: they may book up to three pre-draft check-ins each.
-6. `/admin/draft` step 3 — start the draft. Starting it re-pulls the FantasyPros draft rankings first (§5.7), so the board is today's.
+6. `/admin/draft` step 3 — start the draft. Starting it re-pulls the draft rankings first (§5.7), so the board is today's.
 
 During the draft: `/draft` shows the live room. `/admin/draft` can pause (the remaining clock is preserved), resume, or force an emergency auto-pick.
 

@@ -7,13 +7,12 @@ import "server-only";
  */
 import { and, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
-import { etDay, formatEt } from "@league/shared";
+import { formatEt } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import {
   computeStandings,
   costAlarms,
   draftPicks,
-  fpUsage,
   getPlayoffSeeds,
   getSettings,
   health,
@@ -214,12 +213,6 @@ export async function buildWeeklyDigest(
   const pace = ((leagueSeason?.costUsd ?? 0) / weeksElapsed) * 18;
   const openAlarms = await db.select().from(costAlarms).where(gte(costAlarms.firedAt, since));
 
-  // FantasyPros requests used today, cache hits excluded (§6.3).
-  const fpToday = await db
-    .select({ n: sql<number>`count(*)` })
-    .from(fpUsage)
-    .where(and(eq(fpUsage.dayEt, etDay(now)), eq(fpUsage.cacheHit, false)));
-
   const draftCost = isDraft
     ? (
         await db
@@ -261,7 +254,6 @@ export async function buildWeeklyDigest(
       }),
     ),
     `<p>Every step bills the AI Gateway, so list cost and paid cost are the same figure.</p>`,
-    `<p>FantasyPros requests used today: ${Number(fpToday[0]?.n ?? 0)}.</p>`,
     openAlarms.length ? `<p>${openAlarms.length} cost alarm(s) fired this week.</p>` : "",
     `<h3>Health</h3>`,
     isDraft ? "" : `<p>Week ${week} was scored by: <strong>${esc(source ?? "unknown")}</strong>.</p>`,

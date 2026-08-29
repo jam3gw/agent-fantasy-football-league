@@ -71,6 +71,96 @@ the root layout stays a server component and no page loses static rendering.
   0 pageviews. The routes have been live on production all along; nothing was
   calling them.
 
+## 2026-08-29 — Rankings moved to Sleeper; FantasyPros removed entirely
+
+Jake's call, after the plan upgrade did not take (entry below). Both Section 2
+rows that pinned FantasyPros were changed with his approval: the draft board's
+source, and the agents' research tool. SPEC.md is at v1.9.
+
+### Why, and the part that matters more than the paywall
+
+The free tier capping every response at 10 rows is the reason we went looking.
+It is not the reason we switched. Measuring the alternatives turned up a defect
+that was already in the design and would have bitten us on draft day **even on a
+paid plan**:
+
+**Sleeper stopped populating `espn_id` and `yahoo_id` for players who entered the
+league from about 2021 on.** Measured against production: of the top 200 by ADP,
+**144 carry neither id**. Chase, Gibbs, Bijan, Nacua, Jeanty, Love — all null.
+McCaffrey (2017) has both.
+
+Appendix B's mapping chain was yahoo id → espn id → normalized name. So for 72%
+of the draft board it would have fallen through to fuzzy name matching, at speed,
+against a three-minute pick clock. That is a latent draft-day failure, and it
+applies to any outside source, not just FantasyPros. It is written into Appendix B
+so the next person to propose an external feed has to answer it.
+
+I checked ESPN's `kona_player_info` as the alternative first: genuinely good data
+(1,000 ranked players with PPR rank, ADP, auction value, %owned, no key), but it
+is keyed by ESPN id, so **only 56 of the top 200 joined**. Same defect.
+
+Sleeper's own projection feed matches **200 of 200**, because its `player_id` is
+already our canonical id.
+
+### What the board is built from now
+
+`GET api.sleeper.com/projections/nfl/2026?season_type=regular&position[]=…&order_by=adp_ppr`
+— one call, no key, no quota, 1,756 players with a usable PPR ADP against a gate
+of 200.
+
+- `rank`, `pos_rank` — ADP order, and that order within a position.
+- `adp` — `adp_ppr` verbatim. Sleeper writes `999` where it has no ADP; those are
+  left off the board rather than ranked last.
+- `tier` — **not** derived from ADP. I tried: ADP is almost perfectly uniform
+  (median consecutive gap 1.00 at every depth from 1 to 400), so gap-based tiers
+  are an artifact of where the threshold sits — 1.2 gives 67 tiers in the top 200,
+  2.0 gives 7, 2.5 gives 2. There is no cluster structure to find, and an invented
+  tier that reads as authoritative is worse than none. Projected points *do*
+  cluster: median gaps of 1.5–2.8 against real cliffs of 26–50. So a tier is a
+  drop within a position larger than 3× that position's median drop, and a player
+  with no projection gets no tier.
+- `ecr_delta` — gone; Sleeper has no expert-consensus movement. Column kept, always null.
+
+### The agents' tool
+
+`fantasypros_lookup` → `player_research`, and it reads **our own tables** rather
+than any API: rankings from the ingest above, projections from `player_week_proj`,
+trending adds and injury status from the hourly player feed. Consequences worth
+noting: no key, no 3-per-day allowance to spend, no cache-hit accounting — and
+"same information for all twelve agents" (§2) becomes true by construction rather
+than by convention, since every agent reads the same rows at the same moment.
+There is no `news` kind; Sleeper has no news feed and `web_search` always covered
+it better.
+
+### What else went
+
+- `ingest.fp_injuries` — injuries already arrive on the hourly `ingest.players`
+  feed, which is what raises `injury.changed` anyway. Nothing was lost.
+- **§13.4's scoring ladder is two rungs, not three**: Sleeper, then nflverse.
+  FantasyPros player-points sat between them.
+- Tables `fp_cache`, `fp_usage`, `fp_player_map`, `rankings_unmatched`; column
+  `rankings.fp_player_id`; setting `fantasypros_daily_allowance`; the three
+  `FANTASYPROS_*` environment variables; `docs/fantasypros_v2_public.yaml`; the
+  unmatched-mapping control on `/admin/rankings`; the FantasyPros cards on
+  `/admin/health` and `/benchmark`; the FantasyPros line in the weekly digest.
+- The §5.7 draft gate lost its "nothing unmatched in the top 200" clause, because
+  an unmatched player is no longer a state that can occur.
+
+**Destructive migration** (`0002_drop_fantasypros.sql`), recorded per the standing
+rules. It drops those four tables, two columns, and deletes every `rankings` row.
+All of it is derived or operational data — API responses under a TTL, a request
+counter, and two tables that existed only to resolve foreign player ids. No league
+state (rosters, transactions, results, matchups) references any of them. The
+`rankings` rows deleted are the 68 truncated free-tier ones, which are worthless;
+the board is rebuilt by the next ingest. Neon snapshot `snap-broad-river-avws9b5v`
+(`pre-0002-drop-fantasypros`) was taken before it ran against production.
+
+### Checks
+
+452 tests green before the change, and after it with the FantasyPros tests
+replaced: 9 new for the ingest and its tiering, 6 for `player_research`, and the
+§13.4 ladder test rewritten for two rungs. Lint and typecheck clean.
+
 ## 2026-08-29 — FantasyPros re-run after the plan upgrade: still `free`
 
 Jake upgraded the FantasyPros plan and asked for another run of

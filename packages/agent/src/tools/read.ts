@@ -33,7 +33,6 @@ import {
   activeCount,
   boardPosts,
   computeStandings,
-  fpPlayerMap,
   getRoster,
   getSettings,
   isIrIllegal,
@@ -43,6 +42,7 @@ import {
   nextWaiverRunTime,
   nflGames,
   playerWeekProj,
+  rankings,
   playerWeekStats,
   players,
   readScratchpad,
@@ -55,8 +55,6 @@ import {
   waiverClaims,
   waiverRuns,
 } from "@league/engine";
-import type { FpCaller } from "@league/data";
-import { fpRequest } from "@league/data";
 import type { LeagueTool, ToolContext, ToolResult } from "./types.ts";
 import { pageRows, toolFailure } from "./types.ts";
 
@@ -1603,7 +1601,7 @@ export const webSearchTool = readTool(
       return toolFailure(
         "web_search_unavailable",
         "Web search is not configured for this league.",
-        "Use fantasypros_lookup or the league read tools instead.",
+        "Use player_research or the league read tools instead.",
       );
     }
     let raw: WebSearchResult[];
@@ -1614,7 +1612,7 @@ export const webSearchTool = readTool(
       return toolFailure(
         "web_search_unavailable",
         "The web search provider did not return results.",
-        "Try again later or use fantasypros_lookup.",
+        "Try again later or use player_research.",
       );
     }
     const results = raw
@@ -1631,257 +1629,195 @@ export const webSearchTool = readTool(
 );
 
 /* ------------------------------------------------------------------ *
- * fantasypros_lookup
+ * player_research
  * ------------------------------------------------------------------ */
 
-const FP_KINDS = [
+/**
+ * Replaced `fantasypros_lookup` on 2026-08-29. Every field below is already in
+ * our own tables — rankings from the Sleeper ADP ingest (§5.7), projections
+ * from the weekly projection ingest, injury and trending data from the hourly
+ * player feed — so this tool makes no outbound request, needs no key, and has
+ * no daily allowance to spend. It also makes "same information for all twelve
+ * agents" true by construction rather than by convention: every agent reads the
+ * same rows at the same moment.
+ *
+ * There is no `news` kind. Sleeper carries no news feed, and `web_search`
+ * already covers it.
+ */
+const RESEARCH_KINDS = [
   "draft_rankings",
-  "adp",
   "weekly_rankings",
   "ros_rankings",
-  "waiver_rankings",
   "projections",
+  "trending",
   "injuries",
-  "news",
 ] as const;
-type FpKind = (typeof FP_KINDS)[number];
+type ResearchKind = (typeof RESEARCH_KINDS)[number];
 
-const FP_POSITIONS = ["ALL", "QB", "RB", "WR", "TE", "K", "DST", "FLX"] as const;
+const RESEARCH_POSITIONS = ["ALL", "QB", "RB", "WR", "TE", "K", "DEF"] as const;
 
-/** FantasyPros player id → our Sleeper player id (§5.7, Appendix B). */
-async function fpToOurIds(db: EngineDb, fpIds: string[]): Promise<Map<string, string>> {
-  if (fpIds.length === 0) return new Map();
-  const rows = await db
-    .select()
-    .from(fpPlayerMap)
-    .where(inArray(fpPlayerMap.fpPlayerId, fpIds));
-  return new Map(rows.map((r) => [r.fpPlayerId, r.playerId]));
-}
+const RANKING_SET_FOR: Partial<Record<ResearchKind, "draft" | "weekly" | "ros">> = {
+  draft_rankings: "draft",
+  weekly_rankings: "weekly",
+  ros_rankings: "ros",
+};
 
-/** Our Sleeper player ids → FantasyPros ids (for `players=`/`player_ids=` filters). */
-async function ourToFpIds(db: EngineDb, ourIds: string[]): Promise<string[]> {
-  if (ourIds.length === 0) return [];
-  const rows = await db.select().from(fpPlayerMap).where(inArray(fpPlayerMap.playerId, ourIds));
-  return rows.map((r) => r.fpPlayerId);
-}
-
-function pickArray(body: unknown, keys: string[]): Array<Record<string, unknown>> {
-  if (Array.isArray(body)) return body as Array<Record<string, unknown>>;
-  if (!body || typeof body !== "object") return [];
-  const obj = body as Record<string, unknown>;
-  for (const k of keys) {
-    const v = obj[k];
-    if (Array.isArray(v)) return v as Array<Record<string, unknown>>;
-  }
-  for (const v of Object.values(obj)) {
-    if (Array.isArray(v)) return v as Array<Record<string, unknown>>;
-  }
-  return [];
-}
-
-function num(v: unknown): number | null {
-  if (typeof v === "number") return v;
-  if (typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))) return Number(v);
-  return null;
-}
-
-function fpId(row: Record<string, unknown>): string | null {
-  const raw = row.player_id ?? row.fpid ?? row.playerId ?? row.id;
-  if (raw === undefined || raw === null) return null;
-  return String(raw);
-}
-
-/** Endpoint + params for a lookup kind (§5.8 endpoint list, §8.4 args). */
-function fpEndpoint(
-  kind: FpKind,
-  season: number,
-  week: number,
-  position: string,
-  fpIds: string[],
-  category: string | undefined,
-  limit: number,
-): { path: string; params: Record<string, string | number | undefined> } {
-  switch (kind) {
-    case "draft_rankings":
-      return {
-        path: `/nfl/${season}/consensus-rankings`,
-        params: { position, scoring: "PPR", week: 0 },
-      };
-    case "adp":
-      return {
-        path: `/nfl/${season}/consensus-rankings`,
-        params: { position, scoring: "PPR", type: "ADP", week: 0 },
-      };
-    case "weekly_rankings":
-      return { path: `/nfl/${season}/consensus-rankings`, params: { position, scoring: "PPR", week } };
-    case "ros_rankings":
-      return {
-        path: `/nfl/${season}/consensus-rankings`,
-        params: { position, scoring: "PPR", type: "ROS", week },
-      };
-    case "waiver_rankings":
-      return {
-        path: `/nfl/${season}/consensus-rankings`,
-        params: { position, scoring: "PPR", type: "WW", week },
-      };
-    case "projections":
-      return {
-        path: `/nfl/${season}/projections`,
-        params: { position, week, players: fpIds.length > 0 ? fpIds.join(":") : undefined },
-      };
-    case "injuries":
-      return {
-        path: "/nfl/injuries",
-        params: {
-          year: season,
-          week,
-          include_probabilities: "true",
-          player_ids: fpIds.length > 0 ? fpIds.join(":") : undefined,
-        },
-      };
-    case "news":
-      return {
-        path: "/nfl/news",
-        params: {
-          limit,
-          category,
-          fpid: fpIds.length > 0 ? fpIds.join(":") : undefined,
-          order_by: "updated",
-        },
-      };
-  }
-}
-
-export const fantasyprosLookupTool = readTool(
-  "fantasypros_lookup",
-  "One FantasyPros request: PPR rankings (draft, ADP, weekly, rest-of-season, waiver wire), projections, injuries, or news, mapped to our player ids. You get 3 requests per day; the response says how many remain.",
+export const playerResearchTool = readTool(
+  "player_research",
+  "League rankings and player data: draft/weekly/rest-of-season rankings with ADP and tiers, projected points, trending adds, or current injuries. Filter by position or by player_ids. No daily limit — every agent reads the same rows.",
   z.object({
-    kind: z.enum(FP_KINDS),
-    position: z.enum(FP_POSITIONS).optional(),
+    kind: z.enum(RESEARCH_KINDS),
+    position: z.enum(RESEARCH_POSITIONS).optional(),
     week: z.number().int().min(0).max(18).optional(),
-    player_ids: z.array(z.string()).max(20).optional(),
-    category: z.enum(["injury", "recap", "transaction", "rumor", "breaking"]).optional(),
-    limit: z.number().int().min(1).max(60).optional(),
+    player_ids: z.array(z.string()).max(50).optional(),
+    limit: z.number().int().min(1).max(100).optional(),
+    offset: z.number().int().min(0).optional(),
   }),
   async (args, ctx) => {
     const db = ctx.db;
-    const apiKey = ctx.config.fantasyprosApiKey;
-    if (!apiKey) {
-      return toolFailure(
-        "fantasypros_unavailable",
-        "FantasyPros is not configured for this league.",
-        "Try later or use web_search.",
-      );
-    }
     const settings = await getSettings(db);
     const season = settings.season;
     const week = args.week ?? settings.currentWeek;
     const position = args.position ?? "ALL";
-    if (args.kind === "projections" && args.position === undefined) {
-      return toolFailure("invalid_args", "projections need a position", "pass position: QB, RB, WR, TE, K or DST");
-    }
-    const limit = args.limit ?? (args.kind === "news" ? 25 : 60);
-    const fpIds = await ourToFpIds(db, args.player_ids ?? []);
-    if ((args.player_ids?.length ?? 0) > 0 && fpIds.length === 0 && args.kind !== "news") {
-      return toolFailure(
-        "not_found",
-        "none of those player ids are mapped to FantasyPros players",
-        "drop player_ids to get the full list, then match by name",
+    const limit = args.limit ?? 50;
+    const offset = args.offset ?? 0;
+    const only = new Set(args.player_ids ?? []);
+
+    const positionFilter = (pos: string | null): boolean =>
+      position === "ALL" || (pos !== null && pos === position);
+    const idFilter = (id: string): boolean => only.size === 0 || only.has(id);
+
+    const rankingSet = RANKING_SET_FOR[args.kind];
+    if (rankingSet) {
+      const rows = await db
+        .select({
+          playerId: rankings.playerId,
+          rank: rankings.rank,
+          posRank: rankings.posRank,
+          tier: rankings.tier,
+          adp: rankings.adp,
+          fetchedAt: rankings.fetchedAt,
+          name: players.fullName,
+          team: players.nflTeam,
+          position: players.position,
+          injuryStatus: players.injuryStatus,
+        })
+        .from(rankings)
+        .innerJoin(players, eq(players.playerId, rankings.playerId))
+        .where(and(eq(rankings.set, rankingSet), eq(rankings.week, rankingSet === "draft" ? 0 : week)))
+        .orderBy(asc(rankings.rank));
+
+      const kept = rows.filter((r) => positionFilter(r.position) && idFilter(r.playerId));
+      if (kept.length === 0) {
+        return toolFailure(
+          "not_found",
+          `no ${rankingSet} rankings are loaded${position === "ALL" ? "" : ` for ${position}`}`,
+          "the board is rebuilt by the rankings ingest; try kind: projections meanwhile",
+        );
+      }
+      const ownership = await ownershipOf(
+        db,
+        kept.slice(offset, offset + limit).map((r) => r.playerId),
+      );
+      return pageRows(
+        kept.map((r) => ({
+          player_id: r.playerId,
+          name: r.name,
+          team: r.team,
+          position: r.position,
+          rank: r.rank,
+          pos_rank: r.posRank,
+          tier: r.tier,
+          adp: r.adp,
+          injury_status: r.injuryStatus,
+          ownership: ownership.get(r.playerId) ?? null,
+        })),
+        offset,
+        limit,
+        { kind: args.kind, position, season, week: rankingSet === "draft" ? 0 : week, updated_at: kept[0]?.fetchedAt ?? null },
       );
     }
 
-    const { path, params } = fpEndpoint(args.kind, season, week, position, fpIds, args.category, limit);
-    const caller: FpCaller =
-      ctx.teamId === null
-        ? { kind: "reporter", sessionId: ctx.sessionId }
-        : { kind: "agent", teamId: ctx.teamId, sessionId: ctx.sessionId };
+    if (args.kind === "projections") {
+      const rows = await db
+        .select({
+          playerId: playerWeekProj.playerId,
+          projPtsPpr: playerWeekProj.projPtsPpr,
+          name: players.fullName,
+          team: players.nflTeam,
+          position: players.position,
+          injuryStatus: players.injuryStatus,
+        })
+        .from(playerWeekProj)
+        .innerJoin(players, eq(players.playerId, playerWeekProj.playerId))
+        .where(and(eq(playerWeekProj.season, season), eq(playerWeekProj.week, week)))
+        .orderBy(desc(playerWeekProj.projPtsPpr));
 
-    const outcome = await fpRequest(
-      db,
-      ctx.clock,
-      {
-        apiKey,
-        baseUrl: ctx.config.fantasyprosBaseUrl,
-        dailyCap: ctx.config.fantasyprosDailyCap,
-      },
-      caller,
-      path,
-      params,
+      const kept = rows.filter((r) => positionFilter(r.position) && idFilter(r.playerId));
+      if (kept.length === 0) {
+        return toolFailure("not_found", `no projections are loaded for week ${week}`, "try a different week");
+      }
+      const ownership = await ownershipOf(db, kept.slice(offset, offset + limit).map((r) => r.playerId));
+      return pageRows(
+        kept.map((r) => ({
+          player_id: r.playerId,
+          name: r.name,
+          team: r.team,
+          position: r.position,
+          proj_pts_ppr: r.projPtsPpr,
+          injury_status: r.injuryStatus,
+          ownership: ownership.get(r.playerId) ?? null,
+        })),
+        offset,
+        limit,
+        { kind: args.kind, position, season, week },
+      );
+    }
+
+    // trending and injuries both read the hourly player feed.
+    const base = await db
+      .select({
+        playerId: players.playerId,
+        name: players.fullName,
+        team: players.nflTeam,
+        position: players.position,
+        injuryStatus: players.injuryStatus,
+        injuryBodyPart: players.injuryBodyPart,
+        status: players.status,
+        trendingAdds: players.trendingAdds,
+      })
+      .from(players)
+      .where(
+        args.kind === "trending"
+          ? gt(players.trendingAdds, 0)
+          : and(eq(players.active, true), sql`${players.injuryStatus} is not null`),
+      )
+      .orderBy(args.kind === "trending" ? desc(players.trendingAdds) : asc(players.fullName));
+
+    const kept = base.filter((r) => positionFilter(r.position) && idFilter(r.playerId));
+    if (kept.length === 0) {
+      return toolFailure(
+        "not_found",
+        args.kind === "trending" ? "no trending adds are loaded" : "no injuries are listed right now",
+        "the player feed refreshes hourly on game days",
+      );
+    }
+    const ownership = await ownershipOf(db, kept.slice(offset, offset + limit).map((r) => r.playerId));
+    return pageRows(
+      kept.map((r) => ({
+        player_id: r.playerId,
+        name: r.name,
+        team: r.team,
+        position: r.position,
+        ...(args.kind === "trending"
+          ? { trending_adds: r.trendingAdds }
+          : { injury_status: r.injuryStatus, injury_body_part: r.injuryBodyPart, status: r.status }),
+        ownership: ownership.get(r.playerId) ?? null,
+      })),
+      offset,
+      limit,
+      { kind: args.kind, position, season },
     );
-    // Error codes pass through unchanged (§8.4).
-    if (!outcome.ok) return toolFailure(outcome.error, outcome.message, outcome.hint);
-
-    const rows = pickArray(outcome.body, ["players", "items", "news", "data", "injuries"]);
-    const ids = rows.map(fpId).filter((x): x is string => x !== null);
-    const map = await fpToOurIds(db, ids);
-    const ownership = await ownershipOf(db, [...new Set([...map.values()])]);
-
-    const mapped: Array<Record<string, unknown>> = rows.map((r) => {
-      const fid = fpId(r);
-      const ourId = fid ? (map.get(fid) ?? null) : null;
-      const own = ourId ? (ownership.get(ourId) ?? null) : null;
-      const base = { player_id: ourId, fp_player_id: fid, ownership: own };
-      if (args.kind === "projections") {
-        const stats = (r.stats ?? {}) as Record<string, unknown>;
-        const flat = Array.isArray(stats) ? ((stats[0] ?? {}) as Record<string, unknown>) : stats;
-        return {
-          ...base,
-          name: r.name ?? r.player_name ?? null,
-          position: r.position_id ?? r.player_position_id ?? null,
-          team: r.team_id ?? r.player_team_id ?? null,
-          points_ppr: num(flat.points_ppr) ?? num(r.points_ppr),
-          stats: flat,
-        };
-      }
-      if (args.kind === "injuries") {
-        return {
-          ...base,
-          name: r.player_name ?? r.name ?? null,
-          team: r.player_team_id ?? r.team_id ?? null,
-          position: r.player_position_id ?? r.position_id ?? null,
-          status: r.status ?? null,
-          probability_of_playing: num(r.probability_of_playing),
-          injury_type: r.practice_report_injury_type ?? r.injury_type ?? null,
-          practice: { practice_1: r.practice_1 ?? null, practice_2: r.practice_2 ?? null, practice_3: r.practice_3 ?? null },
-          ir_weeks: r.ir_weeks ?? null,
-        };
-      }
-      if (args.kind === "news") {
-        const newsFp = fid ? [fid] : [];
-        return {
-          date: r.created ?? r.updated ?? null,
-          headline: r.title ?? null,
-          description: r.desc ?? r.description ?? null,
-          impact: r.impact ?? null,
-          link: r.link ?? null,
-          fp_player_ids: newsFp,
-          player_ids: newsFp.map((f) => map.get(f) ?? null).filter((x): x is string => x !== null),
-        };
-      }
-      return {
-        ...base,
-        name: r.player_name ?? r.name ?? null,
-        team: r.player_team_id ?? null,
-        position: r.player_position_id ?? null,
-        rank_ecr: num(r.rank_ecr),
-        pos_rank: r.pos_rank ?? null,
-        tier: num(r.tier),
-        ecr_delta: num(r.player_ecr_delta),
-        bye: num(r.player_bye_week),
-        owned_avg: num(r.player_owned_avg),
-        adp: num(r.rank_adp) ?? num(r.adp),
-      };
-    });
-
-    return pageRows(mapped, 0, limit, {
-      kind: args.kind,
-      position,
-      week: args.kind === "draft_rankings" || args.kind === "adp" ? 0 : week,
-      season,
-      cache_hit: outcome.cacheHit,
-      remaining_today: outcome.remainingToday,
-      unmapped_players: mapped.filter((m) => "fp_player_id" in m && m.player_id === null).length,
-    });
   },
 );
 
@@ -1907,5 +1843,5 @@ export const READ_TOOLS: LeagueTool[] = [
   readBoardTool,
   readScratchpadTool,
   webSearchTool,
-  fantasyprosLookupTool,
+  playerResearchTool,
 ];

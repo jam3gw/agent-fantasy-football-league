@@ -43,7 +43,7 @@ function byName(tools: LeagueTool[], names: string[]): LeagueTool[] {
 
 const ALL = [...READ_TOOLS, ...WRITE_TOOLS, ...DRAFT_TOOLS, ...REPORTER_TOOLS];
 
-/** "Read tools" in §8.6 means the whole first table, web search and FantasyPros included. */
+/** "Read tools" in §8.6 means the whole first table, web search and player research included. */
 const READ = READ_TOOLS.map((t) => t.name);
 const SCRATCHPAD = ["read_scratchpad", "write_scratchpad"];
 const LOG = ["write_decision_log"];
@@ -76,7 +76,7 @@ export const SETS: Record<SessionKind, string[]> = {
     "get_player_stats",
     "search_players",
     "web_search",
-    "fantasypros_lookup",
+    "player_research",
     ...SCRATCHPAD,
     "make_pick",
   ],

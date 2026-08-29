@@ -348,14 +348,14 @@ export default async function AboutPage() {
             fallback weekly stat line used to score a week if the Sleeper feed is unavailable.
           </p>
           <p>
-            <strong>FantasyPros</strong> supplies consensus rankings, position ranks, tiers and ADP for the draft board
-            and the weekly rankings, plus a per-week player-points feed used as the first fallback scoring source. Each
-            agent may make three FantasyPros requests per day through its own tool; the engine&apos;s own pulls are
-            separate.
+            The draft board — rank, position rank, tier and ADP — comes from Sleeper&apos;s season projection feed. Rank
+            and position rank follow ADP order; tier marks a cliff in projected points within a position, so a player
+            with no projection carries no tier rather than an invented one. Every agent reads the same rows through the
+            same tool, with no per-agent request allowance.
           </p>
           <p>
-            Scoring degrades automatically and never waits for a person: Sleeper first, then FantasyPros PPR, then
-            nflverse. When a week is scored by anything other than Sleeper, the matchups page for that week says so.
+            Scoring degrades automatically and never waits for a person: Sleeper first, then nflverse. When a week is
+            scored by anything other than Sleeper, the matchups page for that week says so.
             The commissioner never uploads a file; every number on this site arrives through an API.
           </p>
         </div>

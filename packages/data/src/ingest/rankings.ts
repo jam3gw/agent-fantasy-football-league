@@ -1,80 +1,59 @@
 /**
- * FantasyPros rankings ingest (SPEC §5.7). The engine pulls the draft board
- * itself — nothing is uploaded. Per run: the id-map call, the PPR overall
- * consensus call, and six per-position calls; in season the weekly set plus
- * one rest-of-season call.
+ * Rankings ingest (SPEC §5.7). The engine pulls the draft board itself —
+ * nothing is uploaded.
  *
- * Merge rule (§5.7): `rank` = PPR overall ECR when present, else `rank_ecr`
- * from the players call, else unranked. `pos_rank` and `tier` come from the
- * position calls; `adp` from the players call.
+ * The source is Sleeper's season projection feed, which carries both average
+ * draft position and projected points in one unauthenticated call. It replaced
+ * FantasyPros on 2026-08-29 for two reasons: the free FantasyPros tier capped
+ * every response at 10 rows, and — the durable one — Sleeper stopped populating
+ * `yahoo_id`/`espn_id` for players who entered the league from about 2021 on.
+ * 144 of the top 200 carry neither, so any external source had to be joined by
+ * fuzzy name matching for most of the draft board. Sleeper's own `player_id` is
+ * already our canonical id, so there is no mapping step here and no unmatched
+ * list to resolve before the draft.
+ *
+ * Derivations, all from real numbers rather than invented ones:
+ *   rank     ordering by ADP (draft) or projected points (weekly, ros)
+ *   pos_rank that ordering restricted to the player's position — "RB7"
+ *   adp      Sleeper's PPR ADP, verbatim, draft set only
+ *   tier     a cliff in projected points within a position (see assignTiers)
  */
-import { eq, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
-import { fpPlayerMap, health, players, rankings, rankingsUnmatched } from "@league/engine";
-import type { FpConfig } from "../fantasypros.ts";
-import { fpRequest } from "../fantasypros.ts";
-import type { FpPlayer, MatchIndex, SleeperCandidate } from "../playerMatch.ts";
-import { buildMatchIndex, matchFpPlayer } from "../playerMatch.ts";
+import { health, rankings } from "@league/engine";
+import type { SleeperStatsEntry } from "../sleeper.ts";
+import { fetchSeasonProjections, fetchWeekProjections } from "../sleeper.ts";
 
 export type RankingSet = "draft" | "weekly" | "ros";
 
-export const FP_POSITIONS = ["QB", "RB", "WR", "TE", "K", "DST"] as const;
+/** Sleeper writes 999 into an ADP field it has no value for. */
+const ADP_UNSET = 999;
 
-/** One row of a FantasyPros consensus-rankings response. */
-export interface FpRankingRow {
-  player_id?: string | number;
-  player_name?: string;
-  player_team_id?: string;
-  player_position_id?: string;
-  player_yahoo_id?: string | number | null;
-  player_bye_week?: string | number | null;
-  player_owned_avg?: number | null;
-  rank_ecr?: number | null;
-  pos_rank?: string | null;
-  tier?: number | null;
-  player_ecr_delta?: number | null;
-}
-
-/** One row of the /nfl/players id-map response. */
-export interface FpPlayersRow {
-  player_id?: string | number;
-  fpid?: string | number;
-  name?: string;
-  player_name?: string;
-  team_id?: string;
-  player_team_id?: string;
-  position_id?: string;
-  player_position_id?: string;
-  yahoo_id?: string | number | null;
-  espn_id?: string | number | null;
-  rank_ecr?: number | null;
-  rank_adp?: number | null;
-}
+/**
+ * A tier boundary is a drop in projected points larger than this multiple of
+ * the position's median drop. Measured on the 2026 board, the median gap runs
+ * 1.5–2.8 points while real cliffs run 26–50, so the rule is not sensitive to
+ * the exact multiple.
+ */
+const TIER_CLIFF_MULTIPLE = 3;
 
 export interface RankingsIngestResult {
   set: RankingSet;
   week: number;
-  /** Rows returned per call, for the admin page and truncation checks (§5.7). */
+  /** Rows seen per source call, for /admin/rankings. */
   sourceCounts: Record<string, number>;
   ranked: number;
-  unmatched: number;
   /** The draft cannot start below the settings threshold (default 200). */
   distinctRanked: number;
 }
 
-interface MergedRanking {
-  fpPlayerId: string;
-  rank: number | null;
-  posRank: string | null;
-  tier: number | null;
+interface Candidate {
+  playerId: string;
+  position: string | null;
+  /** The value the set is ordered by: ADP ascending, or points descending. */
+  order: number;
   adp: number | null;
-  ecrDelta: number | null;
-}
-
-function asString(v: unknown): string | null {
-  if (v === null || v === undefined || v === "") return null;
-  return String(v);
+  points: number | null;
 }
 
 function asNumber(v: unknown): number | null {
@@ -83,45 +62,166 @@ function asNumber(v: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-/** Build the Sleeper-side match index from the players table. */
-export async function loadMatchIndex(db: EngineDb): Promise<MatchIndex> {
-  const rows = await db
-    .select({
-      playerId: players.playerId,
-      fullName: players.fullName,
-      position: players.position,
-      nflTeam: players.nflTeam,
-      yahooId: players.yahooId,
-      espnId: players.espnId,
-    })
-    .from(players);
-  return buildMatchIndex(rows as SleeperCandidate[]);
+function positionOf(entry: SleeperStatsEntry): string | null {
+  const p = entry.player?.position;
+  if (typeof p === "string" && p) return p;
+  const fp = entry.player?.fantasy_positions;
+  return Array.isArray(fp) && typeof fp[0] === "string" ? fp[0] : null;
 }
 
 /**
- * Record what FantasyPros said about its own limits, under the `fp.rankings`
- * health key. An error only when the plan makes the draft gate unreachable —
- * otherwise a plain success, so the row doubles as "the rankings pull worked".
+ * Group by position, order by projected points, and start a new tier wherever
+ * the drop to the next player is an outlier for that position. A player with no
+ * projection gets no tier: an invented one would read as authoritative.
  */
-async function recordTruncation(db: EngineDb, clock: Clock, body: unknown): Promise<void> {
-  const meta = (body ?? {}) as { tier?: unknown; limit?: unknown; count?: unknown };
-  const limit = Number(meta.limit);
-  const count = Number(meta.count);
-  const tier = typeof meta.tier === "string" ? meta.tier : "unknown";
-  const at = clock.now();
-  const truncated = Number.isFinite(limit) && Number.isFinite(count) && limit < count;
+export function assignTiers(rows: Array<{ playerId: string; position: string | null; points: number | null }>): Map<
+  string,
+  number
+> {
+  const tiers = new Map<string, number>();
+  const byPosition = new Map<string, Array<{ playerId: string; points: number }>>();
 
-  const message = truncated
-    ? `FantasyPros is on the '${tier}' plan, which returns at most ${limit} players per request ` +
-      `out of ${count} available. Every request is capped the same way, so the per-position calls ` +
-      `cannot get past it either: about ${limit * 7} ranked players is the ceiling, and §5.7's draft ` +
-      `gate needs 200. The draft cannot start until the FantasyPros plan is upgraded.`
+  for (const r of rows) {
+    if (r.position === null || r.points === null) continue;
+    const bucket = byPosition.get(r.position) ?? [];
+    bucket.push({ playerId: r.playerId, points: r.points });
+    byPosition.set(r.position, bucket);
+  }
+
+  for (const bucket of byPosition.values()) {
+    bucket.sort((a, b) => b.points - a.points);
+    const gaps: number[] = [];
+    for (let i = 0; i < bucket.length - 1; i++) gaps.push(bucket[i]!.points - bucket[i + 1]!.points);
+    if (gaps.length === 0) {
+      if (bucket[0]) tiers.set(bucket[0].playerId, 1);
+      continue;
+    }
+    const sorted = [...gaps].sort((a, b) => a - b);
+    const median = sorted[Math.floor(sorted.length / 2)] ?? 0;
+    const cliff = median * TIER_CLIFF_MULTIPLE;
+
+    let tier = 1;
+    tiers.set(bucket[0]!.playerId, tier);
+    for (let i = 1; i < bucket.length; i++) {
+      // A zero median (every projection identical) must not make every gap a
+      // cliff, so a boundary needs a strictly positive drop as well.
+      const gap = bucket[i - 1]!.points - bucket[i]!.points;
+      if (gap > cliff && gap > 0) tier++;
+      tiers.set(bucket[i]!.playerId, tier);
+    }
+  }
+  return tiers;
+}
+
+function toCandidates(entries: SleeperStatsEntry[], set: RankingSet): Candidate[] {
+  const out: Candidate[] = [];
+  for (const e of entries) {
+    const playerId = typeof e.player_id === "string" ? e.player_id : null;
+    if (!playerId) continue;
+    const stats = e.stats ?? {};
+    const points = asNumber(stats["pts_ppr"]);
+    const rawAdp = asNumber(stats["adp_ppr"]);
+    const adp = rawAdp !== null && rawAdp > 0 && rawAdp < ADP_UNSET ? rawAdp : null;
+
+    // The draft board is ordered the way people actually draft; the in-season
+    // sets are ordered by what the player is projected to score.
+    const order = set === "draft" ? adp : points === null ? null : -points;
+    if (order === null) continue;
+
+    out.push({ playerId, position: positionOf(e), order, adp, points });
+  }
+  // Ascending: ADP already reads that way, points were negated above.
+  out.sort((a, b) => a.order - b.order || a.playerId.localeCompare(b.playerId));
+  return out;
+}
+
+/**
+ * Pull one ranking set and store it. `week` 0 with set `draft` is the preseason
+ * board; in season pass the current week for the weekly set.
+ */
+export async function ingestRankings(
+  db: EngineDb,
+  clock: Clock,
+  opts: { season: number; set: RankingSet; week: number },
+): Promise<RankingsIngestResult> {
+  const { season, set, week } = opts;
+  const storedWeek = set === "draft" ? 0 : week;
+  const sourceCounts: Record<string, number> = {};
+
+  let entries: SleeperStatsEntry[];
+  if (set === "weekly") {
+    entries = (await fetchWeekProjections(season, week, { db })) ?? [];
+    sourceCounts["week_projections"] = entries.length;
+  } else {
+    entries = await fetchSeasonProjections(season, { db });
+    sourceCounts["season_projections"] = entries.length;
+  }
+
+  const candidates = toCandidates(entries, set);
+  sourceCounts["ranked"] = candidates.length;
+
+  const tiers = assignTiers(candidates);
+  const positionCounts = new Map<string, number>();
+  const now = clock.now();
+
+  const values = candidates.map((c, i) => {
+    let posRank: string | null = null;
+    if (c.position) {
+      const n = (positionCounts.get(c.position) ?? 0) + 1;
+      positionCounts.set(c.position, n);
+      posRank = `${c.position}${n}`;
+    }
+    return {
+      playerId: c.playerId,
+      set,
+      week: storedWeek,
+      rank: i + 1,
+      posRank,
+      tier: tiers.get(c.playerId) ?? null,
+      adp: set === "draft" ? c.adp : null,
+      ecrDelta: null,
+      sourceCounts,
+      fetchedAt: now,
+    };
+  });
+
+  await db.transaction(async (tx) => {
+    for (const v of values) {
+      await tx
+        .insert(rankings)
+        .values(v)
+        .onConflictDoUpdate({ target: [rankings.playerId, rankings.set, rankings.week], set: v });
+    }
+  });
+
+  await recordHealth(db, clock, set, values.length);
+
+  return {
+    set,
+    week: storedWeek,
+    sourceCounts,
+    ranked: values.length,
+    distinctRanked: new Set(values.map((v) => v.playerId)).size,
+  };
+}
+
+/**
+ * One health row per run. A pull that returns too few players to draft from is
+ * an error rather than a quiet success: §5.7's gate would otherwise block the
+ * draft with a working feed and nothing on the health page to explain it.
+ */
+async function recordHealth(db: EngineDb, clock: Clock, set: RankingSet, ranked: number): Promise<void> {
+  const at = clock.now();
+  const tooFew = set === "draft" && ranked < 200;
+  const message = tooFew
+    ? `The Sleeper projection feed returned only ${ranked} ranked players for the draft board; §5.7's gate needs 200. ` +
+      "The feed is reachable, so this is a shape change upstream rather than a missing key."
     : null;
 
   await db
     .insert(health)
     .values({
-      key: "fp.rankings",
+      key: "rankings",
       lastSuccessAt: at,
       ...(message ? { lastError: message, lastErrorAt: at } : {}),
     })
@@ -129,230 +229,4 @@ async function recordTruncation(db: EngineDb, clock: Clock, body: unknown): Prom
       target: health.key,
       set: message ? { lastSuccessAt: at, lastError: message, lastErrorAt: at } : { lastSuccessAt: at },
     });
-}
-
-/**
- * Pull one ranking set and store it. `week` 0 with set `draft` is the
- * preseason board; in season pass the current week for the weekly set.
- */
-export async function ingestFpRankings(
-  db: EngineDb,
-  clock: Clock,
-  cfg: FpConfig,
-  opts: { season: number; set: RankingSet; week: number },
-): Promise<RankingsIngestResult> {
-  const { season, set, week } = opts;
-  const sourceCounts: Record<string, number> = {};
-  const index = await loadMatchIndex(db);
-
-  // Call 1 — the id map, which also carries rank_ecr and ADP.
-  const playersRes = await fpRequest(db, clock, cfg, { kind: "engine" }, "/nfl/players", {
-    external_ids: "yahoo:espn",
-    ecr: "included",
-    show: "pos_rank",
-  });
-  const merged = new Map<string, MergedRanking>();
-  const fpMeta = new Map<string, FpPlayer>();
-
-  if (playersRes.ok) {
-    const body = playersRes.body as { players?: FpPlayersRow[] };
-    const rows = body.players ?? [];
-    sourceCounts["players"] = rows.length;
-    for (const r of rows) {
-      const fpId = asString(r.player_id ?? r.fpid);
-      if (!fpId) continue;
-      fpMeta.set(fpId, {
-        fpPlayerId: fpId,
-        name: r.name ?? r.player_name ?? "",
-        position: r.position_id ?? r.player_position_id ?? null,
-        team: r.team_id ?? r.player_team_id ?? null,
-        yahooId: asString(r.yahoo_id),
-        espnId: asString(r.espn_id),
-      });
-      merged.set(fpId, {
-        fpPlayerId: fpId,
-        rank: asNumber(r.rank_ecr),
-        posRank: null,
-        tier: null,
-        adp: asNumber(r.rank_adp),
-        ecrDelta: null,
-      });
-    }
-  }
-
-  // Call 2 — PPR overall consensus (authoritative rank, plus tier).
-  const overallParams: Record<string, string | number> = { position: "ALL", scoring: "PPR" };
-  if (set === "ros") overallParams.type = "ROS";
-  else overallParams.week = set === "draft" ? 0 : week;
-  const overallRes = await fpRequest(
-    db,
-    clock,
-    cfg,
-    { kind: "engine" },
-    `/nfl/${season}/consensus-rankings`,
-    overallParams,
-  );
-  if (overallRes.ok) {
-    const body = overallRes.body as { players?: FpRankingRow[] };
-    const rows = body.players ?? [];
-    sourceCounts["overall"] = rows.length;
-    // FantasyPros states its own truncation in the response: `tier`, the
-    // per-response `limit`, and `count`, the number actually available. On the
-    // free tier that is limit 10 against a count in the hundreds, and no number
-    // of per-position calls can get past it — so §5.7's 200-player gate is
-    // simply unreachable until the plan changes. Recording it turns "68 ranked,
-    // need 200" with a working key and no errors into something a person can
-    // act on.
-    await recordTruncation(db, clock, overallRes.body);
-    for (const r of rows) {
-      const fpId = asString(r.player_id);
-      if (!fpId) continue;
-      upsertMerged(merged, fpMeta, fpId, r, { rankFromOverall: true });
-    }
-  }
-
-  // Calls 3–8 — per position, which go deeper than a truncated overall list.
-  for (const position of FP_POSITIONS) {
-    const params: Record<string, string | number> = { position, scoring: "PPR" };
-    if (set === "ros") params.type = "ROS";
-    else params.week = set === "draft" ? 0 : week;
-    const res = await fpRequest(db, clock, cfg, { kind: "engine" }, `/nfl/${season}/consensus-rankings`, params);
-    if (!res.ok) continue;
-    const body = res.body as { players?: FpRankingRow[] };
-    const rows = body.players ?? [];
-    sourceCounts[position] = rows.length;
-    for (const r of rows) {
-      const fpId = asString(r.player_id);
-      if (!fpId) continue;
-      upsertMerged(merged, fpMeta, fpId, r, { rankFromOverall: false });
-    }
-  }
-
-  // Resolve to Sleeper ids and store.
-  const now = clock.now();
-  let ranked = 0;
-  let unmatched = 0;
-  const seenPlayerIds = new Set<string>();
-
-  await db.transaction(async (tx) => {
-    for (const [fpId, m] of merged) {
-      const meta = fpMeta.get(fpId);
-      const existing = (await tx.select().from(fpPlayerMap).where(eq(fpPlayerMap.fpPlayerId, fpId)))[0];
-      let playerId = existing?.playerId ?? null;
-      let matchedBy = existing?.matchedBy ?? null;
-
-      // A name match is re-checked once ids arrive (Appendix B).
-      const shouldRematch = !playerId || matchedBy === "name";
-      if (shouldRematch && meta) {
-        const hit = matchFpPlayer(meta, index);
-        if (hit && (!playerId || hit.matchedBy !== "name")) {
-          playerId = hit.playerId;
-          matchedBy = hit.matchedBy;
-          await tx
-            .insert(fpPlayerMap)
-            .values({ fpPlayerId: fpId, playerId: hit.playerId, matchedBy: hit.matchedBy, updatedAt: now })
-            .onConflictDoUpdate({
-              target: fpPlayerMap.fpPlayerId,
-              set: { playerId: hit.playerId, matchedBy: hit.matchedBy, updatedAt: now },
-            });
-        }
-      }
-
-      if (!playerId) {
-        unmatched++;
-        if (meta) {
-          const already = await tx
-            .select({ n: sql<number>`count(*)::int` })
-            .from(rankingsUnmatched)
-            .where(eq(rankingsUnmatched.fpPlayerId, fpId));
-          if ((already[0]?.n ?? 0) === 0) {
-            await tx.insert(rankingsUnmatched).values({
-              fpPlayerId: fpId,
-              fpName: meta.name,
-              fpTeam: meta.team,
-              fpPosition: meta.position,
-              raw: { ...meta },
-            });
-          }
-        }
-        continue;
-      }
-
-      const values = {
-        playerId,
-        fpPlayerId: fpId,
-        set,
-        week: set === "draft" ? 0 : week,
-        rank: m.rank,
-        posRank: m.posRank,
-        tier: m.tier,
-        adp: m.adp,
-        ecrDelta: m.ecrDelta,
-        sourceCounts,
-        fetchedAt: now,
-      };
-      await tx
-        .insert(rankings)
-        .values(values)
-        .onConflictDoUpdate({
-          target: [rankings.playerId, rankings.set, rankings.week],
-          set: values,
-        });
-      if (m.rank !== null) {
-        ranked++;
-        seenPlayerIds.add(playerId);
-      }
-    }
-  });
-
-  return {
-    set,
-    week: set === "draft" ? 0 : week,
-    sourceCounts,
-    ranked,
-    unmatched,
-    distinctRanked: seenPlayerIds.size,
-  };
-}
-
-function upsertMerged(
-  merged: Map<string, MergedRanking>,
-  fpMeta: Map<string, FpPlayer>,
-  fpId: string,
-  r: FpRankingRow,
-  opts: { rankFromOverall: boolean },
-): void {
-  const current = merged.get(fpId) ?? {
-    fpPlayerId: fpId,
-    rank: null,
-    posRank: null,
-    tier: null,
-    adp: null,
-    ecrDelta: null,
-  };
-  // Overall PPR ECR wins; otherwise keep whatever rank we already had (§5.7).
-  if (opts.rankFromOverall) {
-    const rank = asNumber(r.rank_ecr);
-    if (rank !== null) current.rank = rank;
-  } else if (current.rank === null) {
-    const rank = asNumber(r.rank_ecr);
-    if (rank !== null) current.rank = rank;
-  }
-  if (r.pos_rank) current.posRank = String(r.pos_rank);
-  const tier = asNumber(r.tier);
-  if (tier !== null) current.tier = tier;
-  const delta = asNumber(r.player_ecr_delta);
-  if (delta !== null) current.ecrDelta = delta;
-  merged.set(fpId, current);
-
-  if (!fpMeta.has(fpId) && r.player_name) {
-    fpMeta.set(fpId, {
-      fpPlayerId: fpId,
-      name: r.player_name,
-      position: r.player_position_id ?? null,
-      team: r.player_team_id ?? null,
-      yahooId: asString(r.player_yahoo_id),
-      espnId: null,
-    });
-  }
 }

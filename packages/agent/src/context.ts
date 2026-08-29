@@ -35,7 +35,6 @@ export interface ContextSnapshot {
   week: number;
   phase: string;
   deadline_at: string | null;
-  fantasypros_requests_remaining_today: number | null;
   next_waiver_run_et: string;
   next_locks: Array<{ nfl_team: string; kickoff_et: string }>;
   trade_deadline_week: number;
@@ -95,15 +94,7 @@ interface PendingItems {
   roster_flags: string[];
 }
 
-export interface BuildContextOptions {
-  /** Requests the agent has left today (§5.8); null for kinds without the tool. */
-  fantasyprosRemaining?: number | null;
-}
-
-export async function buildContextSnapshot(
-  ctx: ToolContext,
-  opts: BuildContextOptions = {},
-): Promise<ContextSnapshot> {
+export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSnapshot> {
   const { db, clock } = ctx;
   const settings = await getSettings(db);
   const now = clock.now();
@@ -131,7 +122,6 @@ export async function buildContextSnapshot(
     week,
     phase: settings.phase,
     deadline_at: (ctx.sessionContext.deadline_at as string | undefined) ?? null,
-    fantasypros_requests_remaining_today: opts.fantasyprosRemaining ?? null,
     next_waiver_run_et: formatEt(nextWaiver),
     next_locks: nextLocks,
     trade_deadline_week: settings.tradeDeadlineWeek,

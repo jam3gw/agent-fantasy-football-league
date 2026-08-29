@@ -306,7 +306,7 @@ describe("simulated week (§15.3)", () => {
     expect(results.every((r) => r.faPoints >= 0)).toBe(true);
   });
 
-  it("finalizes from FantasyPros points when the Sleeper feed is unavailable (§13.4)", async () => {
+  it("finalizes from the fallback source when the Sleeper feed is unavailable (§13.4)", async () => {
     const { teamIds, pool } = await seedSimulation();
     await draftAndSetLineups(teamIds, pool);
 
@@ -314,8 +314,8 @@ describe("simulated week (§15.3)", () => {
     await db.delete(playerWeekStats);
     expect(await db.select().from(playerWeekStats)).toHaveLength(0);
 
-    // Source 2 supplies only computed points, not stat lines — exactly the
-    // shape the FantasyPros player-points fallback produces.
+    // The fallback supplies computed points, not Sleeper stat lines — exactly
+    // the shape the nflverse rung produces.
     const starters = await db.select().from(lineupEntries).where(eq(lineupEntries.week, 1));
     for (const entry of starters) {
       await db
@@ -326,7 +326,7 @@ describe("simulated week (§15.3)", () => {
           week: 1,
           stats: { pts_ppr: 12.5 },
           ptsPpr: 12.5,
-          source: "fantasypros",
+          source: "nflverse",
           final: true,
         })
         .onConflictDoNothing();
@@ -341,6 +341,6 @@ describe("simulated week (§15.3)", () => {
     // Nine starters at 12.5 each: the week scored without Sleeper.
     expect(finals[0]!.homePoints).toBeCloseTo(9 * 12.5, 2);
     const rows = await db.select().from(playerWeekStats);
-    expect(rows.every((r) => r.source === "fantasypros")).toBe(true);
+    expect(rows.every((r) => r.source === "nflverse")).toBe(true);
   });
 });

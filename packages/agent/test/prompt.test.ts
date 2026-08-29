@@ -18,7 +18,6 @@ const settings = {
   tradeVetoVotes: 7,
   tradeMaxOffersPerDay: 3,
   tradeDeadlineWeek: 11,
-  fantasyprosDailyAllowance: 3,
 };
 
 const base = {
@@ -40,7 +39,7 @@ describe("system prompt (Appendix C)", () => {
     expect(p).toContain("Deadline after week 11");
     expect(p).toContain("Regular season weeks 1-14");
     expect(p).toContain("Playoffs weeks 15-17, 6 teams");
-    expect(p).toContain("3 FantasyPros requests per day");
+    expect(p).toContain("player_research");
   });
 
   it("follows every setting when the commissioner changes one", () => {
@@ -54,7 +53,6 @@ describe("system prompt (Appendix C)", () => {
       regularSeasonEndWeek: 13,
       playoffStartWeek: 14,
       playoffTeams: 4,
-      fantasyprosDailyAllowance: 6,
     });
     for (const p of [
       buildSystemPrompt({ ...base, ...changed }),
@@ -66,7 +64,7 @@ describe("system prompt (Appendix C)", () => {
       expect(p).toContain("Deadline after week 12");
       expect(p).toContain("Regular season weeks 1-13");
       expect(p).toContain("Playoffs weeks 14-16, 4 teams");
-      expect(p).toContain("6 FantasyPros requests per day");
+      expect(p).toContain("player_research");
       // Nothing from the old defaults survives anywhere in the text.
       expect(p).not.toContain("4:30 AM ET");
       expect(p).not.toContain("7 vetoes");

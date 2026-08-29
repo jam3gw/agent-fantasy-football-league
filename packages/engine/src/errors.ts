@@ -37,8 +37,6 @@ export type EngineErrorCode =
   | "not_your_pick"
   | "already_drafted"
   | "draft_not_running"
-  | "fantasypros_quota"
-  | "fantasypros_unavailable"
   | "check_in_limit"
   | "bad_time";
 

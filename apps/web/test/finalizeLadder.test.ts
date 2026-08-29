@@ -4,14 +4,16 @@
  * The point of §13.4 is that a dead Sleeper feed costs nobody a week and needs
  * nobody's attention, so this drives `finalizeWeek` itself with the network
  * stubbed rather than pre-inserting the rows a fallback would have written.
- * Sleeper is made to fail; FantasyPros answers; the week finalizes, records
- * which source scored it, and the audit runs. No manual step anywhere.
+ * Sleeper is made to fail; nflverse answers; the week finalizes, records which
+ * source scored it, and the audit runs. No manual step anywhere.
+ *
+ * The ladder was three rungs deep until 2026-08-29, with FantasyPros between
+ * the two. It went with the rest of that integration.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import {
-  fpPlayerMap,
   getSettings,
   health,
   initLeagueSettings,
@@ -37,13 +39,9 @@ beforeEach(async () => {
   ({ db, close } = await createTestDb());
   clock = new FixedClock("2026-09-15T08:00:00Z");
   await initLeagueSettings(db, { season: SEASON, phase: "regular", currentWeek: 1, startWeek: 1 });
-  process.env.FANTASYPROS_API_KEY = "test-key";
-  process.env.FANTASYPROS_BASE_URL = "https://fp.example.test/public/v2/json";
 });
 afterEach(async () => {
   vi.unstubAllGlobals();
-  delete process.env.FANTASYPROS_API_KEY;
-  delete process.env.FANTASYPROS_BASE_URL;
   await close();
 });
 
@@ -74,8 +72,6 @@ async function seedWeek(): Promise<{ teamIds: number[]; playerIds: string[] }> {
       });
       await db.insert(rosterEntries).values({ teamId, playerId, acquiredAt: clock.now(), acquiredVia: "draft" });
       await db.insert(lineupEntries).values({ teamId, week: 1, slot, playerId });
-      // The id map source 2 needs to translate FantasyPros ids back.
-      await db.insert(fpPlayerMap).values({ fpPlayerId: `fp-${playerId}`, playerId, matchedBy: "manual" });
     }
   }
   await db.insert(matchups).values({
@@ -86,22 +82,29 @@ async function seedWeek(): Promise<{ teamIds: number[]; playerIds: string[] }> {
   return { teamIds, playerIds };
 }
 
-/** Stub the network: Sleeper down, FantasyPros answering, nflverse optional. */
-function stubNetwork(options: { fantasyprosPoints?: number; nflverseCsv?: string } = {}) {
-  const points = options.fantasyprosPoints ?? 12.5;
+/**
+ * Stub the network. `sleeperPoints` makes Sleeper answer with a real stat line
+ * — 6 catches for 65 yards is exactly 12.5 at the league's PPR settings, so
+ * §3.2's fit check has nothing to report and the audit below is measuring only
+ * what it claims to. Omit it and Sleeper fails, which drops to nflverse.
+ */
+function stubNetwork(options: { sleeperPoints?: number; nflverseCsv?: string } = {}) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: unknown) => {
       const url = String(input);
       if (url.includes("sleeper")) {
-        throw new Error("sleeper is down");
-      }
-      if (url.includes("fp.example.test")) {
-        const rows = await db.select().from(fpPlayerMap);
+        if (options.sleeperPoints === undefined) throw new Error("sleeper is down");
+        const rows = await db.select().from(players);
         return new Response(
-          JSON.stringify({
-            players: rows.map((r) => ({ player_id: r.fpPlayerId, weeks: { "1": points } })),
-          }),
+          JSON.stringify(
+            rows.map((r) => ({
+              player_id: r.playerId,
+              season: SEASON,
+              week: 1,
+              stats: { rec: 6, rec_yd: 65, pts_ppr: options.sleeperPoints },
+            })),
+          ),
           { status: 200, headers: { "content-type": "application/json" } },
         );
       }
@@ -114,21 +117,26 @@ function stubNetwork(options: { fantasyprosPoints?: number; nflverseCsv?: string
 }
 
 describe("§13.4 — the week scores itself when Sleeper is down", () => {
-  it("falls through to FantasyPros, finalizes, and records the source", async () => {
+  it("falls through to nflverse, finalizes, and records the source", async () => {
     const { teamIds } = await seedWeek();
-    stubNetwork({ fantasyprosPoints: 12.5 });
+    // 6 catches for 65 yards = 12.5 for each of the eighteen starters.
+    const csv = [
+      "player_id,season,week,receiving_yards,receptions",
+      ...(await db.select().from(players)).map((p) => `${p.gsisId},2026,1,65,6`),
+    ].join("\n");
+    stubNetwork({ nflverseCsv: csv });
 
     const result = await finalizeWeek(db, clock, 1);
 
-    expect(result.source).toBe("fantasypros");
+    expect(result.source).toBe("nflverse");
     expect(result.degraded).toBe(true);
     expect(result.playersScored).toBeGreaterThan(0);
     expect(result.matchupsFinalized).toBe(1);
 
-    // The stats that scored the week came from source 2, not from a person.
+    // The stats that scored the week came from the fallback, not from a person.
     const stats = await db.select().from(playerWeekStats);
     expect(stats.length).toBe(18);
-    expect(stats.every((r) => r.source === "fantasypros")).toBe(true);
+    expect(stats.every((r) => r.source === "nflverse")).toBe(true);
     expect(stats.every((r) => r.final)).toBe(true);
 
     // Nine starters at 12.5 apiece, on both sides.
@@ -139,7 +147,7 @@ describe("§13.4 — the week scores itself when Sleeper is down", () => {
     expect(matchup!.winnerTeamId).toBeNull(); // a tie, and that is fine
 
     // The site can say which source scored it, and the week advanced.
-    expect(await weekScoringSource(db, 1)).toBe("fantasypros");
+    expect(await weekScoringSource(db, 1)).toBe("nflverse");
     expect((await getSettings(db)).currentWeek).toBe(2);
     expect(teamIds).toHaveLength(2);
   });
@@ -167,7 +175,7 @@ describe("§13.4 — the week scores itself when Sleeper is down", () => {
 describe("§5.6 — the nflverse audit", () => {
   it("logs only the players who differ by more than 0.5 points", async () => {
     await seedWeek();
-    // FantasyPros scores everyone 12.5. At the league's PPR settings (0.1 per
+    // Sleeper scores everyone 12.5. At the league's PPR settings (0.1 per
     // receiving yard, 1 per catch) one player is 8 points out and the other
     // lands on 12.5 exactly, so only the first should be logged.
     const csv = [
@@ -175,10 +183,10 @@ describe("§5.6 — the nflverse audit", () => {
       "gsis-p0-0,2026,1,125,8", // 12.5 + 8.0 = 20.5 → 8.0 out, logged
       "gsis-p0-1,2026,1,65,6", //  6.5 + 6.0 = 12.5 → exact, not logged
     ].join("\n");
-    stubNetwork({ fantasyprosPoints: 12.5, nflverseCsv: csv });
+    stubNetwork({ sleeperPoints: 12.5, nflverseCsv: csv });
 
     const result = await finalizeWeek(db, clock, 1);
-    expect(result.source).toBe("fantasypros");
+    expect(result.source).toBe("sleeper");
     expect(result.audited, "both players should have been compared").toBe(2);
     expect(result.auditDiscrepancies).toBe(1);
 
@@ -201,7 +209,7 @@ describe("§5.6 — the nflverse audit", () => {
       "player_id,season,week,receiving_yards,receptions",
       "gsis-p0-0,2026,1,65,6", // exactly 12.5
     ].join("\n");
-    stubNetwork({ fantasyprosPoints: 12.5, nflverseCsv: csv });
+    stubNetwork({ sleeperPoints: 12.5, nflverseCsv: csv });
 
     const result = await finalizeWeek(db, clock, 1);
     expect(result.audited).toBe(1);
@@ -211,20 +219,10 @@ describe("§5.6 — the nflverse audit", () => {
 
   it("does not audit a week nflverse itself scored", async () => {
     await seedWeek();
-    // Sleeper and FantasyPros both fail; nflverse scores the week. Auditing it
-    // against itself would be meaningless, so the audit is skipped.
-    const csv = [
-      "player_id,season,week,receiving_yards,receptions",
-      "gsis-p0-0,2026,1,100,5",
-    ].join("\n");
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: unknown) => {
-        const url = String(input);
-        if (url.includes("sleeper") || url.includes("fp.example.test")) throw new Error("down");
-        return new Response(csv, { status: 200 });
-      }),
-    );
+    // Sleeper fails and nflverse scores the week. Auditing it against itself
+    // would be meaningless, so the audit is skipped.
+    const csv = ["player_id,season,week,receiving_yards,receptions", "gsis-p0-0,2026,1,100,5"].join("\n");
+    stubNetwork({ nflverseCsv: csv });
 
     const result = await finalizeWeek(db, clock, 1);
     expect(result.source).toBe("nflverse");
@@ -234,11 +232,16 @@ describe("§5.6 — the nflverse audit", () => {
 });
 
 describe("§3.2 — the Sleeper fit check does not fire on a fallback week", () => {
-  it("records no discrepancy for FantasyPros-scored rows", async () => {
-    // Source 2 supplies computed points and no stat line, so `engine_pts` is 0
-    // for every player. Comparing that with `pts_ppr` logged all eighteen.
+  it("records no discrepancy for nflverse-scored rows", async () => {
+    // A fallback supplies computed points and no comparable Sleeper stat line,
+    // so `engine_pts` is what our settings make of it. Comparing that with
+    // `pts_ppr` as though it were Sleeper's own logged all eighteen.
     await seedWeek();
-    stubNetwork({ fantasyprosPoints: 12.5 });
+    const csv = [
+      "player_id,season,week,receiving_yards,receptions",
+      ...(await db.select().from(players)).map((p) => `${p.gsisId},2026,1,65,6`),
+    ].join("\n");
+    stubNetwork({ nflverseCsv: csv });
     await finalizeWeek(db, clock, 1);
     const logged = await db.select().from(scoringDiscrepancies);
     expect(logged).toHaveLength(0);

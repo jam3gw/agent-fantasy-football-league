@@ -24,8 +24,16 @@ export function proxy(request: NextRequest): NextResponse {
   // The login page and its action must stay reachable.
   if (pathname === "/admin/login" || pathname === "/api/admin/login") return NextResponse.next();
 
-  const cookie = request.cookies.get(COOKIE_NAME)?.value;
-  if (verifyCookieValue(cookie, new Date())) return NextResponse.next();
+  // Without a signing key nobody can be authenticated, so a configuration
+  // error is a failed check, not a 500 on every admin path. The login page
+  // names the missing variable.
+  let authenticated = false;
+  try {
+    authenticated = verifyCookieValue(request.cookies.get(COOKIE_NAME)?.value, new Date());
+  } catch {
+    authenticated = false;
+  }
+  if (authenticated) return NextResponse.next();
 
   if (pathname.startsWith("/api/")) {
     return NextResponse.json(

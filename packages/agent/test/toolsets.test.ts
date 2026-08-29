@@ -112,7 +112,7 @@ describe("tool sets (§8.6)", () => {
       const n = names(kind);
       expect(n, kind).toContain("get_league_state");
       expect(n, kind).toContain("web_search");
-      expect(n, kind).toContain("fantasypros_lookup");
+      expect(n, kind).toContain("player_research");
       expect(n, kind).toContain("read_scratchpad");
       expect(n, kind).toContain("write_scratchpad");
     }

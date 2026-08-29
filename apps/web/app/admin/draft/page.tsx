@@ -33,7 +33,7 @@ export default async function AdminDraftPage({
     getDraft(database).catch(() => undefined),
     database.select().from(teams).orderBy(teams.id).catch(() => []),
     database.select().from(draftPicks).orderBy(desc(draftPicks.pickNo)).limit(12).catch(() => []),
-    draftGateStatus().catch(() => ({ ranked: 0, unmatchedTop200: 0, ok: false })),
+    draftGateStatus().catch(() => ({ ranked: 0, ok: false })),
     autoPickCount().catch(() => 0),
     database.select().from(sessions).where(eq(sessions.kind, "onboarding")).catch(() => []),
   ]);
@@ -66,7 +66,7 @@ export default async function AdminDraftPage({
           gate.ok ? "border-accent/50 bg-accent-soft text-accent" : "border-warn/50 text-warn"
         }`}
       >
-        <strong>Rankings gate (§5.7):</strong> {gate.ranked} ranked (need 200), {gate.unmatchedTop200} unmatched in the top 200 (need 0).
+        <strong>Rankings gate (§5.7):</strong> {gate.ranked} ranked (need 200).
         {gate.ok ? " Cleared." : " Resolve this on /admin/rankings before starting."}
       </div>
 

@@ -9,7 +9,7 @@ Maps each milestone (SPEC.md §16) to the packages, tables, workflows, routes, a
 - **Tests**: §15.1.2–7 + carry-over/ghosts (§15.1.10) on PGlite (in-memory Postgres).
 
 ## M2 — Data + scoring (`packages/data`)
-- Sleeper clients (players, trending, stats §5.3, projections §5.4), nflverse schedule + stats audit (§5.5–5.6), team-abbrev map, FantasyPros client generated from `docs/fantasypros_v2_public.yaml` with global limiter, cache, per-agent allowance (§5.8), scoring fit (§3.2, Appendix A) against 2025 W1–3 fixtures in `fixtures/`.
+- Sleeper clients (players, trending, stats §5.3, projections §5.4), nflverse schedule + stats audit (§5.5–5.6), team-abbrev map, scoring fit (§3.2, Appendix A) against 2025 W1–3 fixtures in `fixtures/`.
 - **Tests**: §15.1.1, 8, 9, 11; live poll against fixture.
 
 ## M3 — Agent runner (`packages/agent`)
@@ -17,8 +17,8 @@ Maps each milestone (SPEC.md §16) to the packages, tables, workflows, routes, a
 - **Acceptance**: smoke test per model (needs `AI_GATEWAY_API_KEY` — in Vercel env; run against preview deploy).
 
 ## M4 — Draft
-- `ingest.fp_rankings` (§5.7), FP→Sleeper mapping (App B) + `/admin/rankings`, onboarding sessions, order draw, `draftWorkflow` (§10.2), auto-pick (§10.4), draft room page + `/api/draft/state`.
-- **Acceptance**: mock draft (§15.2) on a temp Neon branch (needs FP + gateway keys).
+- `ingest.rankings` (§5.7) + `/admin/rankings`, onboarding sessions, order draw, `draftWorkflow` (§10.2), auto-pick (§10.4), draft room page + `/api/draft/state`.
+- **Acceptance**: mock draft (§15.2) on a temp Neon branch (needs the gateway key).
 
 ## M5 — Website (`apps/web`)
 - Public routes §12.1 (`/`, `/matchups/[week]`, `/teams/[slug]`, `/sessions/[id]`, `/board`, `/transactions`, `/waivers`, `/trades`, `/draft`, `/report`, `/benchmark`, `/spend`, `/players/[id]`, `/about`), admin §12.2, public JSON API + rate limit, commissioner auth (signed cookie).
@@ -43,7 +43,6 @@ Maps each milestone (SPEC.md §16) to the packages, tables, workflows, routes, a
 - [x] §3.6 Sleeper status vocabularies — **done**; IR-eligible defaults extended with the long forms Sleeper uses in `status`.
 - [x] Next.js 16 breaking changes (AGENTS.md) — **done**; async request APIs, `middleware`→`proxy`, `revalidateTag` arity, Turbopack default, `next lint` removed.
 - [ ] §5.6 nflverse player-stats release naming — both known names are tried at runtime; confirm which responds for 2026.
-- [ ] §5.7/5.8 FantasyPros free-tier daily cap and truncation counts — needs `FANTASYPROS_API_KEY`.
 - [ ] §5.8 consensus-rankings default `type` behaviour — needs the key.
 - [ ] §8.7 gateway cost field in provider metadata — needs a real gateway call; the code prefers it and falls back to the price table.
 - [ ] §8.1 any provider that requires a max-output field — needs one real call per model.

@@ -343,7 +343,7 @@ function byNumberDesc(key: "last_season_points" | "proj_points") {
 /**
  * §10.4 auto-pick choice: the highest-ranked available player that passes both
  * roster rules; if no ranked player qualifies, the best by last-season points;
- * then the best FantasyPros preseason projection; then any eligible player.
+ * then the best preseason projection; then any eligible player.
  * Returns null only when nothing at all can legally be drafted.
  *
  * Exported for the draft workflow (§10.2), which calls it when a pick clock
