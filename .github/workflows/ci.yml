@@ -7,6 +7,10 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    # The default is six hours. This project runs unattended and CI normally
+    # finishes in about eight minutes, so a run that stops making progress
+    # should fail while it is still the current thing.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
