@@ -783,11 +783,17 @@ export const getPlayerStatsTool = readTool(
         .from(playerWeekStats)
         .where(and(eq(playerWeekStats.season, season), inArray(playerWeekStats.playerId, ids)))
         .orderBy(asc(playerWeekStats.week)),
+      // Season totals live at week 0 (ingest.season_stats); weekly rows may sit
+      // beside them if history is ever backfilled. Prefer the totals row and
+      // count games only from real weeks, so a lone aggregate row does not
+      // read as "1 game" and the two shapes never double-count.
       db
         .select({
           playerId: playerWeekStats.playerId,
-          pts: sql<number>`coalesce(sum(${playerWeekStats.ptsPpr}), 0)::float8`,
-          games: sql<number>`count(*)::int`,
+          totalPts: sql<number>`coalesce(sum(${playerWeekStats.ptsPpr}) filter (where ${playerWeekStats.week} = 0), 0)::float8`,
+          hasTotal: sql<boolean>`bool_or(${playerWeekStats.week} = 0)`,
+          weeklyPts: sql<number>`coalesce(sum(${playerWeekStats.ptsPpr}) filter (where ${playerWeekStats.week} > 0), 0)::float8`,
+          games: sql<number>`count(*) filter (where ${playerWeekStats.week} > 0)::int`,
         })
         .from(playerWeekStats)
         .where(and(eq(playerWeekStats.season, season - 1), inArray(playerWeekStats.playerId, ids)))
@@ -832,8 +838,12 @@ export const getPlayerStatsTool = readTool(
           : null,
         this_season: { season, by_week: weekly, total: round2(weekly.reduce((a, w) => a + (w.pts_ppr ?? 0), 0)) },
         last_season: last
-          ? { season: season - 1, total_pts_ppr: round2(Number(last.pts)), games: Number(last.games) }
-          : { season: season - 1, total_pts_ppr: null, games: 0 },
+          ? {
+              season: season - 1,
+              total_pts_ppr: round2(Number(last.hasTotal ? last.totalPts : last.weeklyPts)),
+              games: Number(last.games) > 0 ? Number(last.games) : null,
+            }
+          : { season: season - 1, total_pts_ppr: null, games: null },
         ownership: own.get(p.playerId) ?? { status: "free_agent" },
       };
     });
@@ -1744,7 +1754,7 @@ export const playerResearchTool = readTool(
         })),
         offset,
         limit,
-        { kind: args.kind, position, season, week: rankingSet === "draft" ? 0 : week, updated_at: kept[0]?.fetchedAt ?? null },
+        { kind: args.kind, position, season, week: rankingSet === "draft" ? 0 : week, updated_at: iso(kept[0]?.fetchedAt) },
       );
     }
 

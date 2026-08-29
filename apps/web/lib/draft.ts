@@ -12,6 +12,7 @@ import type { Clock } from "@league/shared";
 import { draftSessionKey } from "@league/shared";
 import type { EngineDb, LeagueSettings } from "@league/engine";
 import {
+  autofillDraftLineupSlot,
   createSession,
   draft as draftTable,
   draftPicks,
@@ -269,6 +270,7 @@ export async function autoPick(
   const choice = await autoPickCandidate(database, pick.teamId, pick.pickNo);
   if (!choice) throw new Error(`no eligible player for auto-pick at ${pick.pickNo}`);
   const candidate = choice.player_id;
+  const settings = await getSettings(database);
 
   await database.transaction(async (tx) => {
     await tx.insert(draftPicks).values({
@@ -281,13 +283,20 @@ export async function autoPick(
       reason: pick.reason,
       pickedAt: clock.now(),
     });
-    // New players always arrive on the bench (§7.8): no lineup entry.
     await tx.insert(rosterEntries).values({
       teamId: pick.teamId,
       playerId: candidate,
       acquiredVia: "draft",
       acquiredAt: clock.now(),
     });
+    // Draft-time slotting (commissioner, 2026-08-29): same placement an agent
+    // pick gets — first open eligible starting slot, bench only when full.
+    await autofillDraftLineupSlot(
+      tx,
+      pick.teamId,
+      { playerId: candidate, position: choice.position, fantasyPositions: choice.fantasy_positions },
+      settings.currentWeek,
+    );
     await recordTransaction(tx, {
       type: "draft_pick",
       week: null,

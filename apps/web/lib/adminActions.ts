@@ -16,7 +16,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
-import { formatEt, sessionKey } from "@league/shared";
+import { formatEt, sessionKey, zonedTimeToUtc } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
 import {
   commissionerActions,
@@ -752,6 +752,24 @@ export async function saveSettingsAction(form: FormData): Promise<void> {
       throw new Error(`the AI Gateway has no model called ${reporterModel}.`);
     }
     extra.reporterModelId = reporterModel;
+    extraTouched = true;
+  }
+
+  // §10.1: when the draft is set to start. Informational — shown to every
+  // agent before the draft so onboarding and check-ins can plan around it.
+  // Entered as ET wall-clock, stored as a UTC ISO string in extra.
+  const draftScheduledEt = form.get("draftScheduledEt");
+  if (draftScheduledEt !== null) {
+    const rawSchedule = String(draftScheduledEt).trim();
+    if (rawSchedule === "") {
+      delete extra.draftScheduledAt;
+    } else {
+      const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(rawSchedule);
+      if (!m) throw new Error("draft schedule must be a date and time");
+      extra.draftScheduledAt = zonedTimeToUtc(
+        Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]),
+      ).toISOString();
+    }
     extraTouched = true;
   }
 

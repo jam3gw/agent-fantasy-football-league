@@ -4,6 +4,12 @@
  * usage and cost, and any errors. Public by §2 — it renders only what is
  * stored in `session_events`, never an environment value.
  *
+ * The page leads with what the agent decided and then shows how it got there:
+ * one card per assistant turn with that turn's tool calls nested inside,
+ * beside a rail that says where in the session you are. Every requirement
+ * above is still on the page — the raw arguments and result of every call are
+ * one disclosure away inside the step that made it.
+ *
  * A queued or running session renders the live view instead: it polls the
  * public live API with SWR and shows the in-flight partial output while the
  * model streams (the same §12.1 transcript, just ahead of the CDN window).
@@ -11,9 +17,10 @@
 import { notFound } from "next/navigation";
 import { asc, eq } from "drizzle-orm";
 import { sessionEvents, sessions, teams } from "@league/engine";
-import { Card, Empty, PageTitle } from "@/components/ui";
-import { Json, SessionSummaryCard, TranscriptEventItem } from "@/components/transcript";
+import { Empty } from "@/components/ui";
+import { SessionFacts, SessionHeader, SessionTranscript } from "@/components/session-view";
 import { db } from "@/lib/db";
+import { groupSteps } from "@/lib/sessionTranscript";
 import { safeRead as safe } from "@/lib/queries";
 import LiveSession from "./live";
 
@@ -44,11 +51,6 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
     ? (await safe(() => db().select().from(teams).where(eq(teams.id, session.teamId!)), []))[0]
     : undefined;
 
-  const title = `Session ${session.id} — ${session.kind}`;
-  const subtitle = team
-    ? `${team.name ?? team.slug} — ${team.modelLabel}`
-    : `Reporter or league session — ${session.modelId}`;
-
   const summary = {
     id: session.id,
     kind: session.kind,
@@ -67,21 +69,13 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
     error: session.error,
     context: session.context,
   };
+  const teamData = team ? { slug: team.slug, name: team.name, modelLabel: team.modelLabel } : null;
 
   // Queued or running: hand the page to the live view, which fetches the
   // transcript fresh (this shell may be up to `revalidate` seconds stale) and
   // then streams. A session that has since finished still renders fully there.
   if (session.status === "queued" || session.status === "running") {
-    return (
-      <div className="space-y-6">
-        <PageTitle title={title} subtitle={subtitle} />
-        <LiveSession
-          sessionId={session.id}
-          initialSession={summary}
-          initialTeam={team ? { slug: team.slug, name: team.name, modelLabel: team.modelLabel } : null}
-        />
-      </div>
-    );
+    return <LiveSession sessionId={session.id} initialSession={summary} initialTeam={teamData} />;
   }
 
   const events = await safe(
@@ -89,40 +83,16 @@ export default async function SessionPage({ params }: { params: Promise<{ id: st
     [],
   );
 
-  const errors = events.filter((e) => e.type === "error");
-
   return (
-    <div className="space-y-6">
-      <PageTitle title={title} subtitle={subtitle} />
+    <div className="flex flex-col gap-5">
+      <SessionHeader session={summary} team={teamData} />
+      <SessionFacts session={summary} steps={groupSteps(events).length} />
 
-      <SessionSummaryCard
-        session={summary}
-        team={team ? { slug: team.slug, name: team.name, modelLabel: team.modelLabel } : null}
-      />
-
-      {errors.length > 0 ? (
-        <Card title={`Errors (${errors.length})`}>
-          {errors.map((e) => (
-            <Json key={e.id} value={e.content} />
-          ))}
-        </Card>
-      ) : null}
-
-      <Card title={`Transcript (${events.length} events)`}>
-        {events.length === 0 ? (
-          <Empty>No transcript events were recorded for this session.</Empty>
-        ) : (
-          <ol className="space-y-4">
-            {events.map((event) => (
-              <TranscriptEventItem key={event.id} event={event} />
-            ))}
-          </ol>
-        )}
-      </Card>
-
-      <p className="text-xs text-muted">
-        Every session is public: the same prompt, the same tools, and the same information go to all twelve models.
-      </p>
+      {events.length === 0 ? (
+        <Empty>No transcript events were recorded for this session.</Empty>
+      ) : (
+        <SessionTranscript events={events} session={summary} team={teamData} />
+      )}
     </div>
   );
 }
