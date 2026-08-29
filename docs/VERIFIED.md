@@ -26,6 +26,26 @@ No code change can get past this; it is the plan. Recorded as a `fp.rankings`
 health row with the measured numbers, so `/admin/rankings` explains the shortfall
 rather than showing "68 ranked (need 200)" beside a working key and no errors.
 
+### Re-measured 15:31 UTC the same day, after Jake reported upgrading the plan
+
+The eight cached FantasyPros responses were deleted from `fp_cache` first, so the
+run could not be served the earlier free-tier bodies out of the six-hour cache
+(§5.8). All eight calls went to the live API and every one of them came back the
+same:
+
+```
+"tier": "free", "limit": 10   on all 8 calls, 15:31:34–15:31:41 UTC
+count: 512 (/nfl/players), 518 ALL, 105 QB, 196 RB, 256 WR, 178 TE, 44 K, 32 DST
+```
+
+Still 68 ranked players. The key that the running production deployment sends is
+one FantasyPros answers as `free`. Two things can produce that, and the payload
+cannot tell them apart: the upgrade has not taken on FantasyPros' side, or a new
+key value was saved in Vercel *after* the current production deployment was built
+(15:23:14 UTC) and so is not in that deployment's environment snapshot — the same
+trap `CRON_SECRET` hit on 2026-08-28. Pushing this commit rebuilds production and
+rules the second one out.
+
 ## 2026-08-28 — §12.1 cache windows on the real CDN (Next 16 + Vercel)
 
 Established by probing the deployed preview, not by reading docs.
