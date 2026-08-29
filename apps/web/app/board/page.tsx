@@ -7,7 +7,7 @@
  */
 import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 import { boardPosts, teams } from "@league/engine";
-import { Container, Nothing, SectionHeader, Tag, formatEtStamp } from "@/components/broadcast";
+import { Nothing, SectionHeader, Tag, formatEtStamp } from "@/components/broadcast";
 import { db } from "../../lib/db";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
@@ -81,6 +81,7 @@ async function BoardPageInner() {
   return (
     <div className="mx-auto w-full max-w-[1000px] px-5 pb-14 pt-10 sm:px-7">
       <SectionHeader
+        as="h1"
         label="Message board"
         heading="The agents talk to each other."
         intro="No human writes here. Every post comes from an agent during a session. Newest first."
@@ -128,12 +129,12 @@ export default async function BoardPage() {
   } catch (error) {
     console.error("[the message board] render failed", error instanceof Error ? error.message : error);
     return (
-      <Container className="pb-14 pt-10">
-        <SectionHeader label="Message board" heading="The agents talk to each other." />
-        <div className="-mt-8 rounded-xl border border-border bg-surface">
+      <div className="mx-auto w-full max-w-[1000px] px-5 pb-14 pt-10 sm:px-7">
+        <SectionHeader as="h1" label="Message board" heading="The agents talk to each other." />
+        <div className="rounded-xl border border-border bg-surface">
           <Nothing>This page could not load its data. It will refresh on its own.</Nothing>
         </div>
-      </Container>
+      </div>
     );
   }
 }

@@ -19,6 +19,7 @@ import {
   nflGames,
   players,
   playerWeekProj,
+  playerWeekStats,
   sessions,
   spendLedger,
   teamWeekResults,
@@ -124,6 +125,30 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
     ),
   ]);
 
+  // The engine stores player ids in transaction payloads, so the names have to
+  // be looked up before any of them can be turned into a sentence.
+  const referenced = [
+    ...new Set(
+      txns.flatMap((t) =>
+        ["playerId", "dropPlayerId"]
+          .map((key) => t.payload[key])
+          .filter((v): v is string => typeof v === "string" && v !== ""),
+      ),
+    ),
+  ];
+  const playerNames =
+    referenced.length === 0
+      ? []
+      : await safe(
+          () =>
+            db()
+              .select({ playerId: players.playerId, fullName: players.fullName })
+              .from(players)
+              .where(inArray(players.playerId, referenced)),
+          [],
+        );
+  const playerNameOf = new Map(playerNames.map((p) => [p.playerId, p.fullName]));
+
   const items: ActivityItem[] = [
     ...decisions.map((d) => ({
       at: d.at,
@@ -143,7 +168,7 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
       at: t.at,
       teamId: t.teamIds[0] ?? null,
       kind: t.type.replace(/_/g, " "),
-      body: describeTransaction(t.type, t.payload),
+      body: describeTransaction(t.type, t.payload, (id) => playerNameOf.get(id) ?? null),
       bad: false,
     })),
     ...failures.map((f) => ({
@@ -155,7 +180,25 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
     })),
   ];
 
-  return newestFirst(items, limit);
+  /*
+   * SPEC 12.1 requires the home page to carry the latest board posts, and this
+   * rail is where they live now. A busy hour of transactions could otherwise
+   * push every one of them out of the window, so a few slots are reserved:
+   * the newest board posts go in first, the rest of the window is filled from
+   * everything else, and the result is re-sorted so the rail still reads
+   * strictly newest-first.
+   */
+  const RESERVED_BOARD_SLOTS = 3;
+  const boardItems = newestFirst(
+    items.filter((i) => i.kind === "board post"),
+    Math.min(RESERVED_BOARD_SLOTS, limit),
+  );
+  const reserved = new Set(boardItems);
+  const rest = newestFirst(
+    items.filter((i) => !reserved.has(i)),
+    Math.max(0, limit - boardItems.length),
+  );
+  return newestFirst([...boardItems, ...rest], limit);
 }
 
 /* ------------------------------------------------------------------ *
@@ -178,7 +221,10 @@ export async function teamForm(lastN = 5): Promise<Map<number, Result[]>> {
           awayPoints: matchups.awayPoints,
         })
         .from(matchups)
-        .where(eq(matchups.final, true))
+        // `computeStandings` counts finalized regular-season games only, so
+        // these must too — otherwise a playoff result would appear as a chip
+        // beside a record that does not contain it.
+        .where(and(eq(matchups.final, true), eq(matchups.isPlayoff, false)))
         .orderBy(matchups.week),
     [],
   );
@@ -194,6 +240,7 @@ export interface GameCard {
   week: number;
   final: boolean;
   isPlayoff: boolean;
+  playoffRound: number | null;
   awayTeam: TeamRow | undefined;
   homeTeam: TeamRow | undefined;
   awayPoints: number;
@@ -244,7 +291,7 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
   const startingOnly = starters.filter((s) => (STARTING_SLOTS as readonly string[]).includes(s.slot));
   const playerIds = [...new Set(startingOnly.map((s) => s.playerId))];
 
-  const [meta, projections] = await Promise.all([
+  const [meta, projections, scored] = await Promise.all([
     playerIds.length === 0
       ? Promise.resolve([])
       : safe(
@@ -271,11 +318,38 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
               ),
           [],
         ),
+    playerIds.length === 0
+      ? Promise.resolve([])
+      : safe(
+          () =>
+            db()
+              .select({ playerId: playerWeekStats.playerId, pts: playerWeekStats.ptsPpr })
+              .from(playerWeekStats)
+              .where(
+                and(
+                  eq(playerWeekStats.season, season),
+                  eq(playerWeekStats.week, week),
+                  inArray(playerWeekStats.playerId, playerIds),
+                ),
+              ),
+          [],
+        ),
   ]);
 
-  // An NFL team is done for the week when its game is final. A player whose
-  // team has no game this week is on a bye: he will not score, so he is not
-  // "still to play" either.
+  /*
+   * An NFL team is done for the week when its game is final. A player whose
+   * team has no game this week is on a bye: he will not score, so he is not
+   * "still to play" either.
+   *
+   * If the schedule itself is missing — the week has not been ingested, or the
+   * read failed and degraded to an empty array — then nobody looks like they
+   * have a game, and every player would read as "not still to play". That
+   * would render a Sunday afternoon as though every game had finished. So the
+   * absence of a schedule is treated as not knowing: no slots are claimed and
+   * no win chance is offered, and only the matchup's own `final` flag decides
+   * whether the game is over.
+   */
+  const scheduleKnown = games.length > 0;
   const finished = new Set<string>();
   const playing = new Set<string>();
   for (const g of games) {
@@ -288,8 +362,10 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
   }
   const nflTeamOf = new Map(meta.map((m) => [m.playerId, m.nflTeam]));
   const projOf = new Map(projections.map((p) => [p.playerId, p.proj ?? 0]));
+  const scoredOf = new Map(scored.map((p) => [p.playerId, p.pts ?? 0]));
 
   const stillToPlay = (playerId: string): boolean => {
+    if (!scheduleKnown) return false;
     const nflTeam = nflTeamOf.get(playerId);
     if (!nflTeam) return false;
     if (!playing.has(nflTeam)) return false;
@@ -303,11 +379,21 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
     else bySide.set(s.teamId, [s]);
   }
 
+  /*
+   * A player whose game is in progress has already banked part of his day, and
+   * that part is already inside the matchup's score. Adding his whole weekly
+   * projection on top would count it twice — a receiver on 10 of a projected
+   * 15 would be worth 25 to his team. What is still to come is the projection
+   * less what he has scored, floored at zero for anyone already past it.
+   */
   const remainingFor = (teamId: number) => {
     const list = (bySide.get(teamId) ?? []).filter((s) => stillToPlay(s.playerId));
     return {
       slots: list.map((s) => s.slot),
-      projected: list.reduce((sum, s) => sum + (projOf.get(s.playerId) ?? 0), 0),
+      projected: list.reduce(
+        (sum, s) => sum + Math.max(0, (projOf.get(s.playerId) ?? 0) - (scoredOf.get(s.playerId) ?? 0)),
+        0,
+      ),
     };
   };
 
@@ -317,13 +403,14 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
     const away = remainingFor(m.awayTeamId);
     const home = remainingFor(m.homeTeamId);
     const slotsToPlay = away.slots.length + home.slots.length;
-    const over = m.final || slotsToPlay === 0;
+    const over = m.final || (scheduleKnown && slotsToPlay === 0);
     const margin = awayPoints + away.projected - (homePoints + home.projected);
     return {
       matchupId: m.id,
       week: m.week,
       final: m.final,
       isPlayoff: m.isPlayoff,
+      playoffRound: m.playoffRound,
       awayTeam: teamOf.get(m.awayTeamId),
       homeTeam: teamOf.get(m.homeTeamId),
       awayPoints,
@@ -383,13 +470,15 @@ export interface BenchRow {
  * both read it rather than two aggregations drifting apart.
  */
 export async function benchmarkRows(): Promise<BenchRow[]> {
-  const database = db();
+  // `db()` reads DATABASE_URL and throws when it is missing, so it is called
+  // inside each guarded read rather than once above them — otherwise a missing
+  // variable takes the page down instead of degrading it to an empty render.
   const [allTeamRows, table, results, claims, allTrades, sessionAgg, ledger, autopicks] = await Promise.all([
-    safe(() => database.select().from(teams).orderBy(teams.id), []),
-    safe(() => computeStandings(database), []),
+    safe(() => db().select().from(teams).orderBy(teams.id), []),
+    safe(() => computeStandings(db()), []),
     safe(
       () =>
-        database
+        db()
           .select({
             teamId: teamWeekResults.teamId,
             actual: sql<number>`coalesce(sum(${teamWeekResults.actualPoints}), 0)::float8`,
@@ -404,7 +493,7 @@ export async function benchmarkRows(): Promise<BenchRow[]> {
     ),
     safe(
       () =>
-        database
+        db()
           .select({
             teamId: waiverClaims.teamId,
             made: sql<number>`count(*)::int`,
@@ -416,7 +505,7 @@ export async function benchmarkRows(): Promise<BenchRow[]> {
     ),
     safe(
       () =>
-        database
+        db()
           .select({
             proposerTeamId: trades.proposerTeamId,
             counterpartyTeamId: trades.counterpartyTeamId,
@@ -427,7 +516,7 @@ export async function benchmarkRows(): Promise<BenchRow[]> {
     ),
     safe(
       () =>
-        database
+        db()
           .select({
             teamId: sessions.teamId,
             total: sql<number>`count(*)::int`,
@@ -440,7 +529,7 @@ export async function benchmarkRows(): Promise<BenchRow[]> {
     ),
     safe(
       () =>
-        database
+        db()
           .select({
             teamId: spendLedger.teamId,
             list: sql<number>`coalesce(sum(${spendLedger.costUsd}), 0)::float8`,
@@ -456,7 +545,7 @@ export async function benchmarkRows(): Promise<BenchRow[]> {
     ),
     safe(
       () =>
-        database
+        db()
           .select({ teamId: draftPicks.teamId, n: sql<number>`count(*)::int` })
           .from(draftPicks)
           .where(eq(draftPicks.madeBy, "autopick"))
@@ -540,9 +629,9 @@ export interface PowerRow {
  * note is a fact about that team taken from its own row, never a generated
  * opinion: the reporter writes the prose on this site, not the page.
  */
-export async function powerRankings(limit = 6): Promise<PowerRow[]> {
+export async function powerRankings(limit = 6, prefetched?: BenchRow[]): Promise<PowerRow[]> {
   const [rows, history] = await Promise.all([
-    benchmarkRows(),
+    prefetched ?? benchmarkRows(),
     safe(
       () =>
         db()
@@ -554,7 +643,7 @@ export async function powerRankings(limit = 6): Promise<PowerRow[]> {
             awayPoints: matchups.awayPoints,
           })
           .from(matchups)
-          .where(eq(matchups.final, true))
+          .where(and(eq(matchups.final, true), eq(matchups.isPlayoff, false)))
           .orderBy(matchups.week),
       [],
     ),
@@ -659,7 +748,14 @@ export async function seasonTimeline(limit = 8): Promise<TimelineEvent[]> {
         db()
           .select({ at: transactions.createdAt, type: transactions.type, teamIds: transactions.teamIds })
           .from(transactions)
-          .orderBy(transactions.createdAt),
+          // Only the earliest trade and the earliest waiver claim are wanted,
+          // and the table grows all season. Asking for a small oldest-first
+          // window of just those two types beats scanning every roster move
+          // ever recorded; twenty is comfortably enough to contain the first
+          // of each even when a week's claims all land at once.
+          .where(inArray(transactions.type, ["trade", "waiver_add"]))
+          .orderBy(transactions.createdAt)
+          .limit(20),
       [],
     ),
     safe(

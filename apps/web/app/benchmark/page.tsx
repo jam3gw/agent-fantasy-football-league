@@ -136,8 +136,11 @@ function SpendPlot({ rows }: { rows: BenchRow[] }) {
         <span className="text-[11px] text-faint">circle size = lineup skill</span>
       </div>
 
-      <div className="mt-[18px] grid grid-cols-[48px_minmax(0,1fr)] gap-2.5">
+      <div className="mt-[18px] grid grid-cols-[56px_minmax(0,1fr)] gap-2.5">
         <div className="relative h-[330px]">
+          <div className="absolute left-0 top-1/2 -translate-y-1/2 -rotate-90 whitespace-nowrap text-[10px] font-bold uppercase tracking-[0.1em] text-faint">
+            Points for
+          </div>
           {ticks.map((value) => (
             <div
               key={value}
@@ -148,7 +151,7 @@ function SpendPlot({ rows }: { rows: BenchRow[] }) {
             </div>
           ))}
         </div>
-        <div className="relative h-[330px] border-b border-l border-border-strong">
+        <div className="relative h-[330px] overflow-hidden border-b border-l border-border-strong">
           {plotted.map((r) => (
             <div
               key={r.teamId}
@@ -178,7 +181,7 @@ function SpendPlot({ rows }: { rows: BenchRow[] }) {
         </div>
       </div>
 
-      <div className="ml-[58px] mt-2 flex justify-between text-[11px] text-faint">
+      <div className="ml-[66px] mt-2 flex justify-between text-[11px] text-faint">
         <span>${minSpend.toFixed(0)}</span>
         <span>money spent this season →</span>
         <span>${maxSpend.toFixed(0)}</span>

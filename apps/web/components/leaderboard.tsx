@@ -16,6 +16,8 @@ export interface LeaderRow {
   model: string;
   team: string;
   record: string;
+  wins: number;
+  ties: number;
   pf: number;
   efficiency: number | null;
   costPerPoint: number | null;
@@ -34,6 +36,14 @@ interface Metric {
   format: (value: number) => string;
   /** Lower is better, so the bars and the sort both invert. */
   invert?: boolean;
+  /**
+   * What the row is ranked on, when that is not the number in the bar. The
+   * Wins tab bars points scored — twelve identical two-win bars would say
+   * nothing — but it must order by record, which is what its label promises.
+   */
+  rank?: (row: LeaderRow) => number;
+  /** What the value column reads, when that is not the barred number. */
+  display?: (row: LeaderRow) => string;
 }
 
 const METRICS: Metric[] = [
@@ -41,9 +51,13 @@ const METRICS: Metric[] = [
     id: "wins",
     label: "Wins",
     axis: "Points scored",
-    note: "Wins first, then points scored. Early in a season the table is still mostly noise — points scored is the steadier number.",
+    note: "Wins first, then points scored to break a tie. Early in a season the table is still mostly noise — the bar shows points scored, which is the steadier number.",
     get: (r) => r.pf,
     format: (v) => v.toFixed(1),
+    // Record first, points only as the tiebreak — the same order the standings
+    // use. Points are still what the bar draws.
+    rank: (r) => r.wins + r.ties * 0.5 + Math.min(r.pf, 9999) / 100000,
+    display: (r) => r.record,
   },
   {
     id: "efficiency",
@@ -73,13 +87,25 @@ const METRICS: Metric[] = [
 ];
 
 export function LeaderboardBand({ rows }: { rows: LeaderRow[] }) {
-  const [metricId, setMetricId] = useState<MetricId>("efficiency");
+  /*
+   * Wins, not lineup skill. Efficiency comes from `team_week_results`, which is
+   * only written when a week finalizes, so before the first Tuesday of the
+   * season every row would be filtered out and this band — the home page's
+   * only standings surface, which SPEC 12.1 requires it to have — would render
+   * empty.
+   */
+  const [metricId, setMetricId] = useState<MetricId>("wins");
   const metric = METRICS.find((m) => m.id === metricId) ?? METRICS[0];
 
   const scored = rows
     .map((row) => ({ row, value: metric.get(row) }))
     .filter((entry): entry is { row: LeaderRow; value: number } => entry.value !== null);
-  scored.sort((a, b) => (metric.invert ? a.value - b.value : b.value - a.value));
+  const rankOf = (entry: { row: LeaderRow; value: number }) =>
+    metric.rank ? metric.rank(entry.row) : entry.value;
+  // Ties break on team id so the order is the same on every render.
+  scored.sort(
+    (a, b) => (metric.invert ? rankOf(a) - rankOf(b) : rankOf(b) - rankOf(a)) || a.row.teamId - b.row.teamId,
+  );
 
   const values = scored.map((s) => s.value);
   const max = Math.max(...values, 0);
@@ -103,7 +129,7 @@ export function LeaderboardBand({ rows }: { rows: LeaderRow[] }) {
           </div>
           <div
             className="scroll-x flex gap-1.5 rounded-full bg-[rgba(250,248,243,0.07)] p-1"
-            role="tablist"
+            role="group"
             aria-label="Ranking measure"
           >
             {METRICS.map((m) => {
@@ -112,8 +138,7 @@ export function LeaderboardBand({ rows }: { rows: LeaderRow[] }) {
                 <button
                   key={m.id}
                   type="button"
-                  role="tab"
-                  aria-selected={active}
+                  aria-pressed={active}
                   onClick={() => setMetricId(m.id)}
                   className={`flex-shrink-0 cursor-pointer rounded-full px-3.5 py-2 text-[12px] font-semibold uppercase tracking-[0.04em] transition-colors ${
                     active ? "bg-band-text text-band" : "text-band-muted hover:text-band-text"
@@ -172,12 +197,18 @@ export function LeaderboardBand({ rows }: { rows: LeaderRow[] }) {
                         className="h-[22px] rounded-[3px]"
                         style={{
                           width: `${Math.max(0, Math.min(100, share))}%`,
+                          // On the near-black band the base green is 1.93:1
+                          // against the track and reads as an empty bar, so
+                          // every rank below the podium uses the lighter green
+                          // and only the leaders are picked out further.
                           background:
-                            i === 0 ? "var(--green-lighter)" : i < 3 ? "var(--green-light)" : "var(--green)",
+                            i === 0 ? "var(--green-lighter)" : i < 3 ? "var(--green-light)" : "#5d9a5a",
                         }}
                       />
                     </div>
-                    <div className="text-right text-[15px] font-bold tabular-nums">{metric.format(value)}</div>
+                    <div className="text-right text-[15px] font-bold tabular-nums">
+                      {metric.display ? metric.display(row) : metric.format(value)}
+                    </div>
                   </div>
                 );
               })}

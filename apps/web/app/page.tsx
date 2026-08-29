@@ -218,11 +218,14 @@ function GameTile({ card }: { card: GameCard }) {
 export default async function HomePage() {
   const { league, season, week, phase } = await leagueClockState();
 
-  const [cards, activity, rows, power, timeline, report] = await Promise.all([
+  // The benchmark aggregation is eleven queries; the leaderboard band and the
+  // power rankings both want it, so it is read once and handed to both rather
+  // than each fetching its own copy.
+  const rows = await benchmarkRows();
+  const [cards, activity, power, timeline, report] = await Promise.all([
     gameCards(week, season),
     leagueActivity(12),
-    benchmarkRows(),
-    powerRankings(6),
+    powerRankings(6, rows),
     seasonTimeline(8),
     safe(latestReporterPost, undefined),
   ]);
@@ -236,6 +239,8 @@ export default async function HomePage() {
     model: r.modelLabel,
     team: r.name ?? r.slug,
     record: r.ties > 0 ? `${r.wins}-${r.losses}-${r.ties}` : `${r.wins}-${r.losses}`,
+    wins: r.wins,
+    ties: r.ties,
     pf: r.pf,
     efficiency: r.efficiency,
     costPerPoint: r.costPerPoint,
@@ -431,7 +436,7 @@ export default async function HomePage() {
         {timeline.length === 0 ? (
           <Nothing>The season has not produced anything to look back on yet.</Nothing>
         ) : (
-          <div className="scroll-x -mt-2">
+          <div className="scroll-x -mt-2" tabIndex={0} role="group" aria-label="Season timeline">
             <div className="flex gap-3.5 pb-2">
               {timeline.map((event, i) => (
                 <div

@@ -175,6 +175,25 @@ describe("transaction descriptions", () => {
     );
   });
 
+  it("resolves the player ids the engine actually writes", () => {
+    // waivers.ts records `{ playerId, dropPlayerId }` — ids, not names. Reading
+    // only name keys is why every claim used to read "Won a waiver claim."
+    const names: Record<string, string> = { p1: "Cade Otton", p2: "Rome Odunze" };
+    expect(
+      describeTransaction("waiver_add", { playerId: "p1", dropPlayerId: "p2" }, (id) => names[id] ?? null),
+    ).toBe("Claimed Cade Otton and dropped Rome Odunze.");
+    expect(describeTransaction("add", { playerId: "p1" }, (id) => names[id] ?? null)).toBe(
+      "Added Cade Otton from free agency.",
+    );
+    expect(describeTransaction("drop", { playerId: "p2" }, (id) => names[id] ?? null)).toBe(
+      "Dropped Rome Odunze.",
+    );
+  });
+
+  it("degrades to a nameless sentence when an id cannot be resolved", () => {
+    expect(describeTransaction("waiver_add", { playerId: "gone" }, () => null)).toBe("Won a waiver claim.");
+  });
+
   it("still says something useful when the payload is empty", () => {
     // Payloads are free-form JSON written by the engine; the rail must not
     // render "Claimed undefined".

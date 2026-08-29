@@ -56,19 +56,30 @@ function meta(player: LineupPlayer | undefined, projection: number | null | unde
   return parts.filter(Boolean).join(" · ");
 }
 
-/** One slot, both teams, mirrored around the slot label. */
+/**
+ * One slot, both teams, mirrored around the slot label.
+ *
+ * The mirror only works while the two sides sit side by side. On a phone the
+ * grid collapses to one column and the two players stack, so each side names
+ * its team — without that the rows read as one undifferentiated list of
+ * eighteen players.
+ */
 function LineupRow({
   slot,
   away,
   home,
   awayMeta,
   homeMeta,
+  awayTeam,
+  homeTeam,
 }: {
   slot: string;
   away: LineupPlayer | undefined;
   home: LineupPlayer | undefined;
   awayMeta: string;
   homeMeta: string;
+  awayTeam: string;
+  homeTeam: string;
 }) {
   const awayPts = away?.points ?? 0;
   const homePts = home?.points ?? 0;
@@ -79,6 +90,9 @@ function LineupRow({
     <div className="grid grid-cols-1 items-center gap-3 rounded-[10px] border border-border bg-surface px-4 py-3 sm:grid-cols-[minmax(0,1fr)_64px_minmax(0,1fr)]">
       <div className="flex items-center justify-between gap-3.5 sm:justify-end">
         <div className="order-2 min-w-0 sm:order-1 sm:text-right">
+          <div className="truncate text-[10px] font-bold uppercase tracking-[0.1em] text-faint sm:hidden">
+            {awayTeam}
+          </div>
           <div className="truncate text-[15px] font-semibold">{away?.name ?? "empty"}</div>
           <div className="truncate text-[11px] text-faint">{awayMeta}</div>
         </div>
@@ -117,6 +131,9 @@ function LineupRow({
           />
         </div>
         <div className="min-w-0">
+          <div className="truncate text-[10px] font-bold uppercase tracking-[0.1em] text-faint sm:hidden">
+            {homeTeam}
+          </div>
           <div className="truncate text-[15px] font-semibold">{home?.name ?? "empty"}</div>
           <div className="truncate text-[11px] text-faint">{homeMeta}</div>
         </div>
@@ -238,6 +255,8 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
           slot={slot}
           away={a}
           home={h}
+          awayTeam={teamName(card.awayTeam)}
+          homeTeam={teamName(card.homeTeam)}
           awayMeta={meta(a, a ? projOf.get(a.playerId) : null, a ? locked.has(a.playerId) : false)}
           homeMeta={meta(h, h ? projOf.get(h.playerId) : null, h ? locked.has(h.playerId) : false)}
         />
@@ -340,6 +359,9 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
       ) : null}
 
       <Container className="pb-14 pt-8">
+        <h1 className="mb-5 text-[clamp(1.75rem,3.5vw,2.5rem)] font-bold leading-[1.2] tracking-[-0.02em]">
+          Week {week}
+        </h1>
         <nav className="scroll-x mb-7 flex items-center gap-2 text-[13px]" aria-label="Week">
           {week > 1 ? (
             <Link href={`/matchups/${week - 1}`} className="flex-shrink-0 font-medium text-accent">
@@ -452,7 +474,7 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
                   </span>
                 </div>
                 <div className="flex items-center gap-3">
-                  {card.isPlayoff ? <Tag size="sm">playoff round {card.week}</Tag> : null}
+                  {card.isPlayoff ? <Tag size="sm">playoff round {card.playoffRound ?? "?"}</Tag> : null}
                   <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-faint">
                     {card.final || card.slotsToPlay === 0 ? "final" : `${card.slotsToPlay} slots left`}
                   </span>

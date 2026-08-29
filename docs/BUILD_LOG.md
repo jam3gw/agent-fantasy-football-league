@@ -470,6 +470,108 @@ steps receive `VERCEL_OIDC_TOKEN` on resume has been confirmed against our
 versions, and both would need a real preview session and a `VERIFIED.md` row
 before the production variable came out.
 
+## 2026-08-29 — The public site is now a broadcast, and the review found ten real defects
+
+Jake handed over a Claude Design bundle — a prototype of a redesigned public
+site — and asked for it built for real, all six screens, wired to live data.
+It is on `main` now. What is worth recording is not the redesign; it is what
+the review loop caught, because most of it was invisible to the eye.
+
+**Three things the design wanted that this league does not store.** A win
+chance, power rankings with movement, and a season timeline. None of them are a
+new source of truth: the win chance is a logistic on the projected final
+margin, the rankings blend win rate, points and lineup efficiency with movement
+computed on the same blend a week earlier, and the timeline assembles itself
+from transactions and `team_week_results`. Every one says in its own comment
+that it is an estimate. The power-ranking notes are facts read off each team's
+row — the reporter writes prose on this site, the page does not.
+
+**The win chance was double-counting a live player.** The margin added each
+remaining starter's *full weekly projection* on top of the matchup score that
+already contained the points he had scored so far. A receiver on 10 of a
+projected 15 was worth 25 to his team. It is now the projection less what he
+has already scored, floored at zero. On the fixture data this moved one game
+from "Cold Start 10% to win" to 27% — the first number was not a rounding
+error, it was wrong.
+
+**An unread schedule read as a finished Sunday.** "Slots still to play" comes
+from joining a starter to his NFL game. If `nfl_games` is empty for the week —
+not ingested yet, or the read degraded — nobody has a game, so nobody is still
+to play, so every game rendered `final` with no win chance. A missing schedule
+now means *not knowing*: no slots claimed, no chance offered, and only the
+matchup's own `final` flag decides.
+
+**Two derived tables disagreed with the standings beside them.** `computeStandings`
+counts finalized regular-season games only (`standings.ts:55`); the new form
+chips and power-ranking history counted playoff games too, so a chip could
+record a result the record next to it did not contain. Both now filter
+`is_playoff = false`.
+
+**The activity rail could not name a player.** `describeTransaction` read
+`addedName` / `droppedName`; `waivers.ts` writes `playerId` and
+`dropPlayerId`. Every transaction in the rail therefore fell back to "Won a
+waiver claim." It resolves ids now, and still degrades to a nameless sentence
+rather than to "Claimed undefined".
+
+**`benchmarkRows()` ran twice on every home render** — eleven queries duplicated,
+because `powerRankings()` fetched its own copy. It takes the rows now.
+`seasonTimeline` also scanned the whole `transactions` table to find two rows;
+it asks for a bounded oldest-first window of the two types it wants.
+`benchmarkRows` additionally called `db()` once *outside* every `safeRead`, and
+`db()` throws when `DATABASE_URL` is missing — so the one failure mode the
+breaker exists for would have taken the page down instead of emptying it.
+
+**Two colours failed WCAG on every screen.** The design system's slate
+`#a39c8c` is 2.57:1 on its own paper, and it is the colour of every small meta
+label on all six pages. The band's faint tone was 3.23:1. Darkened to 4.63:1
+and lightened to 4.93:1 respectively; the system's original value is kept as
+`--slate-soft-decorative` for the places it is a shape rather than a word. This
+is a deliberate divergence from the handoff — the prototype's own values fail —
+and it is recorded here rather than silently absorbed. Related: the leaderboard
+bars below the top three were `#2f5d34` on a near-black track, 1.93:1, and read
+as empty rows.
+
+**The leaderboard's "Wins" tab did not rank by wins.** It sorted on points for,
+under a label promising wins and a note promising "wins first" — inherited
+straight from the prototype. It ranks by record now, points as the tiebreak,
+and the bar still draws points because twelve identical two-win bars say
+nothing. It is also the default tab again: the previous default, lineup skill,
+comes from `team_week_results`, which is empty until the first week finalizes,
+so before the first Tuesday of the season the band — the home page's only
+standings surface, which §12.1 requires it to have — rendered empty.
+
+**Font Awesome is gone.** The design system asks for it and says not to
+hand-draw icons. That is right for a site with an icon set; this one used
+exactly one glyph, and the cost was a third-party stylesheet on every route
+including `/admin/login`, with no integrity hash available from this network.
+One inline arrow replaces it. If a second icon is ever needed, load the real
+set rather than growing that SVG.
+
+Also fixed: four pages had no `<h1>` at all (the design system marks its eyebrow
+up as `<h2>` and its heading as `<h3>`, so the decorative label outranked the
+page title — same pixels, corrected outline); the metric switch declared an
+ARIA `tablist` with no panels and no keyboard model, and is now a group of
+toggles; reduced-motion stopped the ticker but stranded every game past the
+first screenful, and now makes it an ordinary scroller; playoff games were
+labelled with the league week instead of the round; and the mirrored lineup
+rows lost all team attribution when they stack on a phone.
+
+**How it was checked.** Six independent reviewers over separate dimensions
+(§12.1 conformance, derived-logic correctness, data layer, security and the
+server/client boundary, accessibility and contrast, design fidelity), each
+finding then put to two skeptics prompted to refute it. Thirty-eight findings,
+most refuted; the ones above were confirmed by reading the code directly.
+Verified against a real Postgres with a seeded week-3 league: all seven screens
+render at 1320 px and 375 px with zero horizontal overflow and exactly one
+`<h1>` each. 40 test files, 488 tests.
+
+**Two steps of the review loop could not run here** and are not claimed: a real
+agent session against a preview deploy (§CLAUDE.md step 4 — no credentials in
+this session), and the post-merge production health check (step 5 — no Vercel
+access). The cron/`CRON_SECRET` problem recorded in the entry below is
+unrelated to this change and still Jake's to fix; until it is, production has no
+league state for these pages to show, and they will correctly render empty.
+
 ## 2026-08-29 — Full audit: three findings that would each have stopped the season
 
 Jake asked what is missing. Rather than answer from the build log I checked

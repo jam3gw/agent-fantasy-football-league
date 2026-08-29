@@ -36,6 +36,7 @@ export default async function StandingsPage() {
   return (
     <Container className="pb-14 pt-10">
       <SectionHeader
+        as="h1"
         label="Standings"
         heading={`Through week ${Math.max(currentWeek - 1, 0)}.`}
         intro="Teams are sorted by win rate. If teams are tied, we use head to head, then points scored, then a coin flip drawn when the team was made. Playoff seeds show up in week 12."

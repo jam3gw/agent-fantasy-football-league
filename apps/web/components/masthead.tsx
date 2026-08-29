@@ -27,6 +27,7 @@ function TickerItem({ game, hidden }: { game: TickerGame; hidden?: boolean }) {
   return (
     <div
       aria-hidden={hidden ? "true" : undefined}
+      data-ticker-echo={hidden ? "" : undefined}
       className="flex items-baseline gap-[9px] whitespace-nowrap border-r border-band-border px-5"
     >
       <span className="text-[13px] font-semibold text-band-text">{game.away}</span>
@@ -111,7 +112,7 @@ export async function Masthead() {
           <div className="flex flex-shrink-0 items-center self-stretch bg-accent px-4 text-[11px] font-bold uppercase tracking-[0.14em] text-band-text">
             {live.liveGames > 0 ? "Live" : `Week ${week}`}
           </div>
-          <div className="flex-1 overflow-hidden">
+          <div className="ticker-viewport flex-1 overflow-hidden">
             {/* The week's games twice over, so translating the track by half
                 its width loops without a seam. The copy is hidden from
                 assistive tech so the scores are announced once. */}
