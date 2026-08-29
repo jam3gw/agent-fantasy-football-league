@@ -37,8 +37,6 @@ export interface ModelStepRequest {
   modelId: string;
   messages: ModelMessage[];
   tools: LeagueTool[];
-  /** Provider options for this call (gateway BYOK/only, cache breakpoints). */
-  providerOptions?: Record<string, unknown>;
 }
 
 export interface ModelToolCall {
@@ -110,6 +108,10 @@ async function recordEvent(
     content,
     createdAt: clock.now(),
   });
+  // Every transcript row is a heartbeat. The tick reclaims a session that has
+  // written nothing for a while, and a turn spent on free tools writes no
+  // ledger row — so without this a live session looks abandoned.
+  await db.update(sessions).set({ updatedAt: clock.now() }).where(eq(sessions.id, sessionId));
 }
 
 
@@ -314,8 +316,15 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
   const deadlineAt = new Date(String(session.context.deadline_at));
   const endingTool = endingToolFor(session.kind);
 
+  // A session interrupted by the step cap picks up exactly where it stopped;
+  // a fresh one builds its prompt and context snapshot below (§8.2 steps 1, 3).
+  const restored = await restoreSession(db, sessionId, endingTool);
+
   // Step 2 of §8.2 (wait for a slot) belongs to the workflow; by here we run.
-  if (clock.now() > deadlineAt) {
+  // A resumed session that already reached its ending tool is finished, and
+  // must not be recorded `skipped` just because its window has since closed —
+  // its decision log or report is already published.
+  if (!restored?.endingToolSucceeded && clock.now() > deadlineAt) {
     await db
       .update(sessions)
       .set({ status: "skipped", endedAt: clock.now(), updatedAt: clock.now() })
@@ -344,9 +353,6 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
 
   const toolsByName = new Map(deps.tools.map((t) => [t.name, t]));
 
-  // A session interrupted by the step cap picks up exactly where it stopped;
-  // a fresh one builds its prompt and context snapshot (§8.2 steps 1 and 3).
-  const restored = await restoreSession(db, sessionId, endingTool);
   let messages: ModelMessage[];
   let seq: number;
   if (restored) {

@@ -38,7 +38,7 @@ export default async function AdminHealthPage({
   const season = settings?.season ?? 0;
   const week = settings?.currentWeek ?? 0;
 
-  const [feeds, allTeams, failed, discrepancies, dueJobs, alarms, rules, liveGames, recentSessions, fp] =
+  const [feeds, allTeams, failed, discrepancies, dueJobs, alarms, rules, liveGames, recentSessions, fp, queuedSessions, runningSessions] =
     await Promise.all([
       database.select().from(health).catch(() => []),
       database.select().from(teams).catch(() => []),
@@ -70,6 +70,20 @@ export default async function AdminHealthPage({
       // Enough history to see a model's recent run of failures (§8.8).
       database.select().from(sessions).orderBy(desc(sessions.createdAt)).limit(400).catch(() => []),
       fpUsageToday().catch(() => ({ day: "—", total: 0, byTeam: {} as Record<string, number> })),
+      // The session queue: since sessions are no longer represented by a job
+      // row, this is the only place the queue is visible (§9.2).
+      database
+        .select()
+        .from(sessions)
+        .where(eq(sessions.status, "queued"))
+        .orderBy(sessions.createdAt)
+        .catch(() => []),
+      database
+        .select()
+        .from(sessions)
+        .where(eq(sessions.status, "running"))
+        .orderBy(sessions.startedAt)
+        .catch(() => []),
     ]);
 
   const teamName = (id: number | null) =>
@@ -82,6 +96,18 @@ export default async function AdminHealthPage({
     (!livePoll?.lastSuccessAt || now.getTime() - livePoll.lastSuccessAt.getTime() > LIVE_STALE_MS);
 
   const overdue = dueJobs.filter((j) => j.dueAt.getTime() < now.getTime() - 120_000);
+
+  // §9.2: six at once, one per team. A session whose due time has passed and
+  // that is still queued is waiting for a slot — normal for a minute or two,
+  // a problem if it persists.
+  const dueSince = (session: { context: Record<string, unknown> }) => {
+    const raw = session.context.due_at;
+    return typeof raw === "string" ? new Date(raw) : null;
+  };
+  const waiting = queuedSessions.filter((s) => {
+    const at = dueSince(s);
+    return at === null || at.getTime() <= now.getTime();
+  });
   const streaks = failureStreaks(recentSessions);
   const brokenModels = streaks.filter((s) => s.streak >= 3);
   const scoringSource = settings ? await weekScoringSource(database, Math.max(1, week - 1)).catch(() => null) : null;
@@ -219,6 +245,41 @@ export default async function AdminHealthPage({
                   <Cell>{formatEt(s.lastAt)}</Cell>
                 </Row>
               ))}
+            </Table>
+          )}
+        </Card>
+
+        <Card
+          title={`Sessions — ${runningSessions.length}/6 running, ${queuedSessions.length} queued (${waiting.length} waiting for a slot)`}
+        >
+          {queuedSessions.length === 0 && runningSessions.length === 0 ? (
+            <Empty>Nothing queued or running. The tick starts sessions as they come due.</Empty>
+          ) : (
+            <Table head={["Team", "Kind", "State", "Due", "Deadline"]}>
+              {[...runningSessions, ...queuedSessions].slice(0, 30).map((s) => {
+                const due = dueSince(s);
+                const deadlineRaw = s.context.deadline_at;
+                const deadline = typeof deadlineRaw === "string" ? new Date(deadlineRaw) : null;
+                return (
+                  <Row key={s.id}>
+                    <Cell>{teamName(s.teamId)}</Cell>
+                    <Cell>
+                      <span className="font-mono text-xs">{s.kind}</span>
+                    </Cell>
+                    <Cell>
+                      {s.status === "running" ? (
+                        <Badge tone="accent">running</Badge>
+                      ) : due === null || due.getTime() <= now.getTime() ? (
+                        <Badge tone="warn">waiting for a slot</Badge>
+                      ) : (
+                        <Badge>queued</Badge>
+                      )}
+                    </Cell>
+                    <Cell>{due ? formatEt(due) : "—"}</Cell>
+                    <Cell>{deadline ? formatEt(deadline) : "—"}</Cell>
+                  </Row>
+                );
+              })}
             </Table>
           )}
         </Card>

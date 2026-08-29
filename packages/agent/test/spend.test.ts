@@ -20,6 +20,7 @@ import {
   updateSettings,
 } from "@league/engine";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
+import { createModelStep } from "../src/modelStep.ts";
 import {
   applyOptionalPause,
   evaluateAlarms,
@@ -287,14 +288,47 @@ describe("the ledger itself", () => {
 });
 
 describe("every step bills the AI Gateway", () => {
-  it("the ledger records `gateway` and nothing else", async () => {
+  it("createModelStep reports `gateway`, and sets no provider options at all", async () => {
     // The commissioner's decision on 2026-08-28: one billing path, so one
-    // price list and one balance. Nothing in the runner can route a call to a
-    // provider account any more, and this is what would catch it coming back.
-    const a = await makeTeam("a");
-    const s = await makeSession(a, "s-a", 7);
-    await spend(s, a, 1);
-    const rows = await db.select().from(spendLedger);
-    expect(rows.every((r) => r.billedTo === "gateway")).toBe(true);
+    // price list and one balance. Asserted on the model step's own output —
+    // asserting it on a ledger row a test helper wrote would only restate the
+    // helper's input.
+    let seen: Record<string, unknown> | null = null;
+    const step = createModelStep({} as never, {
+      generate: (async (params: Record<string, unknown>) => {
+        seen = params;
+        return {
+          text: "hello",
+          toolCalls: [],
+          usage: { inputTokens: 10, outputTokens: 2 },
+          providerMetadata: undefined,
+          content: "hello",
+          finishReason: "stop",
+        };
+      }) as never,
+    });
+
+    const result = await step({ modelId: "openai/gpt-5.6-sol", messages: [], tools: [] }, 0);
+    expect(result.billedTo).toBe("gateway");
+    // No BYOK credential and no `only` pinning can reach the gateway any more.
+    expect(seen).not.toBeNull();
+    expect(Object.keys(seen!)).not.toContain("providerOptions");
+    expect(JSON.stringify(seen)).not.toContain("byok");
+  });
+
+  it("a model routed to a provider before now bills the gateway like every other", async () => {
+    // spacexai/grok-4.6 and the two OpenAI models used to carry BYOK routes.
+    for (const modelId of ["spacexai/grok-4.6", "openai/gpt-5.6-terra", "google/gemini-3.1-pro-preview"]) {
+      const step = createModelStep({} as never, {
+        generate: (async () => ({
+          text: "",
+          toolCalls: [],
+          usage: { inputTokens: 1, outputTokens: 1 },
+          content: "",
+        })) as never,
+      });
+      const result = await step({ modelId, messages: [], tools: [] }, 0);
+      expect(result.billedTo, modelId).toBe("gateway");
+    }
   });
 });

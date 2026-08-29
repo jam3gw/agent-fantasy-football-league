@@ -409,3 +409,186 @@ describe("§4.1 — a session survives the 800-second step cap", () => {
     expect(brief).toHaveLength(1);
   });
 });
+
+describe("§4.1 — resuming a session that died mid-batch", () => {
+  it("pairs a tool call whose result was never written, and does not re-run it", async () => {
+    // A function killed between the assistant turn and its tool results leaves
+    // a `tool_use` with no `tool_result`. Every provider rejects that, so the
+    // resumed step would fail on every retry until the session was abandoned.
+    toolRuns = [];
+    const sessionId = await makeSession("weekly_review");
+
+    // Write the transcript such a death leaves behind: system, brief, an
+    // assistant turn asking for two tools, and a result for only one.
+    await db.insert(sessionEvents).values([
+      { sessionId, seq: 0, type: "system", content: { prompt: "system" } },
+      { sessionId, seq: 1, type: "user", content: { brief: "brief", snapshot: { week: 2 } } },
+      {
+        sessionId,
+        seq: 2,
+        type: "assistant",
+        content: {
+          text: "checking",
+          tool_calls: [
+            { name: "get_league_state", args: {}, id: "c1" },
+            { name: "get_league_state", args: {}, id: "c2" },
+          ],
+          raw: {
+            role: "assistant",
+            content: [
+              { type: "tool-call", toolCallId: "c1", toolName: "get_league_state", input: {} },
+              { type: "tool-call", toolCallId: "c2", toolName: "get_league_state", input: {} },
+            ],
+          },
+        },
+      },
+      {
+        sessionId,
+        seq: 3,
+        type: "tool_result",
+        content: { name: "get_league_state", result: { week: 2 }, tool_call_id: "c1", invalid: false },
+      },
+    ]);
+    await db.update(sessions).set({ status: "running" }).where(eq(sessions.id, sessionId));
+
+    let seen: unknown[] = [];
+    const result = await runSession(sessionId, {
+      ...deps([]),
+      modelStep: async (req) => {
+        seen = req.messages;
+        return step({
+          text: "done",
+          toolCalls: [{ toolCallId: "c3", toolName: "write_decision_log", args: { summary: "ok" } }],
+          assistantMessage: {
+            role: "assistant",
+            content: [
+              { type: "tool-call", toolCallId: "c3", toolName: "write_decision_log", input: { summary: "ok" } },
+            ],
+          } as never,
+        });
+      },
+    });
+    expect(result.status).toBe("succeeded");
+
+    // Both calls came back paired; the missing one says it never ran.
+    const toolMessage = (seen as Array<{ role: string; content: unknown }>).find((m) => m.role === "tool")!;
+    const parts = toolMessage.content as Array<{ toolCallId: string; output: { error?: string } }>;
+    expect(parts.map((p) => p.toolCallId).sort()).toEqual(["c1", "c2"]);
+    expect(parts.find((p) => p.toolCallId === "c2")!.output.error).toBe("not_executed");
+
+    // And the resume did not re-execute the one that had already run.
+    expect(toolRuns).toEqual(["write_decision_log"]);
+  });
+
+  it("stops immediately when the ending tool already succeeded before the crash", async () => {
+    // The transcript shows a published decision log. Another model step would
+    // write a second one, and charge for it.
+    toolRuns = [];
+    const sessionId = await makeSession("weekly_review");
+    await db.insert(sessionEvents).values([
+      { sessionId, seq: 0, type: "system", content: { prompt: "system" } },
+      { sessionId, seq: 1, type: "user", content: { brief: "brief", snapshot: {} } },
+      {
+        sessionId,
+        seq: 2,
+        type: "assistant",
+        content: {
+          text: "done",
+          tool_calls: [{ name: "write_decision_log", args: { summary: "ok" }, id: "c1" }],
+          raw: { role: "assistant", content: "done" },
+        },
+      },
+      {
+        sessionId,
+        seq: 3,
+        type: "tool_result",
+        content: { name: "write_decision_log", result: { ok: true }, tool_call_id: "c1", invalid: false },
+      },
+    ]);
+    await db.update(sessions).set({ status: "running" }).where(eq(sessions.id, sessionId));
+
+    let calls = 0;
+    const result = await runSession(sessionId, {
+      ...deps([]),
+      modelStep: async () => {
+        calls++;
+        return step({ text: "again" });
+      },
+    });
+
+    expect(calls, "no further model step may run").toBe(0);
+    expect(result.status).toBe("succeeded");
+    expect(result.endedBy).toBe("ending_tool");
+    expect(toolRuns).toEqual([]);
+  });
+
+  it("a session that already published is not recorded skipped when its window has closed", async () => {
+    toolRuns = [];
+    const sessionId = await makeSession("lineup_check", {
+      deadline_at: new Date(clock.now().getTime() - 60_000).toISOString(),
+    });
+    await db.insert(sessionEvents).values([
+      { sessionId, seq: 0, type: "system", content: { prompt: "system" } },
+      { sessionId, seq: 1, type: "user", content: { brief: "brief", snapshot: {} } },
+      {
+        sessionId,
+        seq: 2,
+        type: "assistant",
+        content: { text: "done", tool_calls: [], raw: { role: "assistant", content: "done" } },
+      },
+      {
+        sessionId,
+        seq: 3,
+        type: "tool_result",
+        content: { name: "write_decision_log", result: { ok: true }, tool_call_id: "c1", invalid: false },
+      },
+    ]);
+    await db.update(sessions).set({ status: "running" }).where(eq(sessions.id, sessionId));
+
+    const result = await runSession(sessionId, deps([step({ text: "x" })]));
+    expect(result.status).toBe("succeeded");
+    expect(result.endedBy).toBe("ending_tool");
+  });
+
+  it("restores the invalid-call count from the flag, not from the error code", async () => {
+    // A tool may return `invalid_args` from its own body after a clean schema
+    // parse. Those count as real calls; only a schema failure is invalid.
+    toolRuns = [];
+    const sessionId = await makeSession("weekly_review", { tool_call_ceiling: 20 });
+    await db.insert(sessionEvents).values([
+      { sessionId, seq: 0, type: "system", content: { prompt: "system" } },
+      { sessionId, seq: 1, type: "user", content: { brief: "brief", snapshot: {} } },
+      {
+        sessionId,
+        seq: 2,
+        type: "assistant",
+        content: { text: "", tool_calls: [], raw: { role: "assistant", content: "" } },
+      },
+      {
+        sessionId,
+        seq: 3,
+        type: "tool_result",
+        content: {
+          name: "get_league_state",
+          result: { ok: false, error: "invalid_args", message: "from the tool body" },
+          tool_call_id: "c1",
+          invalid: false,
+        },
+      },
+    ]);
+    await db.update(sessions).set({ status: "running" }).where(eq(sessions.id, sessionId));
+
+    const result = await runSession(sessionId, {
+      ...deps([
+        step({
+          text: "done",
+          toolCalls: [{ toolCallId: "c9", toolName: "write_decision_log", args: { summary: "ok" } }],
+          assistantMessage: { role: "assistant", content: "done" } as never,
+        }),
+      ]),
+    });
+    // The restored row counted as a real call, not an invalid one.
+    expect(result.invalidToolCalls).toBe(0);
+    expect(result.toolCalls).toBe(2); // the restored one plus the ending tool
+  });
+});

@@ -70,16 +70,6 @@ export const MODEL_PRICE_SEED: Record<
 };
 
 /**
- * BYOK routes (§8.9): gateway model id → provider credential name. A routed
- * request bills the provider account; `only` pins the provider so the request
- * cannot silently reroute at a different price.
- *
- * `anthropic/claude-sonnet-5` → `vertex` is deliberately NOT routed by
- * default: §8.9 makes it conditional on the build confirming that the Google
- * Cloud trial credit covers Anthropic models on Vertex. Left on the gateway
- * until that is verified in the provider console.
- */
-/**
  * Every model call bills the AI Gateway — the commissioner's decision on
  * 2026-08-28, superseding §8.9's BYOK routing. One billing path means one
  * price list, one balance to watch on /spend, and no provider account whose

@@ -217,6 +217,10 @@ describe("the tick's sweeper is the only thing that starts a session", () => {
         modelId: "m/1",
         status: "running",
         startedAt: clock.now(),
+        // The row's own default would be real wall-clock time, which is stale
+        // against the league clock this test runs on — and a stale row is
+        // exactly what the reclaim sweep is for.
+        updatedAt: clock.now(),
         context: { deadline_at: deadline.toISOString() },
       })
       .returning({ id: sessions.id });
@@ -327,6 +331,72 @@ describe("the tick's sweeper is the only thing that starts a session", () => {
     expect(result.reclaimed).toBe(1);
     const after = (await db.select().from(sessions).where(eq(sessions.id, row!.id)))[0]!;
     expect(after.status).toBe("failed");
+    expect(await runningCount()).toBe(0);
+  });
+
+  it("leaves a live session alone even after its deadline has passed", async () => {
+    // The case that matters: a session finishing its closing step is past its
+    // deadline by definition (§8.2 step 5), and a turn spent on free tools
+    // writes no ledger row. Only idleness may condemn it — otherwise the tick
+    // fails a live session and hands its team's slot to a second one.
+    const [teamId] = await twelveTeams();
+    await db.insert(sessions).values({
+      teamId: teamId!,
+      kind: "weekly_review",
+      trigger: "t",
+      idempotencyKey: "closing",
+      modelId: "m/1",
+      status: "running",
+      startedAt: new Date(clock.now().getTime() - 90 * 60_000),
+      updatedAt: clock.now(), // just wrote a transcript row
+      context: { deadline_at: new Date(clock.now().getTime() - 60_000).toISOString() },
+    });
+    const result = await startQueuedSessions(db, clock, async () => {});
+    expect(result.reclaimed).toBe(0);
+    expect(await runningCount()).toBe(1);
+  });
+
+  it("reclaims an idle session even while it is still inside its window", async () => {
+    // The other half: idle for fifteen minutes is dead whatever the deadline
+    // says, and failing it (rather than skipping it) is what lets §8.8 retry.
+    const [teamId] = await twelveTeams();
+    await db.insert(sessions).values({
+      teamId: teamId!,
+      kind: "weekly_review",
+      trigger: "t",
+      idempotencyKey: "idle",
+      modelId: "m/1",
+      status: "running",
+      startedAt: new Date(clock.now().getTime() - 30 * 60_000),
+      updatedAt: new Date(clock.now().getTime() - 30 * 60_000),
+      context: { deadline_at: new Date(clock.now().getTime() + 60 * 60_000).toISOString() },
+    });
+    const result = await startQueuedSessions(db, clock, async () => {});
+    expect(result.reclaimed).toBe(1);
+    const rows = await db.select().from(sessions).where(eq(sessions.status, "failed"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.error).toContain("no progress");
+  });
+
+  it("never starts a draft pick: the draft workflow runs those inline", async () => {
+    // `runDraftPick` commits the session `queued` and only then runs it. A tick
+    // landing in that window would start a second copy — two model calls
+    // racing `make_pick` on a 180-second clock.
+    const [teamId] = await twelveTeams();
+    await db.insert(sessions).values({
+      teamId: teamId!,
+      kind: "draft_pick",
+      trigger: "draft",
+      idempotencyKey: "pick-47",
+      modelId: "m/1",
+      status: "queued",
+      context: { deadline_at: new Date(clock.now().getTime() + 180_000).toISOString() },
+    });
+    const started: number[] = [];
+    await startQueuedSessions(db, clock, async (id) => {
+      started.push(id);
+    });
+    expect(started).toEqual([]);
     expect(await runningCount()).toBe(0);
   });
 

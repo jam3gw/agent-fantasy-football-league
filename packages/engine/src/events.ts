@@ -1,7 +1,7 @@
 /**
  * Engine events (§9.3). Emitted by engine functions inside the same database
- * transaction; handlers create session rows (status queued) plus a
- * `session.run` scheduled job so the per-minute tick starts the workflow.
+ * transaction; handlers create session rows with status `queued`. The queued
+ * row is the queue: the per-minute tick starts it when a slot is free (§9.2).
  */
 import { and, eq, gte, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
@@ -53,6 +53,9 @@ export interface CreateSessionInput {
  * Idempotently create a queued session and the job that starts it.
  * Returns the session id, or null when the idempotency key already exists.
  */
+/** Kinds that belong to the draft rather than to a fantasy week (§8.7). */
+const PRE_SEASON_KINDS = new Set(["draft_pick", "onboarding"]);
+
 export async function createSession(
   db: EngineDb,
   settings: LeagueSettings,
@@ -73,10 +76,16 @@ export async function createSession(
       status: "queued",
       createdAt: input.now,
       context: {
-        // Every booking carries the fantasy week it belongs to. The spend
-        // rollups attribute a step to a week through this (§8.7), so a kind
-        // that omitted it dropped out of the week's totals entirely.
-        week: input.context?.week ?? settings.currentWeek,
+        // Every in-season booking carries the fantasy week it belongs to. The
+        // spend rollups attribute a step to a week through this (§8.7), so a
+        // kind that omitted it — trade responses, votes, board replies, injury
+        // responses — dropped out of the week's totals entirely.
+        //
+        // The pre-season kinds are deliberately left without one: a draft is
+        // fourteen sessions per agent, and calling that "week 1" would put the
+        // whole draft against the weekly alarm on draft day. §8.7 counts the
+        // draft separately, under "plus the draft".
+        ...(PRE_SEASON_KINDS.has(input.kind) ? {} : { week: input.context?.week ?? settings.currentWeek }),
         ...(input.context ?? {}),
         due_at: input.dueAt.toISOString(),
         deadline_at: deadlineAt.toISOString(),

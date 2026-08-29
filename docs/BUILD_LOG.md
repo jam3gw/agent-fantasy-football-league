@@ -11,6 +11,69 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Third review round
+
+Round 3 read only round 2's fixes and the two commissioner changes. It found
+one high-severity gap and a set of real medium ones. All fixed.
+
+**The sweeper could start a draft pick.** `runDraftPick` commits the session
+row `queued` and only then runs it inline against the 180-second clock; in the
+few round-trips between, a tick could claim it and start a second copy. Two
+model calls racing `make_pick`, and whichever loses ends without a pick and
+gets auto-picked — on a clock nobody can redo, roughly 168 chances per draft.
+The sweeper now skips `draft_pick` entirely: the draft workflow owns those.
+
+**`reclaimStuckSessions` could have killed a live session.** It failed a
+`running` session that was past its deadline and had not been touched for
+fifteen minutes — but `sessions.updated_at` was only bumped by a status write
+or a ledger row, and a turn spent on free tool calls (`web_search` and
+`read_url` are seeded at $0) writes neither. A session doing eight searches
+goes ten minutes silent; a session running its closing step is past its
+deadline by definition. The tick would have failed it, the live invocation
+would have overwritten the row `succeeded` seconds later leaving no trace, and
+in between the sweeper would have started a second session for that team — the
+one-per-team breach round 2 had just closed. Now every transcript row bumps
+`updated_at`, and idleness alone is the test: fifteen minutes without writing
+anything is dead whatever the deadline says. Failing rather than skipping is
+also what lets §8.8 retry it, which the comment claimed and the old condition
+made impossible.
+
+**The compensation for a failed `start()` could itself make two runners.**
+`start` can throw *after* the workflow was accepted — a timeout reading the
+response — and putting the row back in the queue then gives it a second
+runner. The row stays `running`; the reclaim path owns it.
+
+**The session queue had become invisible.** `session.run` rows were the only
+place a pending session showed up in the admin UI, and removing them left
+nothing anywhere selecting queued sessions. `/admin/health` now has a card:
+running out of six, queued, and how many are waiting for a slot.
+
+**The draft is out of the weekly totals again.** Defaulting `context.week` for
+every kind put fourteen pick sessions plus onboarding into week 1, which would
+have tripped the $40 weekly alarm for every agent on draft day. The pre-season
+kinds keep their "no week" meaning; §8.7 counts them under "plus the draft".
+
+Also: the ending-tool check moved ahead of the deadline check, so a session
+that already published is not recorded `skipped` when its window closes;
+`ModelStepRequest.providerOptions` and an orphaned BYOK doc comment removed;
+three pieces of admin and module text that still described the `session.run`
+job corrected.
+
+**Tests.** The review was right that the riskiest lines of round 2 shipped
+uncovered and that one of my assertions was vacuous. Added: the unpaired
+tool-call repair, the ending-tool early exit, the invalid-call flag round-trip,
+both halves of the reclaim condition separately, and the draft-pick exclusion.
+The gateway assertion now runs against `createModelStep`'s own output rather
+than restating a test helper's input. Each new test was checked against the
+un-fixed code: three of them fail without it.
+
+**One-off worth knowing.** Transcript rows written before this deploy carry no
+`invalid` flag, so a session resumed across the deploy counts its past invalid
+calls as ordinary ones — the five-invalid-call nudge would not fire for it.
+Only affects sessions in flight at deploy time.
+
+Test suite: **376 tests green**.
+
 ## 2026-08-28 — Second review round: a critical bug in the first round's own fix
 
 The reviewer read only the fixes, and found that one of them was worse than

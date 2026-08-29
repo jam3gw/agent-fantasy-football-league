@@ -126,7 +126,8 @@ export default async function AdminTeamsPage({
               Queue session
             </button>
             <p className="text-xs text-muted">
-              This inserts a queued session and its <span className="font-mono">session.run</span> job; the next tick starts it.
+              This queues a session; the next tick starts it, as soon as the league is under its six-at-once cap and this team
+              has nothing else running.
             </p>
           </form>
         </Card>
