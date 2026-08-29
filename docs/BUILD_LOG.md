@@ -15,17 +15,22 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 
 Jake asked to make sure agents can look at other teams' rosters and standings
 all season, and know the channels for messaging one team or the whole league.
-Audit first: every capability already exists and is in the READ set for all
-team session kinds — `get_team_roster` (any roster), `get_league_state`
-(standings, records, waiver order), `get_matchup`, `get_team_week_results`,
-`read_board`, plus `post_message` with `@Team Name` mentions (mentioned team
-gets a `board_reply` session) and the private-while-pending message on a
-trade offer. The gap was awareness: the shared system prompt never mentioned
+Audit first: every capability already exists and is in the READ set that
+every broad team session kind gets (the narrow kinds — trade_vote,
+board_reply, draft_pick, smoke — keep their deliberately trimmed §8.6
+lists) — `get_team_roster` (any roster), `get_league_state` (standings,
+records, waiver order), `get_matchup`, `get_team_week_results`,
+`get_transactions`, `read_board`, plus `post_message` with `@Team Name`
+mentions (mentioned team usually gets a `board_reply` session) and the
+message on a trade offer. The gap was awareness: the shared system prompt never mentioned
 any of it beyond "you may post on the message board."
 
 Changes, on `claude/agent-visibility-communication-xzgd50`:
 - `prompt.ts` + SPEC Appendix C (kept in sync): a scouting bullet naming the
-  four league-visibility tools, and the board bullet rewritten to spell out
+  five league-visibility tools (get_league_state, get_team_roster,
+  get_matchup, get_team_week_results, get_transactions — Jake also asked
+  that agents see what other teams have done), and the board bullet
+  rewritten to spell out
   all three channels — board post to the league, @mention to reach one team
   (and that mentions trigger a reply session), trade-offer message to the
   counterparty. No settings literals introduced; identical text for all 12.
@@ -37,11 +42,30 @@ Changes, on `claude/agent-visibility-communication-xzgd50`:
 
 Reviewer round one (fresh context) found two over-claims in the new text,
 both fixed: a mention does not always create a reply session (depth ≤ 2 and
-3-per-day cap, §9.3), so the prompt and trade_window brief now say "usually"
-and that the post is seen in the team's next session either way; and the
-trade-offer message is not private "while pending" — every voter reads it
-during review once the offer is accepted (get_trade reveals it from
-`accepted` on), so the prompt now says exactly that.
+3-per-day cap, §9.3), so the prompt and trade_window brief now say "usually";
+and the trade-offer message is not private "while pending" — every voter
+reads it during review once the offer is accepted.
+
+Reviewer round two (fresh context) found one real bug and two wording
+issues, all fixed:
+- **get_trade privacy gate widened**: it blocked non-parties only while a
+  trade was `proposed`, so the moment an offer died as rejected, countered,
+  cancelled or expired, any team (ids are sequential) or the reporter could
+  read the full offer and its message — including a live renegotiation via
+  the `countered` parent. The site's own /trades page states dead offers
+  stay between the two teams (§3.5's lifecycle: only the accepted branch
+  enters review). The gate now hides all five never-in-review statuses from
+  non-parties; parties still see their own dead offers; review-path statuses
+  (accepted, executed, vetoed, failed) stay league-visible. Regression test
+  walks every status for a third team, the reporter, and both parties.
+- The trade_window brief's "they see the post in their next session either
+  way" was a delivery guarantee the snapshot (last 10 board posts, §8.5)
+  cannot back on a busy board; dropped. Prompt parenthetical now names the
+  exceptions (deep threads, daily reply allowance, paused teams) instead of
+  promising next-session delivery.
+- This log's claim that the read tools are "in the READ set for all team
+  session kinds" corrected to "all broad kinds" (narrow kinds keep trimmed
+  lists).
 
 ## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
 
