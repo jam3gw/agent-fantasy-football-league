@@ -8,7 +8,7 @@
  * wrong.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import {
   createSession,
@@ -442,6 +442,44 @@ describe("the tick's sweeper is the only thing that starts a session", () => {
     const result = await startQueuedSessions(db, clock, async () => {});
     expect(result.reclaimed).toBe(0);
     expect(await runningCount()).toBe(1);
+  });
+
+  it("a self check-in never takes the slot a lineup check needs", async () => {
+    // §8.10: the league's own schedule outranks anything an agent scheduled
+    // for itself. The check-in is booked first and is due first, so ordering
+    // by age alone would start it ahead of the kickoff-bound sessions.
+    const teamIds = await twelveTeams();
+    const kickoff = new Date("2026-11-08T18:00:00Z");
+    const due = new Date(clock.now().getTime() - 60_000);
+
+    await db.insert(sessions).values(
+      teamIds.slice(0, CAP + 1).map((teamId, i) => ({
+        teamId,
+        kind: (i === 0 ? "self_check_in" : "lineup_check") as "self_check_in" | "lineup_check",
+        trigger: "t",
+        idempotencyKey: `s${i}`,
+        modelId: "m/1",
+        status: "queued" as const,
+        context: {
+          due_at: due.toISOString(),
+          deadline_at: kickoff.toISOString(),
+          ...(i === 0 ? { reason: "check the practice report" } : {}),
+        },
+      })),
+    );
+
+    const started: number[] = [];
+    await startQueuedSessions(db, clock, async (id) => {
+      started.push(id);
+    });
+
+    expect(started).toHaveLength(CAP);
+    const startedKinds = await db.select().from(sessions).where(inArray(sessions.id, started));
+    expect(startedKinds.every((s) => s.kind === "lineup_check")).toBe(true);
+    // The check-in is still queued, waiting for a slot the league does not need.
+    const left = await db.select().from(sessions).where(eq(sessions.status, "queued"));
+    expect(left).toHaveLength(1);
+    expect(left[0]!.kind).toBe("self_check_in");
   });
 
   it("never starts a draft pick: the draft workflow runs those inline", async () => {

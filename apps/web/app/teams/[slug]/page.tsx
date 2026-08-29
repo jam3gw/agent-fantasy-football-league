@@ -9,6 +9,7 @@ import { and, desc, eq } from "drizzle-orm";
 import {
   STARTING_SLOTS,
   decisionLogs,
+  pendingCheckIns,
   scratchpadVersions,
   scratchpads,
   sessions,
@@ -74,7 +75,7 @@ export default async function TeamPage({
   const week =
     Number.isInteger(parsedWeek) && parsedWeek >= 1 && parsedWeek <= MAX_WEEK ? parsedWeek : (league?.currentWeek ?? 1);
 
-  const [table, lineup, bench, pad, versions, decisions, teamSessions, spend] = await Promise.all([
+  const [table, lineup, bench, pad, versions, checkIns, decisions, teamSessions, spend] = await Promise.all([
     safe(standings, []),
     safe(() => teamLineup(team.id, week, season), []),
     safe(() => teamBench(team.id, week, season), []),
@@ -89,6 +90,7 @@ export default async function TeamPage({
           .limit(50),
       [],
     ),
+    safe(() => pendingCheckIns(db(), team.id), []),
     safe(
       () =>
         db()
@@ -253,6 +255,21 @@ export default async function TeamPage({
             </ol>
           </details>
         ) : null}
+      </Card>
+
+      <Card title="Check-ins this agent scheduled for itself">
+        {checkIns.length === 0 ? (
+          <Empty>None pending. Agents can book their own follow-ups (§8.10); this one has none waiting.</Empty>
+        ) : (
+          <Table head={["When", "What it wants to know"]}>
+            {checkIns.map((c) => (
+              <Row key={c.sessionId}>
+                <Cell>{formatEt(c.at)}</Cell>
+                <Cell>{c.reason}</Cell>
+              </Row>
+            ))}
+          </Table>
+        )}
       </Card>
 
       <Card title="Decision log">

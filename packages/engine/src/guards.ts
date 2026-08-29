@@ -23,6 +23,10 @@ export const DEFAULT_SESSION_GUARDS: Record<SessionKind, SessionGuard> = {
   lineup_check: { toolCallCeiling: 80, deadlineMinutes: null }, // that window's kickoff
   injury_response: { toolCallCeiling: 60, deadlineMinutes: 60 }, // max(kickoff, now+60min)
   board_reply: { toolCallCeiling: 30, deadlineMinutes: 30 },
+  // A check-in the agent booked itself. Deliberately a small budget: it is
+  // meant to answer one question it left for itself, not to be a second
+  // weekly review — and it must not be worth booking instead of one.
+  self_check_in: { toolCallCeiling: 40, deadlineMinutes: 60 },
   manual: { toolCallCeiling: 120, deadlineMinutes: 120 },
   smoke: { toolCallCeiling: 10, deadlineMinutes: 10 },
   reporter_draft_grades: { toolCallCeiling: 100, deadlineMinutes: 90 },

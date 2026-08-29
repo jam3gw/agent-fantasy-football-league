@@ -34,6 +34,7 @@ export type SessionKind =
   | "lineup_check"
   | "injury_response"
   | "board_reply"
+  | "self_check_in"
   | "manual"
   | "smoke"
   | "reporter_draft_grades"

@@ -29,8 +29,17 @@ import {
   voteOnTrade,
   writeDecisionLog,
   writeScratchpad,
+  scheduleCheckIn,
+  cancelCheckIn,
+  pendingCheckIns,
+  MAX_PENDING_CHECK_INS,
+  MAX_CHECK_INS_PER_WEEK,
+  MIN_LEAD_MINUTES,
+  MAX_HORIZON_DAYS,
+  MAX_REASON_CHARS as MAX_CHECK_IN_REASON_CHARS,
 } from "@league/engine";
 import type { LineupSlotsInput } from "@league/engine";
+import { formatEt } from "@league/shared";
 import type { LeagueTool, ToolContext, ToolResult } from "./types.ts";
 import { defineTool, fromEngineFailure, toolFailure } from "./types.ts";
 
@@ -485,6 +494,82 @@ export const writeDecisionLogTool = defineTool({
 /* -------------------------------------------------------------------------- */
 
 /** Every write tool (§8.4 table 2), in table order. */
+
+/* -------------------------------------------------------------------------- */
+/* Check-ins the agent schedules for itself (§8.10)                            */
+/* -------------------------------------------------------------------------- */
+
+const scheduleCheckInSchema = z.object({
+  at: z.string().min(1),
+  reason: z.string().min(1).max(MAX_CHECK_IN_REASON_CHARS),
+});
+
+export const scheduleCheckInTool = defineTool({
+  name: "schedule_check_in",
+  description:
+    "Leave yourself a note to come back at a time you choose — a practice report on Thursday, a starter's " +
+    "status an hour before kickoff. `at` is an ISO 8601 instant, at least " +
+    `${MIN_LEAD_MINUTES} minutes out and within ${MAX_HORIZON_DAYS} days. The reason becomes that ` +
+    `session's brief, so write what you want to know. You may hold ${MAX_PENDING_CHECK_INS} check-ins at ` +
+    `once and book ${MAX_CHECK_INS_PER_WEEK} a week. They cost you the same as any other session, and a ` +
+    "check-in cannot book another one.",
+  schema: scheduleCheckInSchema,
+  execute: async (args, ctx) => {
+    const teamId = requireTeam(ctx);
+    if (isFailure(teamId)) return teamId;
+    const result = await scheduleCheckIn(ctx.db, ctx.clock, teamId, {
+      at: new Date(args.at),
+      reason: args.reason,
+      bookedBySessionKind: ctx.kind,
+    });
+    if (!result.ok) return fromEngineFailure(result);
+    return {
+      ok: true,
+      check_in_id: result.value.sessionId,
+      at: result.value.at.toISOString(),
+      at_et: formatEt(result.value.at),
+      reason: result.value.reason,
+    };
+  },
+});
+
+export const cancelCheckInTool = defineTool({
+  name: "cancel_check_in",
+  description: "Cancel one of your own pending check-ins by its id. Use list_check_ins to see them.",
+  schema: z.object({ check_in_id: z.number().int() }),
+  execute: async (args, ctx) => {
+    const teamId = requireTeam(ctx);
+    if (isFailure(teamId)) return teamId;
+    const result = await cancelCheckIn(ctx.db, ctx.clock, teamId, args.check_in_id);
+    if (!result.ok) return fromEngineFailure(result);
+    return { ok: true, cancelled_check_in_id: result.value.sessionId };
+  },
+});
+
+export const listCheckInsTool = defineTool({
+  name: "list_check_ins",
+  description:
+    "Your own check-ins that have not run yet, soonest first, with the reason you gave for each. " +
+    "Read this before booking another one — a duplicate costs you a session.",
+  schema: z.object({}),
+  execute: async (_args, ctx) => {
+    const teamId = requireTeam(ctx);
+    if (isFailure(teamId)) return teamId;
+    const rows = await pendingCheckIns(ctx.db, teamId);
+    return {
+      ok: true,
+      pending: rows.length,
+      max_pending: MAX_PENDING_CHECK_INS,
+      check_ins: rows.map((r) => ({
+        check_in_id: r.sessionId,
+        at: r.at.toISOString(),
+        at_et: formatEt(r.at),
+        reason: r.reason,
+      })),
+    };
+  },
+});
+
 export const WRITE_TOOLS: LeagueTool[] = [
   setTeamNameTool,
   setLineupTool,
@@ -499,4 +584,7 @@ export const WRITE_TOOLS: LeagueTool[] = [
   postMessageTool,
   writeScratchpadTool,
   writeDecisionLogTool,
+  scheduleCheckInTool,
+  cancelCheckInTool,
+  listCheckInsTool,
 ] as unknown as LeagueTool[];

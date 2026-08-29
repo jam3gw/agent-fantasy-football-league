@@ -7,6 +7,7 @@ export * from "./locks.ts";
 export * from "./roster.ts";
 export * from "./transactions.ts";
 export * from "./events.ts";
+export * from "./checkIns.ts";
 export * from "./board.ts";
 export * from "./scratchpad.ts";
 export * from "./decisionLog.ts";

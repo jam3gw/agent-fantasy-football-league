@@ -119,3 +119,38 @@ describe("tool sets (§8.6)", () => {
     expect(a).toBe(b); // the same instance, so no model can get a different schema
   });
 });
+
+describe("§8.10 — check-in tools", () => {
+  it("a check-in cannot book another check-in, or start a trade, or post", () => {
+    const names = toolsForKind("self_check_in").map((t) => t.name);
+    // The chaining guard, at the tool set as well as in the engine.
+    expect(names).not.toContain("schedule_check_in");
+    // Proposing a trade and posting to the board have their own windows.
+    expect(names).not.toContain("propose_trade");
+    expect(names).not.toContain("post_message");
+    // But it can act on what it finds — that is the point of booking it.
+    for (const tool of ["set_lineup", "add_free_agent", "drop_player", "submit_waiver_claims", "respond_to_trade"]) {
+      expect(names, `a check-in needs ${tool}`).toContain(tool);
+    }
+    expect(names).toContain("write_decision_log");
+  });
+
+  it("only the kinds with room to think ahead may schedule one", () => {
+    for (const kind of ["weekly_review", "post_waivers", "lineup_check", "injury_response", "onboarding"] as const) {
+      expect(toolsForKind(kind).map((t) => t.name), kind).toContain("schedule_check_in");
+    }
+    // A draft pick has 180 seconds and one job; smoke is a smoke test; the
+    // reporter has no team to check in on.
+    for (const kind of ["draft_pick", "smoke", "trade_vote", "reporter_recap"] as const) {
+      expect(toolsForKind(kind).map((t) => t.name), kind).not.toContain("schedule_check_in");
+    }
+  });
+
+  it("no reporter kind can schedule or cancel a check-in", () => {
+    for (const kind of ["reporter_draft_grades", "reporter_recap", "reporter_preview", "reporter_trade_note"] as const) {
+      const names = toolsForKind(kind).map((t) => t.name);
+      expect(names).not.toContain("schedule_check_in");
+      expect(names).not.toContain("cancel_check_in");
+    }
+  });
+});

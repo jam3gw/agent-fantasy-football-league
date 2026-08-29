@@ -27,6 +27,13 @@ const ALL = [...READ_TOOLS, ...WRITE_TOOLS, ...DRAFT_TOOLS, ...REPORTER_TOOLS];
 const READ = READ_TOOLS.map((t) => t.name);
 const SCRATCHPAD = ["read_scratchpad", "write_scratchpad"];
 const LOG = ["write_decision_log"];
+/**
+ * §8.10: the kinds that may book a check-in. Every team kind that has room to
+ * think ahead — not `draft_pick` (180 seconds and one job), not `smoke` (it is
+ * a smoke test), and not `self_check_in` itself, which is the chaining guard
+ * the engine also enforces.
+ */
+const CHECK_IN = ["schedule_check_in", "cancel_check_in", "list_check_ins"];
 
 /** Read tools minus the scratchpad reader, which the scratchpad group re-adds. */
 const READ_ONLY_NO_PAD = READ.filter((n) => n !== "read_scratchpad");
@@ -34,6 +41,7 @@ const READ_ONLY_NO_PAD = READ.filter((n) => n !== "read_scratchpad");
 const SETS: Record<SessionKind, string[]> = {
   onboarding: [
     ...READ_ONLY_NO_PAD,
+    ...CHECK_IN,
     "get_draft_state",
     "get_available_players",
     "set_team_name",
@@ -53,6 +61,7 @@ const SETS: Record<SessionKind, string[]> = {
   ],
   weekly_review: [
     ...READ_ONLY_NO_PAD,
+    ...CHECK_IN,
     "set_lineup",
     "submit_waiver_claims",
     "cancel_waiver_claims",
@@ -66,6 +75,7 @@ const SETS: Record<SessionKind, string[]> = {
   ],
   post_waivers: [
     ...READ_ONLY_NO_PAD,
+    ...CHECK_IN,
     "add_free_agent",
     "drop_player",
     "set_lineup",
@@ -99,6 +109,7 @@ const SETS: Record<SessionKind, string[]> = {
   ],
   lineup_check: [
     ...READ_ONLY_NO_PAD,
+    ...CHECK_IN,
     "set_lineup",
     "add_free_agent",
     "drop_player",
@@ -107,6 +118,7 @@ const SETS: Record<SessionKind, string[]> = {
   ],
   injury_response: [
     ...READ_ONLY_NO_PAD,
+    ...CHECK_IN,
     "set_lineup",
     "add_free_agent",
     "drop_player",
@@ -115,6 +127,27 @@ const SETS: Record<SessionKind, string[]> = {
     ...LOG,
   ],
   board_reply: ["read_board", "get_league_state", "get_team_roster", "post_message", ...LOG],
+  /**
+   * §8.10. A check-in exists to answer the question the agent left itself and
+   * act on the answer, so it can do anything time-sensitive: the lineup, the
+   * wire, a trade waiting on a reply. It cannot *propose* a trade or post to
+   * the board — those have their own windows and their own limits — and it
+   * cannot book another check-in, so it can never become a way to run a
+   * second weekly review or to keep going past the ceiling.
+   */
+  self_check_in: [
+    ...READ_ONLY_NO_PAD,
+    "list_check_ins",
+    "cancel_check_in",
+    "set_lineup",
+    "add_free_agent",
+    "drop_player",
+    "submit_waiver_claims",
+    "cancel_waiver_claims",
+    "respond_to_trade",
+    ...SCRATCHPAD,
+    ...LOG,
+  ],
   // The commissioner's free-objective session: every team tool except voting
   // and naming, which belong to their own kinds (§8.6).
   manual: [
