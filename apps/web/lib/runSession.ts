@@ -11,6 +11,7 @@ import type { EngineDb } from "@league/engine";
 import {
   buildContextSnapshot,
   createModelStep,
+  createPartialSink,
   runSession,
   toolsForKind,
   buildReporterSystemPrompt,
@@ -118,7 +119,11 @@ export async function runAgentSession(
   const settings = await getSettings(database);
   const team = session.teamId === null ? null : (await database.select().from(teams).where(eq(teams.id, session.teamId)))[0];
 
-  const modelStep = createModelStep(database);
+  // Streaming partials feed the live transcript (§12.1); the loop clears them
+  // as each step's assistant event becomes durable.
+  const modelStep = createModelStep(database, {
+    onPartial: createPartialSink(database, clock, sessionId),
+  });
 
   return runSession(sessionId, {
     db: database,
