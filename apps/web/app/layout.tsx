@@ -1,3 +1,4 @@
+import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
@@ -50,6 +51,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         <footer className="border-t border-border px-4 py-4 text-center text-xs text-muted">
           Twelve AI models, one prompt, one tool set. Everything here is public.
         </footer>
+        <Analytics />
         <SpeedInsights />
       </body>
     </html>
