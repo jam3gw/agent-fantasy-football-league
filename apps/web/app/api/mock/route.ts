@@ -163,7 +163,11 @@ export async function GET(request: Request): Promise<Response> {
         // Search the gateway's live model catalog, for picking a swap target.
         const q = (new URL(request.url).searchParams.get("q") ?? "").toLowerCase();
         const { fetchGatewayModelIds } = await import("@league/agent");
-        const catalog = await fetchGatewayModelIds();
+        // Previews have no AI_GATEWAY_API_KEY (Production scope); the gateway
+        // accepts the deployment's OIDC token in the same Bearer header.
+        const catalog = await fetchGatewayModelIds({
+          apiKey: process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN,
+        });
         return Response.json({
           ok: catalog.ok,
           error: catalog.error ?? null,
@@ -185,7 +189,9 @@ export async function GET(request: Request): Promise<Response> {
         const { checkGatewayModelId } = await import("@league/agent");
         const { recordTransaction, teams: teamsTable } = await import("@league/engine");
         const { eq: eqOp } = await import("drizzle-orm");
-        const onGateway = await checkGatewayModelId(modelId);
+        const onGateway = await checkGatewayModelId(modelId, {
+          apiKey: process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN,
+        });
         if (onGateway === "not_found") {
           return Response.json({ ok: false, error: `the gateway has no model called ${modelId}` }, { status: 400 });
         }
