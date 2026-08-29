@@ -51,7 +51,11 @@ as the wire shape until old rows drain. (5) The engine now refuses a
 id exists — the only caller passes its own runner-stamped session id (a model
 cannot supply the argument; zod strips extras), and a per-booking existence
 query buys nothing for a link the team page already renders conditionally.
-Reviewer round two is running; its outcome lands in the next log update.
+Reviewer round two (fresh context): no new findings — all five fixes verified,
+including that `briefs.generated.ts` reproduces byte-for-byte from the
+markdown and that the legacy-row test genuinely flows through
+`pendingCheckIns` (the raw insert defaults to `queued`). Loop closed. Full
+suite green: 534 tests / 45 files; lint and typecheck clean.
 
 ## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
 
