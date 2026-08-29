@@ -6,24 +6,31 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 
 
 
-**`COMMISSIONER_PASSWORD` is not set in Vercel — you cannot log in to `/admin`.**
-Measured, not inferred: `POST /api/admin/login` on production answers 500, and
-the runtime log is `Error: COMMISSIONER_PASSWORD is not set` thrown from
-`env.commissionerPassword`. Not the stale-snapshot trap that `CRON_SECRET` hit
-— the deployment serving it (`dpl_gTM844jkErfWAsPwGufFfuY22aYi`) was built
-minutes before the probe, so its environment snapshot is current and the
-variable simply is not there, or is not scoped to Production.
+**`SESSION_SECRET` is not set — `/admin` is still unreachable, one variable
+short.** `COMMISSIONER_PASSWORD` was set and redeployed on 2026-08-29 and is
+confirmed working: a wrong password now answers 303 rather than 500. But the
+signing secret beside it is missing, and the login cannot complete without it.
 
-Fix is `docs/SETUP.md` §2: Vercel → the project → Settings → Environment
-Variables → add `COMMISSIONER_PASSWORD`, scope **Production**, then redeploy.
-While you are there, confirm `SESSION_SECRET` (`openssl rand -hex 32`) — this
-probe cannot see it, because `passwordMatches` throws before the cookie is ever
-signed, so a missing `SESSION_SECRET` would look identical from outside.
+Measured on `dpl_4cYcAdoXvZp6JNwDZAYxvJKWyxRH`:
+`Error: SESSION_SECRET is not set`, thrown from `env.sessionSecret`.
 
-Nothing else is blocked by it: every public page is fine, the tick does not
-authenticate this way, and no agent path touches admin auth. But every "check
-`/admin/health`" instruction in SETUP.md and RUNBOOK.md is unreachable until it
-is set, which is most of the pre-draft checklist.
+**A correct password will also 500**, which is the part worth knowing before
+trying it and concluding the password is wrong. `passwordMatches` returns first,
+then `issueCookieValue` calls `sign()` — so the wrong-password path (303) never
+touches the secret and looks healthy, while the success path throws on the very
+next line. Same for any request carrying a cookie: `verifyCookieValue` signs
+too, so `/admin/health` answers 500 with a cookie and 307 without one.
+
+Fix: `openssl rand -hex 32`, add as `SESSION_SECRET` scoped to **Production**,
+redeploy. Then `/admin/health` becomes reachable and the rest of the SETUP.md
+checklist unblocks.
+
+Why it took two rounds to see: the first probe could not reach this. It sent no
+cookie and a wrong password, so both code paths returned before any signing
+happened — `COMMISSIONER_PASSWORD` masked `SESSION_SECRET` completely. Sending a
+syntactically valid but bogus cookie (`<digits>.<junk>`) is what forces `sign()`
+to run, and is the cheap way to check this variable from outside without the
+password.
 
 *(the items below are FYI)*
 
