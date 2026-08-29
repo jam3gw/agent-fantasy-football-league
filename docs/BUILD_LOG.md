@@ -133,9 +133,15 @@ recorded successful sends — the alert path has now worked for real.
   paragraph), SETUP (§3 check, §6 rewritten as done, §6a external monitor +
   four Vercel dashboard switches, fails-silently table), this entry.
 
-**Verify after deploy** (recorded below when done): `/api/healthz` answers 200
-from outside; `tick.capacity`, `db.size`, `gateway.credits` rows appear green
-in production `health` within the hour.
+**Verified after deploy, 23:04 UTC**: `/api/healthz` answers
+`200 {"ok":true,"lastTickAt":...}` from outside on the first post-deploy
+tick; `tick.capacity` and `db.size` green in production `health`; and
+`gateway.credits` fired a **real alarm on its first run** — the balance is
+$97.54, under the $100 line, and `email.send` plus
+`notify:gateway_credits:2026-08-29` confirm the email left. The watchdog
+paid for itself before the deploy was ten minutes old: **Jake, top up the
+gateway and check auto top-up** — today's smoke tests and the mock draft
+ate the balance, and at $0 every session fails at once.
 
 ### Left alone deliberately
 
