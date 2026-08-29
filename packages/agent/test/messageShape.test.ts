@@ -87,6 +87,14 @@ const pingTool: LeagueTool = defineTool({
     return { week: 2, teams: 12 };
   },
 });
+const dateTool: LeagueTool = defineTool({
+  name: "player_research",
+  description: "returns a live Date, the way a drizzle timestamp column arrives",
+  schema: z.object({}),
+  async execute() {
+    return { items: [], updated_at: new Date("2026-08-29T16:28:34.909Z"), nested: { at: new Date() } };
+  },
+});
 const failingTool: LeagueTool = defineTool({
   name: "set_lineup",
   description: "fails on purpose",
@@ -191,6 +199,32 @@ describe("every message handed to the model is a valid ModelMessage", () => {
     expect(part.type).toBe("tool-result");
     expect((part.output as { type: string }).type).toBe("json");
     expect((part.output as { value: { week: number } }).value.week).toBe(2);
+  });
+
+  it("holds when a tool returns a live Date — the session-869 failure, caught before the model sees it", async () => {
+    // A drizzle timestamp column arrives as a Date instance; the SDK's
+    // JSON-value schema rejects it on the NEXT step's replay. The transcript's
+    // JSONB storage serialized it, which is why a resumed session never saw
+    // the bug — only live second steps died. toolOutput now normalizes.
+    const id = await makeSession();
+    const seen: ModelMessage[][] = [];
+    const deps = capturingDeps(
+      [
+        step({ toolCalls: [{ toolCallId: "c1", toolName: "player_research", args: {} }] }),
+        step({ toolCalls: [{ toolCallId: "c2", toolName: "write_decision_log", args: { summary: "done" } }] }),
+      ],
+      seen,
+    );
+    deps.tools = [...deps.tools, dateTool];
+    const result = await runSession(id, deps);
+    expect(result.status).toBe("succeeded");
+    expect(seen.length).toBeGreaterThanOrEqual(2);
+    seen.forEach((messages, i) => expectValid(messages, `step ${i + 1}`));
+
+    // The Date reached the model as its JSON form, identical to the transcript.
+    const part = (seen[1]!.find((m) => m.role === "tool")!.content as Array<Record<string, unknown>>)[0]!;
+    const value = (part.output as { value: { updated_at: unknown } }).value;
+    expect(value.updated_at).toBe("2026-08-29T16:28:34.909Z");
   });
 
   it("holds for a failed tool result, which is data the agent reads, not a transport error", async () => {
