@@ -15,7 +15,7 @@
  */
 import { and, eq, gte, inArray, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
-import { checkInKey } from "@league/shared";
+import { ceilToFiveMinutes, checkInKey } from "@league/shared";
 import type { EngineDb } from "./db/index.ts";
 import { sessions, teams } from "./db/schema.ts";
 import type { EngineResult } from "./errors.ts";
@@ -72,7 +72,12 @@ export async function scheduleCheckIn(
     }
 
     if (Number.isNaN(input.at.getTime())) return fail("bad_time", "that is not a time");
-    const leadMs = input.at.getTime() - now.getTime();
+    // §9.1 sweeps the queue every five minutes, so a check-in booked for 10:02
+    // would start at 10:05 regardless. Rounding up puts the time the agent is
+    // told and the time it runs on the same grid, and never makes a check-in
+    // earlier than it asked for.
+    const at = ceilToFiveMinutes(input.at);
+    const leadMs = at.getTime() - now.getTime();
     if (leadMs < MIN_LEAD_MINUTES * 60_000) {
       return fail(
         "bad_time",
@@ -114,16 +119,16 @@ export async function scheduleCheckIn(
       teamId,
       kind: "self_check_in",
       trigger: "agent:schedule_check_in",
-      idempotencyKey: checkInKey(teamId, input.at.toISOString()),
+      idempotencyKey: checkInKey(teamId, at.toISOString()),
       modelId: team.modelId,
-      dueAt: input.at,
+      dueAt: at,
       now,
       context: { week: settings.currentWeek, reason },
     });
     if (sessionId === null) {
       return fail("invalid_args", "you already have a check-in booked for that minute");
     }
-    return ok({ sessionId, at: input.at, reason });
+    return ok({ sessionId, at, reason });
   });
 }
 

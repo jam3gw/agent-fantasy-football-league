@@ -14,6 +14,7 @@ import { seedLeague, seedTeams } from "./helpers/factories.ts";
 import {
   MAX_CHECK_INS_PER_WEEK,
   MAX_PENDING_CHECK_INS,
+  MIN_LEAD_MINUTES,
   cancelCheckIn,
   pendingCheckIns,
   scheduleCheckIn,
@@ -55,7 +56,7 @@ describe("scheduling", () => {
     expect(row.teamId).toBe(teamIds[0]!);
     expect(row.context.reason).toContain("Achane");
     // The sweeper starts it from `due_at`, and the week is stamped so its cost
-    // lands in this week's rollup (§8.7).
+    // lands in this week's rollup (§8.7). `in2h()` is already on the grid.
     expect(row.context.due_at).toBe(in2h().toISOString());
     expect(row.context.week).toBe(7);
     // It runs on the team's own model, like every other session for that team.
@@ -176,5 +177,67 @@ describe("cancelling", () => {
     if (!r.ok) throw new Error("setup");
     await db.update(sessions).set({ status: "succeeded" }).where(eq(sessions.id, r.value.sessionId));
     expect(await cancelCheckIn(db, clock, teamIds[0]!, r.value.sessionId)).toMatchObject({ ok: false });
+  });
+});
+
+describe("times land on the five-minute grid the sweeper runs on", () => {
+  it("rounds up, so a check-in is never earlier than asked and never waits for the next sweep", async () => {
+    // 10:02 would sit until the 10:05 sweep anyway; booking it at 10:05 means
+    // the time the agent is told is the time it runs.
+    const asked = new Date("2026-10-20T17:32:41.500Z");
+    const r = await scheduleCheckIn(db, clock, teamIds[0]!, { at: asked, reason: "practice report" });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.value.at.toISOString()).toBe("2026-10-20T17:35:00.000Z");
+    expect(r.value.at.getTime()).toBeGreaterThan(asked.getTime());
+
+    const row = (await db.select().from(sessions).where(eq(sessions.id, r.value.sessionId)))[0]!;
+    expect(row.context.due_at).toBe("2026-10-20T17:35:00.000Z");
+  });
+
+  it("leaves a time already on the grid alone", async () => {
+    const r = await scheduleCheckIn(db, clock, teamIds[0]!, {
+      at: new Date("2026-10-20T17:35:00.000Z"),
+      reason: "on the grid",
+    });
+    expect(r.ok && r.value.at.toISOString()).toBe("2026-10-20T17:35:00.000Z");
+  });
+
+  it("two requests that round to the same slot are one booking", async () => {
+    const first = await scheduleCheckIn(db, clock, teamIds[0]!, {
+      at: new Date("2026-10-20T17:31:00Z"),
+      reason: "first",
+    });
+    const second = await scheduleCheckIn(db, clock, teamIds[0]!, {
+      at: new Date("2026-10-20T17:34:00Z"),
+      reason: "same slot",
+    });
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    expect(await pendingCheckIns(db, teamIds[0]!)).toHaveLength(1);
+  });
+
+  it("the minimum lead is measured after rounding, never before", async () => {
+    // Rounding only ever pushes a time later, so the guarantee is about the
+    // time the check-in actually runs: whatever is accepted is at least the
+    // minimum out. A request 26 minutes out becomes a booking at 30 — that is
+    // the rule holding, not being dodged.
+    const nearly = await scheduleCheckIn(db, clock, teamIds[0]!, {
+      at: new Date(new Date(NOW).getTime() + 26 * 60_000),
+      reason: "just under",
+    });
+    expect(nearly.ok).toBe(true);
+    if (nearly.ok) {
+      const lead = nearly.value.at.getTime() - new Date(NOW).getTime();
+      expect(lead).toBeGreaterThanOrEqual(MIN_LEAD_MINUTES * 60_000);
+    }
+
+    // And nothing rounding can do rescues "come back in a minute", which is
+    // what the minimum exists to refuse.
+    const soon = await scheduleCheckIn(db, clock, teamIds[0]!, {
+      at: new Date(new Date(NOW).getTime() + 60_000),
+      reason: "right now",
+    });
+    expect(!soon.ok && soon.error).toBe("bad_time");
   });
 });

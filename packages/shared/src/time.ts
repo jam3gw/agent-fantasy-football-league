@@ -149,3 +149,18 @@ export function formatEt(utc: Date): string {
   }).format(utc);
   return `${s} ET`;
 }
+
+/**
+ * Round up to the next five-minute boundary, seconds discarded.
+ *
+ * The tick sweeps the session queue every five minutes (§9.1), so a session
+ * booked for 10:02 would not start until 10:05 anyway. Rounding *up* rather
+ * than to the nearest keeps a stated minimum lead a real minimum, and rounding
+ * at all means the time an agent is told matches the time it actually runs.
+ * A time already on the grid is returned unchanged.
+ */
+export function ceilToFiveMinutes(at: Date): Date {
+  const ms = at.getTime();
+  const step = 5 * 60_000;
+  return new Date(Math.ceil(ms / step) * step);
+}

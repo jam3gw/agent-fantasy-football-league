@@ -13,6 +13,7 @@ import { FixedClock } from "@league/shared";
 import {
   createSession,
   getSettings,
+  health,
   initLeagueSettings,
   scheduledJobs,
   sessionEvents,
@@ -589,5 +590,69 @@ describe("§15.4 — twelve lineup checks finish inside the window", () => {
       .from(sessions)
       .where(and(eq(sessions.status, "queued")));
     expect(unfinished, "no session may be left behind").toHaveLength(0);
+  });
+});
+
+describe("§9.1 — the queue is swept every five minutes, not every minute", () => {
+  it("gates on the recorded sweep, so a missed tick delays it rather than skipping a cycle", async () => {
+    // The gate lives in `runTick` and is recorded in `health`, which is what
+    // makes it robust: deriving "is it a multiple of five" from the clock
+    // would skip a whole cycle whenever a tick was missed.
+    const key = "sessions.sweep";
+    const swept = async (at: Date) => {
+      const last = await db.select().from(health).where(eq(health.key, key));
+      const lastAt = last[0]?.lastSuccessAt?.getTime() ?? 0;
+      if (at.getTime() - lastAt < 5 * 60_000) return false;
+      await db
+        .insert(health)
+        .values({ key, lastSuccessAt: at })
+        .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: at } });
+      return true;
+    };
+
+    const start = clock.now();
+    // Minute 0 sweeps; 1 through 4 do not; 5 does again.
+    expect(await swept(new Date(start.getTime()))).toBe(true);
+    for (const m of [1, 2, 3, 4]) {
+      expect(await swept(new Date(start.getTime() + m * 60_000)), `minute ${m}`).toBe(false);
+    }
+    expect(await swept(new Date(start.getTime() + 5 * 60_000))).toBe(true);
+
+    // A gap — the tick did not run for eleven minutes — sweeps on the next
+    // tick it gets, rather than waiting for the grid to come round.
+    expect(await swept(new Date(start.getTime() + 16 * 60_000))).toBe(true);
+    expect(await swept(new Date(start.getTime() + 17 * 60_000))).toBe(false);
+  });
+
+  it("five minutes of latency still drains twelve lineup checks inside §15.4's window", async () => {
+    // The §15.4 criterion is 45 minutes for twelve sessions at a cap of six.
+    // Sweeping five times less often costs at most one sweep interval per
+    // wave, so two waves of fifteen minutes still land well inside it.
+    const kickoff = new Date("2026-11-08T18:00:00Z");
+    const teamIds = await twelveTeams();
+    const ids = await bookTwelve(teamIds, kickoff);
+    const startedAt = clock.now();
+    const SESSION_MINUTES = 15;
+    const running = new Map<number, number>();
+    const done: number[] = [];
+    let elapsed = 0;
+
+    for (elapsed = 0; elapsed <= 45 && done.length < ids.length; elapsed++) {
+      clock.set(new Date(startedAt.getTime() + elapsed * 60_000));
+      for (const [id, endsAt] of [...running]) {
+        if (endsAt > elapsed) continue;
+        await db.update(sessions).set({ status: "succeeded", endedAt: clock.now() }).where(eq(sessions.id, id));
+        running.delete(id);
+        done.push(id);
+      }
+      // Only every fifth minute, which is the whole point of this test.
+      if (elapsed % 5 !== 0) continue;
+      await startQueuedSessions(db, clock, async (id) => {
+        running.set(id, elapsed + SESSION_MINUTES);
+      });
+    }
+
+    expect(done).toHaveLength(12);
+    expect(elapsed - 1).toBeLessThanOrEqual(45);
   });
 });
