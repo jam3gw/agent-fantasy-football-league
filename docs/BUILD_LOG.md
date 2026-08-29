@@ -6,36 +6,47 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 
 
 
-**`SESSION_SECRET` is not set — `/admin` is still unreachable, one variable
-short.** `COMMISSIONER_PASSWORD` was set and redeployed on 2026-08-29 and is
-confirmed working: a wrong password now answers 303 rather than 500. But the
-signing secret beside it is missing, and the login cannot complete without it.
-
-Measured on `dpl_4cYcAdoXvZp6JNwDZAYxvJKWyxRH`:
-`Error: SESSION_SECRET is not set`, thrown from `env.sessionSecret`.
-
-**A correct password will also 500**, which is the part worth knowing before
-trying it and concluding the password is wrong. `passwordMatches` returns first,
-then `issueCookieValue` calls `sign()` — so the wrong-password path (303) never
-touches the secret and looks healthy, while the success path throws on the very
-next line. Same for any request carrying a cookie: `verifyCookieValue` signs
-too, so `/admin/health` answers 500 with a cookie and 307 without one.
-
-Fix: `openssl rand -hex 32`, add as `SESSION_SECRET` scoped to **Production**,
-redeploy. Then `/admin/health` becomes reachable and the rest of the SETUP.md
-checklist unblocks.
-
-Why it took two rounds to see: the first probe could not reach this. It sent no
-cookie and a wrong password, so both code paths returned before any signing
-happened — `COMMISSIONER_PASSWORD` masked `SESSION_SECRET` completely. Sending a
-syntactically valid but bogus cookie (`<digits>.<junk>`) is what forces `sign()`
-to run, and is the cheap way to check this variable from outside without the
-password.
-
-*(the items below are FYI)*
+*(none blocking — FYI items below)*
 
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` were assumed to be in Vercel — as of 2026-08-29 `COMMISSIONER_PASSWORD` measurably is not (see above), so treat the rest of that list as unconfirmed too. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
+
+## 2026-08-29 — Commissioner login works; both admin secrets confirmed live
+
+`COMMISSIONER_PASSWORD` and `SESSION_SECRET` are both set and scoped to
+Production. `/admin` is reachable. Verified from outside without the password:
+
+| Probe | Answer | Means |
+|---|---|---|
+| `POST /api/admin/login`, wrong password | 303 | `COMMISSIONER_PASSWORD` is set |
+| `GET /admin/health` with `<digits>.<junk>` cookie | 307 | `SESSION_SECRET` is set **and the forged signature was rejected** |
+| `GET /api/admin/health`, same cookie | 401 | same, on the API branch |
+| `GET /admin/health`, no cookie | 307 | proxy redirect, as designed |
+
+The forged-cookie rows are the ones that carry weight: 500 would mean the
+secret is missing, but 307/401 means `sign()` ran *and* the signature check
+said no. A cookie that merely failed to throw would have been indistinguishable
+from one that was accepted.
+
+`/api/cron/tick` is 200 every minute across all four deployments in the window,
+so the scheduler is alive and `/admin/health`'s banner has what it keys on.
+Vercel's error table shows all three admin-secret error groups last occurring at
+15:54:21 or earlier, on deployments already replaced — nothing since.
+
+**It took two rounds, and the middle round is the lesson.** The first fix set
+`COMMISSIONER_PASSWORD` only, and that made the *wrong*-password path return a
+healthy-looking 303 while a correct password still answered 500 — visible in the
+error table as one `SESSION_SECRET is not set` on `/api/admin/login` at 15:54:21,
+which is a real login attempt with the real password failing. Anyone reading
+that 500 without the stack trace would reasonably conclude the password was
+wrong. The order in `login/route.ts` is why: `passwordMatches` returns first,
+`issueCookieValue` signs on the next line, so the two secrets fail on opposite
+branches of the same handler.
+
+The cheap external check for a signing secret, worth keeping: send a
+syntactically valid but bogus cookie (`<digits>.<junk>`). `verifyCookieValue`
+returns early on a malformed value and never signs, so only the well-formed
+shape reaches `sign()` and exposes whether the key exists.
 
 ## 2026-08-29 — Vercel Web Analytics on the public site
 
