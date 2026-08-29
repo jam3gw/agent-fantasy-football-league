@@ -14,6 +14,7 @@ import {
   rankingBefore,
   summarizeBody,
   teamName,
+  transactionPlayerIds,
   remainingPoints,
   winChanceFromMargin,
   type FinalGame,
@@ -221,6 +222,90 @@ describe("transaction descriptions", () => {
 
   it("degrades to a nameless sentence when an id cannot be resolved", () => {
     expect(describeTransaction("waiver_add", { playerId: "gone" }, () => null)).toBe("Won a waiver claim.");
+  });
+
+  it("describes a draft pick from the snake_case payload the draft paths write", () => {
+    // make_pick (packages/agent/src/tools/draft.ts) records `player_id`,
+    // `name`, `position`, `nfl_team`, `pick_no`, `round`, `reason` — reading
+    // only `playerId` is why every pick used to read "Made a draft pick."
+    expect(
+      describeTransaction("draft_pick", {
+        pick_no: 5,
+        round: 1,
+        player_id: "p1",
+        name: "Bijan Robinson",
+        position: "RB",
+        nfl_team: "ATL",
+        made_by: "agent",
+        reason: "Best back on the board.",
+      }),
+    ).toBe("Drafted Bijan Robinson (RB, ATL) at pick 5 (round 1). “Best back on the board.”");
+  });
+
+  it("resolves an autopick through the id, since the workflow writes no name", () => {
+    // The auto-pick path (apps/web/lib/draft.ts) records only `player_id`.
+    const names: Record<string, string> = { p9: "Tank Bigsby" };
+    expect(
+      describeTransaction(
+        "draft_pick",
+        { pick_no: 47, round: 4, player_id: "p9", made_by: "autopick" },
+        (id) => names[id] ?? null,
+      ),
+    ).toBe("Auto-picked Tank Bigsby at pick 47 (round 4) when the clock ran out.");
+  });
+
+  it("names both sides of a trade from the id arrays trades.ts writes", () => {
+    const names: Record<string, string> = { p1: "Cade Otton", p2: "Rome Odunze", p3: "Jake Ferguson" };
+    expect(
+      describeTransaction(
+        "trade",
+        { tradeId: 3, givePlayerIds: ["p1", "p2"], getPlayerIds: ["p3"] },
+        (id) => names[id] ?? null,
+      ),
+    ).toBe("Traded away Cade Otton, Rome Odunze for Jake Ferguson.");
+  });
+
+  it("describes a lineup change from its diff and caps the list", () => {
+    const names: Record<string, string> = { a: "Puka Nacua", b: "Cooper Kupp", c: "Jayden Reed" };
+    expect(
+      describeTransaction(
+        "lineup",
+        { diff: { WR1: { from: "b", to: "a" }, FLEX: { from: null, to: "c" } } },
+        (id) => names[id] ?? null,
+      ),
+    ).toBe("Set its lineup: Puka Nacua in for Cooper Kupp at WR1; Jayden Reed in at FLEX.");
+    expect(
+      describeTransaction(
+        "lineup",
+        {
+          diff: {
+            WR1: { from: "b", to: "a" },
+            FLEX: { from: null, to: "c" },
+            RB2: { from: "a", to: "b" },
+          },
+        },
+        (id) => names[id] ?? null,
+      ),
+    ).toBe("Set its lineup: Puka Nacua in for Cooper Kupp at WR1; Jayden Reed in at FLEX; and 1 more change.");
+    expect(describeTransaction("lineup", { carried_over: true, slots: {} })).toBe(
+      "Carried last week's lineup over.",
+    );
+    // Ids nobody can resolve still yield a count rather than a blank sentence.
+    expect(describeTransaction("lineup", { diff: { WR1: { from: "x", to: "y" } } }, () => null)).toBe(
+      "Changed 1 lineup slot.",
+    );
+  });
+
+  it("collects every id shape the engine writes into payloads", () => {
+    expect(transactionPlayerIds({ playerId: "a", dropPlayerId: "b" })).toEqual(["a", "b"]);
+    expect(transactionPlayerIds({ player_id: "c" })).toEqual(["c"]);
+    expect(transactionPlayerIds({ givePlayerIds: ["d", "e"], getPlayerIds: ["f"] })).toEqual(["d", "e", "f"]);
+    expect(transactionPlayerIds({ diff: { WR1: { from: "g", to: "h" }, K: { from: null, to: "i" } } })).toEqual([
+      "g",
+      "h",
+      "i",
+    ]);
+    expect(transactionPlayerIds({ playerId: 42, givePlayerIds: "not-a-list", diff: [] })).toEqual([]);
   });
 
   it("still says something useful when the payload is empty", () => {
