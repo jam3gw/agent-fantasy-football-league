@@ -219,7 +219,7 @@ export function describeTransaction(
     return list
       .filter((v): v is string => typeof v === "string" && v !== "")
       .map((id) => nameOf(id))
-      .filter((n): n is string => n !== null);
+      .filter((n): n is string => n !== null && n !== "");
   };
   const added =
     resolved("playerId") ??
