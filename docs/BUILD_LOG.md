@@ -145,6 +145,14 @@ round three: the mention-exception list now includes eliminated teams
 (events.ts skips them from week 15 on), and the trade-message sentence
 states the exact boundary — review entry, not acceptance.
 
+Merged to main as 956940f (after twice bringing in a fast-moving main:
+the mock-draft/transcript batch, then the Vercel/Neon audit; only
+BUILD_LOG conflicted, both sides kept; 599 tests green on the merged
+tree). Production deploy dpl_HoqjKPdrzbAwn3VG787FxwJ7pSQP is READY on
+that commit and aliased to league.jake-moses.com; verified live:
+/api/healthz, /api/public/pulse and /api/public/standings answer 200,
+and /trades serves this branch's new footer text.
+
 Reviewer round four (fresh context) traced every write to `reviewEndsAt`
 and every status transition, commissioner reversal included, and found the
 gate sound in both directions (a reversed trade keeps its timestamp and
