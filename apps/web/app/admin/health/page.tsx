@@ -170,9 +170,13 @@ export default async function AdminHealthPage({
             <>
               <strong>The scheduler has never run.</strong> Nothing is ingesting data, no sessions will start, and the
               season cannot begin. Every row on this page is written by the tick, so an empty page is this, not calm.
-              The usual cause is <span className="font-mono">CRON_SECRET</span> missing from the Vercel project: the
-              cron fires every minute and the tick answers 401. Set it in Settings → Environment Variables for
-              Production, redeploy, and this banner clears within a minute.
+              The usual cause is <span className="font-mono">CRON_SECRET</span>: the cron fires every minute and the
+              tick answers 401. Set it in Settings → Environment Variables for <strong>Production</strong>, then{" "}
+              <strong>redeploy</strong> — a deployment only ever sees the environment snapshot taken when it was
+              built, so setting the variable does nothing for the deployment already running, and the 401s continue
+              unchanged. Confirm in the Vercel runtime logs that{" "}
+              <span className="font-mono">/api/cron/tick</span> has turned 200. This banner clears within a minute of
+              the first successful tick.
             </>
           ) : (
             <>

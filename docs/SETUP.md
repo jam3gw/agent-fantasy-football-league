@@ -36,12 +36,24 @@ is frozen: no ingest, no sessions, no season.
 1. Generate a secret: `openssl rand -hex 32`
 2. Vercel → the project → **Settings → Environment Variables**
 3. Add `CRON_SECRET` with that value, scoped to **Production** (tick the box)
-4. **Redeploy.** Environment variables only reach a deployment built after they
-   were set — adding the variable alone changes nothing.
+4. **Redeploy.** This is the step everyone misses. A deployment only ever sees
+   the environment snapshot taken when it was *built*, so adding the variable
+   does nothing for the deployment currently serving traffic — the cron keeps
+   firing every minute and keeps getting 401. Vercel → Deployments → the latest
+   production one → **Redeploy**.
 
 **Check:** open `/admin/health`. The red "The scheduler has never run" banner
-clears within a minute, and `cron.tick` shows a recent success. If it does not,
-the variable is missing from Production or the deploy predates it.
+clears within a minute, and `cron.tick` shows a recent success.
+
+If it does not, look at the Vercel runtime logs and filter for
+`/api/cron/tick`. You will see one line a minute. What the status code means:
+
+| Status | Meaning |
+|---|---|
+| **401** | The running deployment does not have the variable, or its value differs from the one Vercel Cron sends. Redeploy; if it persists, the variable is not scoped to Production. |
+| **200** | Working. `/admin/health` fills in within a minute. |
+| **500** | The tick ran and threw. The reason is on `/admin/health` under the `tick.*` keys. |
+| *nothing* | The cron is not firing at all — check `vercel.json` is deployed and crons are enabled for the project. |
 
 ---
 
