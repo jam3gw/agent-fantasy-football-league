@@ -123,6 +123,61 @@ the root layout stays a server component and no page loses static rendering.
   0 pageviews. The routes have been live on production all along; nothing was
   calling them.
 
+## 2026-08-29 — The smoke test earned its place: no session could run at all
+
+Ran the §8 pre-draft smoke test, one session per model. **All twelve failed, on
+every provider, with the same error:**
+
+```
+AI_InvalidPromptError: Invalid prompt: System messages are not allowed in the
+prompt or messages fields. Use the instructions option instead.
+```
+
+Identical across Anthropic, OpenAI and Google, in 3–4 seconds, zero tool calls,
+$0 spent. That uniformity is the finding: not a bad model id, not a missing
+gateway credit, not a provider quirk — our own call was malformed, so **no
+session of any kind could have run**. Onboarding, the draft, weekly reviews,
+waivers, the reporter: all of it, dead. The draft would have failed on the day.
+
+**Cause.** `session.ts` builds the conversation as
+`[{role: "system", …}, {role: "user", …}]`, which is the right shape for the
+transcript and for `withCaching` to find its breakpoint, and `modelStep.ts`
+handed that array straight to `generateText` as `messages`. AI SDK v7 (we are on
+`ai@7.0.84`) rejects a system-role message inside `messages` outright.
+
+**Fix.** `splitInstructions()` in `modelStep.ts` lifts system messages out and
+passes them as the `instructions` option. Read off the installed
+`ai@7.0.84` type declarations rather than guessed:
+`type Instructions = string | SystemModelMessage | Array<SystemModelMessage>`.
+The array-of-messages form is the one used deliberately — passing the prompt
+text alone would have silently dropped the Anthropic `cacheControl` breakpoint
+that rides on the message's `providerOptions`, turning prompt caching off across
+the season without any error to notice. Caching is applied before the split for
+the same reason: `withCaching` keys off position in the full list.
+
+Two tests, both confirmed to fail against the un-fixed code before being kept:
+the system prompt never appears in `messages` and is actually carried in
+`instructions` (checked on three providers), and the cache breakpoint survives
+the move.
+
+**Why the suite was green through all of this.** Every test of the model step
+passes a `generate` stub, so nothing in 452 tests ever exercised the real SDK's
+prompt validation. A stub cannot reject what the real one rejects. The smoke
+test is the only thing in the system that would ever have caught it, which is
+exactly what §8's checklist puts it there for — and it caught it four days
+before the draft rather than on the day.
+
+### A second, smaller finding from the same run
+
+Queueing all twelve at once nearly retired half of them unrun. Smoke sessions
+carry a 10-minute deadline (`guards.ts`), the queue sweep runs every five
+minutes, and the sweeper starts six at a time — so the second batch of six had
+about two minutes of margin before `startQueuedSessions` would have marked them
+`skipped`/`deadline`. I extended the deadline on the still-queued rows rather
+than lose the run. The deadline is meant to bound a *running* session, not queue
+latency, so a queued session arguably should not age against it; noted here
+rather than changed, since the draft does not depend on it.
+
 ## 2026-08-29 — Rankings moved to Sleeper; FantasyPros removed entirely
 
 Jake's call, after the plan upgrade did not take (entry below). Both Section 2
