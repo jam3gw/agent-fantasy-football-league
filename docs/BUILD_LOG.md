@@ -207,6 +207,38 @@ state (rosters, transactions, results, matchups) references any of them. The
 the board is rebuilt by the next ingest. Neon snapshot `snap-broad-river-avws9b5v`
 (`pre-0002-drop-fantasypros`) was taken before it ran against production.
 
+### Production result
+
+`ingest.rankings` ran on the first tick after the deploy: **1,756 ranked
+players, all 1,756 joining to `players`** — a 100% match rate, against the 200
+the §5.7 gate needs. 413 carry a tier (the ones with a projection). Board reads
+Gibbs 1.90, Bijan 2.60, Chase 3.60, Nacua 4.80. No health error.
+
+### What I got wrong: the migration broke one tick
+
+I dropped `fantasypros_daily_allowance` in the same deploy that stopped reading
+it, which is an expand/contract violation. The migration runs during the build,
+but the old deployment keeps serving until the alias switches — and in that
+window its `getSettings` still names the dropped column. Every tick stage failed
+once, at 16:23:31, and recovered on the next tick at 16:24.
+
+One lost tick pre-draft costs nothing, so I am not reverting anything. But the
+shape of the mistake is worth keeping, because two versions of it are not
+harmless:
+
+- In season, a lost tick can be a missed lock or a missed waiver run.
+- **If the build had failed after the migration ran**, production would have been
+  left serving old code against a schema that no longer fits it, with no new
+  deployment to switch to. The snapshot would have been the only way back.
+
+The rule for next time: **drop a column in the deploy *after* the one that stops
+reading it.** Ship the code that no longer selects it, let it become the running
+deployment, then drop. Adding a column is safe in one step; removing one is not.
+
+Also deleted the stale `fp.rankings` and `fantasypros` rows from `health`. They
+had no writer left, so `/admin/health` would have shown a permanent red error for
+a source that no longer exists.
+
 ### Checks
 
 452 tests green before the change, and after it with the FantasyPros tests

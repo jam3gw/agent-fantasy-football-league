@@ -2,7 +2,61 @@
 
 Each entry: date, the request made, what came back. Items marked **verify** in SPEC.md land here.
 
-## FantasyPros free-tier truncation — measured 2026-08-29 (§5.7 verify)
+## Rankings on Sleeper's projection feed — measured 2026-08-29 (§5.7 verify)
+
+**The §5.7 draft gate is met with about nine times the headroom it needs.** One
+unauthenticated call, run on production through `ingest.rankings`:
+
+```
+GET api.sleeper.com/projections/nfl/2026?season_type=regular&position[]=…&order_by=adp_ppr
+→ 3,303 rows; 1,756 with a usable PPR ADP (Sleeper writes 999 where it has none)
+stored: 1,756 ranked, 1,756 with an ADP, 413 with a tier, 0 errors
+```
+
+**Player identity, which is the number that matters:** all **1,756 of 1,756**
+stored rows join to a row in `players`. Sleeper's `player_id` is our canonical id,
+so the match rate is 100% by construction and `rankings_unmatched` no longer
+exists.
+
+For contrast, measured the same day against the same production `players` table:
+
+| Source | Keyed by | Of the top 200 by ADP, how many join |
+|---|---|---|
+| Sleeper projections | `player_id` (ours) | **200 / 200** |
+| ESPN `kona_player_info` | ESPN id | 56 / 200 |
+| FantasyPros | yahoo id → espn id → name | 56 / 200 before the name fallback |
+
+The reason the two external sources land in the same place: **Sleeper leaves
+`espn_id` and `yahoo_id` null for players who entered the league from about 2021
+on. 144 of the top 200 carry neither.** Chase, Gibbs, Bijan, Nacua, Jeanty, Love
+are all null; McCaffrey (2017) has both. Any future external source inherits this
+and must be measured the same way before it is trusted with the board.
+
+Top of the live board: Gibbs 1.90, Bijan 2.60, Chase 3.60, Nacua 4.80,
+McCaffrey 5.60.
+
+### Tiers are not derived from ADP, and here is why
+
+ADP has no cluster structure to find — the median consecutive gap is **1.00 at
+every depth** (ranks 1–50, 50–100, 100–200; 0.30 beyond 200). So a gap-based tier
+is an artifact of the threshold, not a property of the data:
+
+```
+gap > 1.2 → 67 tiers in the top 200      gap > 2.0 →  7 tiers
+gap > 1.5 → 30 tiers                     gap > 2.5 →  2 tiers
+```
+
+Projected points do cluster. Within a position the median drop runs 1.5–2.8
+points against real cliffs of 26–50 (RB 33.9, TE 35.8, QB 50.6, WR 26.6). Tiers
+are therefore a drop larger than 3× the position's median drop, and a player with
+no projection gets no tier rather than an invented one.
+
+## FantasyPros free-tier truncation — measured 2026-08-29 (§5.7 verify, superseded)
+
+**Superseded**: FantasyPros was removed on 2026-08-29. Kept because it is the
+measurement that prompted the move.
+
+
 
 **The §5.7 draft gate cannot be met on the free plan.** Measured against the
 live API from production, not inferred: FantasyPros states its own limits in
