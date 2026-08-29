@@ -48,6 +48,7 @@ describe("system prompt (Appendix C)", () => {
     expect(p).toContain("get_team_roster");
     expect(p).toContain("standings");
     expect(p).toContain("get_team_week_results");
+    expect(p).toContain("get_transactions");
     // Communication: the board for the league, @mentions for one team, the
     // message on a trade offer for the counterparty.
     expect(p).toContain("message board");

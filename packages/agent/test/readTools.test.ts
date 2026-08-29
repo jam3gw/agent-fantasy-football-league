@@ -642,6 +642,44 @@ describe("get_trade", () => {
     expect(res.ok).toBe(false);
     expect((res as { error: string }).error).toBe("not_found");
   });
+
+  it("hides an offer that never entered review from everyone but the two parties (§3.5)", async () => {
+    await seedLeague(db);
+    const teamIds = await seedTeams(db);
+    const [a, b, c] = teamIds as [number, number, number];
+    const p1 = await makePlayer(db, { fullName: "Quiet Piece", position: "RB" });
+    await rosterPlayer(db, a, p1);
+
+    for (const status of ["proposed", "rejected", "countered", "cancelled", "expired"] as const) {
+      const inserted = await db
+        .insert(trades)
+        .values({
+          proposerTeamId: a,
+          counterpartyTeamId: b,
+          givePlayerIds: [p1],
+          getPlayerIds: [],
+          status,
+          message: "CANDID VALUATION",
+          proposedAt: new Date("2026-09-13T10:00:00.000Z"),
+        })
+        .returning({ id: trades.id });
+      const tradeId = inserted[0]!.id;
+
+      // A third team and the reporter are both refused, and the message never leaks.
+      for (const viewer of [c, null]) {
+        const res = await getTradeTool.execute({ trade_id: tradeId }, ctxFor({ teamId: viewer }));
+        expect(res.ok, `${status} seen by ${viewer === null ? "reporter" : "third team"}`).toBe(false);
+        expect((res as { error: string }).error).toBe("not_visible");
+        expect(JSON.stringify(res)).not.toContain("CANDID VALUATION");
+      }
+
+      // Both parties still see their own negotiation, dead or alive.
+      for (const viewer of [a, b]) {
+        const res = ok(await getTradeTool.execute({ trade_id: tradeId }, ctxFor({ teamId: viewer })));
+        expect(res.message).toBe("CANDID VALUATION");
+      }
+    }
+  });
 });
 
 /* ========================================================================== */
