@@ -401,6 +401,14 @@ export async function swapModelAction(form: FormData): Promise<void> {
 
 export async function runOnboardingAction(): Promise<void> {
   const c = await ctx();
+  // §10.1: the order is drawn first, so each agent prepares for the slot it
+  // actually has. Enforced rather than documented — an onboarding session run
+  // before the draw produces a generic plan and cannot be re-run, because the
+  // idempotency key is the same.
+  const draftState = await getDraft(c.database);
+  if (!draftState?.order || draftState.order.length === 0) {
+    throw new Error("draw the draft order first — onboarding tells each agent the slot it is preparing for");
+  }
   const settings = await getSettings(c.database);
   const allTeams = await c.database.select().from(teams);
   let queued = 0;

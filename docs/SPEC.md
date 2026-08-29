@@ -848,6 +848,7 @@ Limits (engine-enforced, so they hold however a check-in is created):
 |---|---|---|
 | Pending at once | 3 | An anxious model books twenty. |
 | Per fantasy week | 5 | Bounds the cost a self-scheduling agent can add. |
+| Before the draft | 3 | Preparation is a one-off, so it gets its own budget rather than spending week 1's. Smaller because there is little to react to yet. |
 | Minimum lead | 30 minutes | Sooner is "keep going", which the ceiling governs. Measured *after* rounding, so an accepted check-in is always at least this far out. |
 | Maximum horizon | 14 days | Nothing booked past a season that may end. |
 | Reason | 500 characters | It is a brief, not an essay. |
@@ -960,12 +961,30 @@ Emitted by engine functions; handled by the tick or directly by the engine (same
 
 ### 10.1 Setup (commissioner)
 
-1. Check `/admin/rankings`: the FantasyPros pull is fresh, at least 200 players have a rank, and no unmatched player is in the top 200 (resolve any with the mapping control).
-2. Verify all 12 models pass the smoke test.
-3. Run `onboarding` sessions for all 12 teams (button). Each names its team and writes its plan.
-4. Draw the order (button; random permutation; stored; shown on the site).
-5. Optional: run a **mock draft** (Section 15.2) on a separate Neon database branch. Delete the branch afterwards; nothing from the mock reaches production data.
-6. Start the draft (button).
+1. Run `ingest.season_stats` from `/admin/jobs`. It is not booked automatically — last season's totals never change, so there is nothing to schedule — but the draft board's last-season points come from it, and without it every player shows zero.
+2. Check `/admin/rankings`: the FantasyPros pull is fresh, at least 200 players have a rank, and no unmatched player is in the top 200 (resolve any with the mapping control).
+3. Verify all 12 models pass the smoke test.
+4. **Draw the order** (button; random permutation; stored; shown on the site).
+5. Run `onboarding` sessions for all 12 teams (button). Each names its team and writes its plan.
+6. Optional: run a **mock draft** (Section 15.2) on a separate Neon database branch. Delete the branch afterwards; nothing from the mock reaches production data.
+7. Start the draft (button).
+
+**The order is drawn before onboarding** (changed 2026-08-29; it was the other
+way round). An agent that does not know its slot writes a generic plan, which
+is the same plan for all twelve; an agent that picks 7th and again at 18th has
+a different problem from one that picks 1st. The onboarding session is given its
+slot, its pick numbers for every round, and the field size, and
+`runOnboardingAction` refuses to run before the draw — an onboarding session
+cannot be re-run, so getting the sequence wrong is not recoverable.
+
+**Timing.** Onboarding is one bounded session per team (60 tool calls, a
+60-minute window); twelve drain in two waves, so 20–40 minutes. Past that,
+additional preparation time only helps to the extent agents use it: an
+onboarding session can schedule check-ins for itself (§8.10) against a
+pre-draft allowance separate from any week. A day between onboarding and the
+draft is the useful amount — it buys one more overnight rankings pull, room to
+resolve unmatched players, room to swap a model that fails its smoke test, and
+room for those check-ins to fire. Longer adds nothing and lets plans go stale.
 
 ### 10.2 Draft workflow
 

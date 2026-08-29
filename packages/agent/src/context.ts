@@ -10,6 +10,7 @@ import {
   boardPosts,
   computeStandings,
   decisionLogs,
+  draft,
   getSettings,
   lineupEntries,
   lockedPlayerIds,
@@ -434,6 +435,30 @@ async function kindData(
 
   if (kind === "lineup_check") {
     return { window_kickoff_et: sessionContext.window_kickoff_et ?? null };
+  }
+
+  if (kind === "onboarding") {
+    // §10.1: the order is drawn before onboarding, so an agent prepares for
+    // the slot it actually has. "I pick 7th and again at 18th" is a different
+    // plan from "I pick 1st"; without this the plans are all generic.
+    const state = (await db.select().from(draft).where(eq(draft.id, 1)))[0];
+    const order = state?.order ?? [];
+    const slot = ctx.teamId === null ? -1 : order.indexOf(ctx.teamId);
+    if (slot === -1) return { draft_order_drawn: false };
+    const settings = await getSettings(db);
+    const rounds = settings.draftRounds;
+    const teamCount = order.length;
+    // Snake: odd rounds run down the order, even rounds back up it.
+    const picks = Array.from({ length: rounds }, (_, r) =>
+      r % 2 === 0 ? r * teamCount + slot + 1 : r * teamCount + (teamCount - slot),
+    );
+    return {
+      draft_order_drawn: true,
+      your_draft_slot: slot + 1,
+      of_teams: teamCount,
+      your_pick_numbers: picks,
+      rounds,
+    };
   }
 
   if (kind === "draft_pick") {

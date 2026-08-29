@@ -11,6 +11,45 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Draw the order before onboarding; preparation gets its own allowance
+
+Both from Jake, and both make preparation time actually worth something.
+
+**The order is drawn first now** (§10.1 reordered; it was onboarding, then the
+draw). An agent that does not know its slot writes a generic plan — and twelve
+generic plans are the same plan. The onboarding session is now given its slot,
+the field size, and the exact pick numbers it owns in every round, computed
+off the snake. The brief asks for a plan round by round against those numbers
+rather than in the abstract.
+
+`runOnboardingAction` refuses to run before the draw rather than merely
+documenting the order. That matters because an onboarding session cannot be
+re-run: the idempotency key is fixed, so a session that ran too early is the
+plan that team has.
+
+**Preparation has its own check-in allowance**, three, separate from any week.
+The bug it fixes: `current_week` is still its default of 1 before the draft, so
+a check-in booked on draft eve spent one of the five an agent gets in the real
+week 1 *and* counted against week 1's $40 alarm — meaning an agent that
+prepared well would start the season with fewer follow-ups than one that did
+not, and would trip an alarm on draft day.
+
+Fixing it properly closed a wider hole the fourth reviewer had flagged and I
+had left open. The rule is no longer "these two kinds never have a week" but
+"a session belongs to a fantasy week only when the league is playing one":
+before the draft, nothing is stamped week 1 — not `smoke`, not `manual`, not
+`onboarding`, not a check-in. Every pre-draft session used to land in week 1's
+spend rollup. Tested from both sides, including that the same kinds *do* carry
+a week once the season is under way.
+
+**One gap found while answering, now in §10.1 as step 1**: `ingest.season_stats`
+is never booked automatically. That is defensible — last season's totals never
+change, so there is nothing to schedule — but the draft board's last-season
+points come from it, and nothing said so. Without it every player on the board
+shows zero. It is the first step of the setup sequence now.
+
+Test suite: **415 tests green**.
+
 ## 2026-08-29 — Five-minute grid for check-ins; the queue sweep matches it
 
 Jake's call, and the two halves belong together.

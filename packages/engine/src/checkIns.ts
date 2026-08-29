@@ -27,6 +27,15 @@ import { getSettings } from "./settings.ts";
 export const MAX_PENDING_CHECK_INS = 3;
 /** Check-ins one team may book per fantasy week, booked or already run. */
 export const MAX_CHECK_INS_PER_WEEK = 5;
+/**
+ * Check-ins one team may book before the draft, counted separately from any
+ * week. Preparation is a one-off, so it gets its own budget rather than
+ * spending week 1's — otherwise an agent that preps well starts the season
+ * with fewer follow-ups than one that did not, and trips week 1's alarm on
+ * draft day. Smaller than the weekly allowance because there is nothing to
+ * react to yet: rankings move, and that is about it.
+ */
+export const MAX_CHECK_INS_PRE_DRAFT = 3;
 /** No sooner than this: sooner is "keep going", which the ceiling governs. */
 export const MIN_LEAD_MINUTES = 30;
 /** No further out than this. */
@@ -95,7 +104,7 @@ export async function scheduleCheckIn(
     if (team.eliminated) return fail("team_paused", "your season is over");
 
     const mine = await tx
-      .select({ status: sessions.status, week: sql<number>`(${sessions.context} ->> 'week')::int` })
+      .select({ status: sessions.status, week: sql<number | null>`(${sessions.context} ->> 'week')::int` })
       .from(sessions)
       .where(and(eq(sessions.teamId, teamId), eq(sessions.kind, "self_check_in")));
 
@@ -107,12 +116,27 @@ export async function scheduleCheckIn(
         { hint: "cancel one you no longer need with cancel_check_in" },
       );
     }
-    const thisWeek = mine.filter((s) => s.week === settings.currentWeek).length;
-    if (thisWeek >= MAX_CHECK_INS_PER_WEEK) {
-      return fail(
-        "check_in_limit",
-        `you have booked ${thisWeek} check-ins this week; the maximum is ${MAX_CHECK_INS_PER_WEEK}`,
-      );
+
+    // Before the draft there is no fantasy week, so `createSession` stamps no
+    // week and preparation is counted on its own allowance.
+    const inSeason = ["regular", "playoffs"].includes(settings.phase);
+    if (inSeason) {
+      const thisWeek = mine.filter((s) => s.week === settings.currentWeek).length;
+      if (thisWeek >= MAX_CHECK_INS_PER_WEEK) {
+        return fail(
+          "check_in_limit",
+          `you have booked ${thisWeek} check-ins this week; the maximum is ${MAX_CHECK_INS_PER_WEEK}`,
+        );
+      }
+    } else {
+      const beforeTheDraft = mine.filter((s) => s.week === null).length;
+      if (beforeTheDraft >= MAX_CHECK_INS_PRE_DRAFT) {
+        return fail(
+          "check_in_limit",
+          `you have booked ${beforeTheDraft} check-ins before the draft; the maximum is ${MAX_CHECK_INS_PRE_DRAFT}`,
+          { hint: "this allowance is separate from the one you get each week in the season" },
+        );
+      }
     }
 
     const sessionId = await createSession(tx, settings, {
@@ -123,7 +147,7 @@ export async function scheduleCheckIn(
       modelId: team.modelId,
       dueAt: at,
       now,
-      context: { week: settings.currentWeek, reason },
+      context: { reason },
     });
     if (sessionId === null) {
       return fail("invalid_args", "you already have a check-in booked for that minute");
