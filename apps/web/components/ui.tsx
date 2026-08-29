@@ -49,11 +49,17 @@ export function TeamLabel({
   name: string | null;
   model?: string | null;
 }) {
-  const label = name ?? "(unnamed)";
+  // A team has no name until its agent picks one in onboarding (§8.6). Until
+  // then fall back to whatever still identifies it — the model, then the slug —
+  // because twelve rows all reading "(unnamed)" tell a reader nothing, and the
+  // pre-draft site is mostly that. The model is not repeated as the suffix when
+  // it is already standing in as the label.
+  const label = name ?? model ?? slug ?? "(unnamed)";
+  const suffix = model && label !== model ? model : null;
   const inner = (
     <>
-      <span className="font-medium">{label}</span>
-      {model ? <span className="ml-1.5 text-xs text-muted">{model}</span> : null}
+      <span className={name ? "font-medium" : "font-medium text-muted"}>{label}</span>
+      {suffix ? <span className="ml-1.5 text-xs text-muted">{suffix}</span> : null}
     </>
   );
   return slug ? (

@@ -8,6 +8,13 @@
       "when": 1787941692754,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1788009796685,
+      "tag": "0001_team_name_unique",
+      "breakpoints": true
     }
   ]
 }

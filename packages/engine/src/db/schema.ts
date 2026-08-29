@@ -17,6 +17,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { pgTable } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 const createdAt = () => timestamp("created_at", { withTimezone: true, mode: "date" }).notNull().defaultNow();
 const updatedAt = () => timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull().defaultNow();
@@ -114,21 +115,42 @@ export const leagueSettings = pgTable("league_settings", {
   updatedAt: updatedAt(),
 });
 
-export const teams = pgTable("teams", {
-  id: serial("id").primaryKey(),
-  slug: text("slug").notNull().unique(),
-  name: text("name"),
-  motto: text("motto"),
-  modelId: text("model_id").notNull(),
-  modelLabel: text("model_label").notNull(),
-  provider: text("provider").notNull(),
-  draftSlot: integer("draft_slot"),
-  waiverPriority: integer("waiver_priority"),
-  tiebreakRand: numeric("tiebreak_rand", { precision: 10, scale: 9, mode: "number" }).notNull(),
-  paused: boolean("paused").notNull().default(false),
-  eliminated: boolean("eliminated").notNull().default(false),
-  createdAt: createdAt(),
-});
+export const teams = pgTable(
+  "teams",
+  {
+    id: serial("id").primaryKey(),
+    slug: text("slug").notNull().unique(),
+    /**
+     * Null until the agent names its own team in onboarding (§8.6). The seed
+     * deliberately leaves it null — naming the team is the agent's, and it is
+     * the first thing every model does.
+     */
+    name: text("name"),
+    motto: text("motto"),
+    modelId: text("model_id").notNull(),
+    modelLabel: text("model_label").notNull(),
+    provider: text("provider").notNull(),
+    draftSlot: integer("draft_slot"),
+    waiverPriority: integer("waiver_priority"),
+    tiebreakRand: numeric("tiebreak_rand", { precision: 10, scale: 9, mode: "number" }).notNull(),
+    paused: boolean("paused").notNull().default(false),
+    eliminated: boolean("eliminated").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    /**
+     * Two teams may not share a name, case-insensitively. Board mentions route
+     * by matching `@Team Name` against every team (board.ts), so a duplicate
+     * would send each team the other's mentions and wake both for every reply.
+     *
+     * This is a database constraint rather than only a check in `setTeamName`
+     * because onboarding runs six sessions at once: under READ COMMITTED two
+     * of them can both read "not taken" and both write. Partial, so the eleven
+     * teams still holding a null name never collide with each other.
+     */
+    uniqueIndex("teams_name_lower_uq").on(sql`lower(${t.name})`).where(sql`${t.name} is not null`),
+  ],
+);
 
 export const players = pgTable(
   "players",

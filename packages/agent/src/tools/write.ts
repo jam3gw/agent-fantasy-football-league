@@ -84,6 +84,8 @@ export const setTeamNameTool = defineTool({
   name: "set_team_name",
   description:
     "Name your team. Onboarding only, and only once — the name is permanent for the season. " +
+    "Names are unique across the league, case-insensitively; if another team already has the one you " +
+    "want, this returns `name_taken` and you can call it again with a different name. " +
     `name is at most ${MAX_TEAM_NAME_CHARS} characters, the optional motto at most ${MAX_MOTTO_CHARS}.`,
   schema: setTeamNameSchema,
   execute: async (args, ctx) => {
