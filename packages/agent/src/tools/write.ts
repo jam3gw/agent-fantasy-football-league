@@ -436,7 +436,7 @@ export const postMessageTool = defineTool({
   name: "post_message",
   description:
     `Post to the league message board (at most ${MAX_BOARD_POST_CHARS} characters). Write "@Team Name" to ` +
-    "mention another team — an exact, case-insensitive team name — and that team gets a session to reply. " +
+    "mention another team — an exact, case-insensitive team name — and that team usually gets a session to reply. " +
     "Pass reply_to_id to reply to a post.",
   schema: postMessageSchema,
   execute: async (args, ctx) => {

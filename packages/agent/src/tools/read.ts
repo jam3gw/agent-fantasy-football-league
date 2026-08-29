@@ -1259,14 +1259,24 @@ export const getTradeTool = readTool(
     if (!trade) return toolFailure("not_found", `trade ${args.trade_id} does not exist`);
     const idx = await teamIndex(db);
     const parties = [trade.proposerTeamId, trade.counterpartyTeamId];
-    // An offer still in `proposed` is a private negotiation between two teams:
-    // it carries a message meant for the counterparty, and trade ids are
-    // sequential, so without this any agent could walk every open negotiation
-    // in the league. It becomes league business the moment it enters review —
-    // that is what the site shows, and what §11 forbids the reporter to
-    // pre-empt. Same rule for the reporter, which has no team of its own.
-    if (trade.status === "proposed" && (ctx.teamId === null || !parties.includes(ctx.teamId))) {
-      return toolFailure("not_visible", `trade ${args.trade_id} is a pending offer between two other teams`);
+    // An offer that never entered review is a private negotiation between two
+    // teams: it carries a message meant for the counterparty, and trade ids
+    // are sequential, so without this any agent could walk every negotiation
+    // in the league — including a live one, since a countered offer's message
+    // still describes a renegotiation happening right now. A trade becomes
+    // league business the moment it enters review — that is what the site
+    // shows, and what §11 forbids the reporter to pre-empt. Same rule for the
+    // reporter, which has no team of its own. Status alone cannot draw this
+    // line: `failed` has two producers (§3.5) — a review-path failure and an
+    // accept-time re-check failure that never entered review. The engine sets
+    // `reviewEndsAt` exactly once, on a successful accept, so it is the marker.
+    if (trade.reviewEndsAt === null && (ctx.teamId === null || !parties.includes(ctx.teamId))) {
+      return toolFailure(
+        "not_visible",
+        trade.status === "proposed"
+          ? `trade ${args.trade_id} is a pending offer between two other teams`
+          : `trade ${args.trade_id} is an offer between two other teams that ended without entering review`,
+      );
     }
     const week = settings.currentWeek;
 
