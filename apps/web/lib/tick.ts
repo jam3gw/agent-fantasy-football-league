@@ -270,6 +270,18 @@ export async function runTick(): Promise<TickSummary> {
     summary.draftRestarted = await restartStalledDraft(database, clock);
   });
 
+  // The heartbeat, last and unconditional. /admin/health's red "the scheduler
+  // has never run" banner keys on this row and on nothing else, so a tick that
+  // did its work and forgot to stamp it would leave the page shouting that the
+  // league is dead while it runs perfectly — which is exactly what happened
+  // when the stage refactor dropped this write. Every stage above catches its
+  // own failure, so reaching here means the tick completed, whatever any one
+  // stage made of its own job.
+  await database
+    .insert(health)
+    .values({ key: "cron.tick", lastSuccessAt: clock.now() })
+    .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: clock.now() } });
+
   return summary;
 }
 
