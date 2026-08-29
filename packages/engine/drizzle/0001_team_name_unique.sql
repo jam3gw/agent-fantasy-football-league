@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX "teams_name_lower_uq" ON "teams" USING btree (lower("name")) WHERE "teams"."name" is not null;
