@@ -2,6 +2,54 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-29 — Smoke round verified thinking end to end; the harder probe found a real pre-existing bug
+
+Jake asked for a smoke round to verify the reasoning shows up, and gave the
+go-ahead to merge and deploy. Merged (with the activity-rail work another
+session had landed on main in the meantime), production deploy confirmed by
+watching `/sessions/613` start rendering its thinking block, then queued the
+round directly in `sessions` (the tick's five-minute sweep starts them; this
+sandbox holds no admin or cron secret).
+
+**Smoke round (sessions 857–868): 12 of 12 succeeded, zero errors, zero
+`visibility_option_dropped` events** — every provider accepted the visibility
+options. Durable `reasoning` landed for six models, two of them new since
+the morning measurement: Gemini 3.1 Pro (203 chars — `includeThoughts`
+works) and GLM-5.3 (931 chars, interestingly alongside a reported reasoning
+token count of zero). Grok, DeepSeek, Kimi, Qwen as before. The transcript
+pages render the blocks (Gemini 1, GLM 2, Grok 2 — matching the DB).
+Still nothing to show for: all three Anthropic models and GPT-5.6 Sol
+(0 reasoning tokens on the trivial task — adaptive thinking skipping, as
+before), GPT-5.6 Terra (20 tokens, no summary returned for so small a
+burst), Muse Spark (126 tokens, provider withholds text, no flag exists),
+and Mistral Large 3 (team 2's swapped model; not a reasoning model).
+
+**The probe that earned its cost.** The smoke task is too trivial to make an
+Anthropic model think, so one `manual` Sonnet 5 session (869) ran with a
+deliberative draft-strategy objective. Step 1 proved the Anthropic display
+option works: 23 reasoning tokens and a real summarized-thinking sentence
+recorded in the transcript. Step 2 then failed with the old
+`AI_InvalidPromptError: messages do not match the ModelMessage[] schema` —
+a **pre-existing** bug, nothing to do with the thinking change:
+`player_research` returns `updated_at` as a live `Date` (a drizzle
+timestamp), the SDK's JSON-value schema rejects a `Date` in a tool result,
+and the very next model step dies. Reproduced locally against the real
+`streamText`: the transcript's own bytes validate (JSONB had serialized the
+Date), the live object fails — which is exactly why no resumed session and
+no smoke test (which never calls `player_research`) ever saw it. Every
+session that researches players and then takes another step would have
+failed this way, including every onboarding and weekly review.
+
+Fix, two layers: `updated_at` now goes through `iso()` like every other
+date in the read tools (the only leak found by audit), and `toolOutput`
+JSON-normalizes every result, so the live step sees exactly what the
+transcript records and the two can never diverge again. Regression test
+drives a Date-returning tool through a live two-step session and validates
+every message with the SDK's own `modelMessageSchema` — the same
+run-their-validator lesson this log already recorded once. The tick's
+automatic retry of 869 (session 870) was cancelled before it could fail
+against the un-fixed deploy; a fresh probe runs after this deploys.
+
 ## Questions for Jake
 
 

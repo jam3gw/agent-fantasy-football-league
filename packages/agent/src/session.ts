@@ -181,9 +181,16 @@ export function contextSafetyMargin(contextWindow: number): number {
  * `{ok: false, error, message, hint}` as data the agent is meant to read and
  * act on, which is an ordinary turn in the conversation rather than a
  * transport-level error.
+ *
+ * The value is JSON-normalized: the SDK validates it against its JSON-value
+ * schema, which a live `Date` instance fails — that killed session 869 on its
+ * second step, while the identical bytes replayed fine after the transcript's
+ * JSONB storage had serialized them. Normalizing here makes the live step see
+ * exactly what the transcript records, so a live session and a resumed one
+ * cannot diverge on the same result.
  */
 export function toolOutput(value: unknown): { type: "json"; value: unknown } {
-  return { type: "json", value };
+  return { type: "json", value: value === undefined ? null : JSON.parse(JSON.stringify(value)) };
 }
 
 /**
