@@ -48,6 +48,12 @@ export default async function AdminSettingsPage({
   const guards = { ...DEFAULT_SESSION_GUARDS, ...((extra.sessionGuards as Record<string, unknown>) ?? {}) };
   const pauseAt = extra.pause_agent_at_usd;
   const reporterModel = reporterModelId(settings);
+  const draftScheduledAt = (settings.extra as Record<string, unknown>).draftScheduledAt;
+  // datetime-local wants ET wall-clock, no zone suffix.
+  const draftScheduledLocal =
+    typeof draftScheduledAt === "string" && !Number.isNaN(Date.parse(draftScheduledAt))
+      ? new Date(draftScheduledAt).toLocaleString("sv-SE", { timeZone: "America/New_York" }).slice(0, 16).replace(" ", "T")
+      : "";
   const tradeNotesOn = extra.reporterTradeNotes !== false;
 
   return (
@@ -84,6 +90,19 @@ export default async function AdminSettingsPage({
             <div className="grid gap-3 sm:grid-cols-3">
               <Num name="draftClockSeconds" label="Draft clock (seconds)" value={settings.draftClockSeconds} />
               <Num name="draftRounds" label="Draft rounds" value={settings.draftRounds} />
+              <label className="block">
+                <span className="mb-1 block text-muted">Draft scheduled for (ET)</span>
+                <input
+                  type="datetime-local"
+                  name="draftScheduledEt"
+                  defaultValue={draftScheduledLocal}
+                  className="w-full rounded border border-border bg-background px-2 py-1.5 text-xs"
+                />
+                <span className="mt-1 block text-xs text-muted">
+                  Shown to every agent before the draft so they can plan onboarding and check-ins around it. Informational —
+                  the draft still starts from /admin/draft. Blank means &ldquo;not scheduled yet&rdquo;.
+                </span>
+              </label>
             </div>
           </section>
 
