@@ -112,12 +112,22 @@ export function gatewayCostFrom(metadata: unknown): number | null {
  * the response *carries*, never how the model thinks — like prompt caching,
  * they are not limits, budgets, effort flags, or toggles, so §8.1 stands.
  * Anthropic's `type: "adaptive"` is spelled out because `display` cannot be
- * sent alone, and adaptive is already the default on all three league models.
+ * sent alone — so it is only sent to the exact models where adaptive is
+ * verified to BE the default (docs/VERIFIED.md), never by prefix: on a swap
+ * to some other Anthropic model it would otherwise force a thinking mode,
+ * which §8.1 forbids. Add a swapped-in Anthropic model here only after
+ * verifying its default.
  */
+const ANTHROPIC_ADAPTIVE_BY_DEFAULT = new Set([
+  "anthropic/claude-fable-5",
+  "anthropic/claude-opus-5",
+  "anthropic/claude-sonnet-5",
+]);
+
 export function reasoningVisibilityOptions(
   modelId: string,
 ): Record<string, Record<string, unknown>> | null {
-  if (modelId.startsWith("anthropic/")) {
+  if (ANTHROPIC_ADAPTIVE_BY_DEFAULT.has(modelId)) {
     return { anthropic: { thinking: { type: "adaptive", display: "summarized" } } };
   }
   if (modelId.startsWith("google/")) {
@@ -186,40 +196,58 @@ export function createModelStep(
     // so splitting first would move the breakpoints.
     const { instructions, messages } = splitInstructions(withCaching(req.messages, req.modelId));
 
+    // One attempt: call the provider and accumulate deltas as they arrive,
+    // staging them on a throttle. streamText reports provider failures as
+    // `error` parts in the stream rather than by throwing, so the error is
+    // carried out of the loop for the caller to act on — the session loop's
+    // catch is what marks the session failed.
+    const attempt = async (providerOptions: ReturnType<typeof reasoningVisibilityOptions>) => {
+      const params = {
+        model: req.modelId,
+        ...(instructions.length > 0 ? { instructions } : {}),
+        messages,
+        tools: declareTools(req),
+        ...(providerOptions ? { providerOptions } : {}),
+        // No maxOutputTokens, temperature, reasoning budget, or effort flag (§8.1).
+      } as unknown as Parameters<typeof streamText>[0];
+
+      const result = stream(params);
+      let partialReasoning = "";
+      let partialText = "";
+      let streamError: unknown = null;
+      let lastFlush = 0;
+      for await (const part of result.fullStream) {
+        // A new reasoning block after an earlier one: keep the blocks readable
+        // in the durable log rather than running their words together.
+        if (part.type === "reasoning-start" && partialReasoning !== "") partialReasoning += "\n\n";
+        else if (part.type === "reasoning-delta") partialReasoning += part.text;
+        else if (part.type === "text-delta") partialText += part.text;
+        else if (part.type === "error") streamError = part.error;
+        else continue;
+        if (!config.onPartial || streamError !== null) continue;
+        const interval =
+          config.flushIntervalMs ?? partialFlushIntervalMs(partialReasoning.length + partialText.length);
+        const now = Date.now();
+        if (now - lastFlush < interval) continue;
+        lastFlush = now;
+        await config.onPartial({ stepNo, reasoning: partialReasoning, text: partialText });
+      }
+      return { result, partialReasoning, partialText, streamError };
+    };
+
     const providerOptions = reasoningVisibilityOptions(req.modelId);
-    const params = {
-      model: req.modelId,
-      ...(instructions.length > 0 ? { instructions } : {}),
-      messages,
-      tools: declareTools(req),
-      ...(providerOptions ? { providerOptions } : {}),
-      // No maxOutputTokens, temperature, reasoning budget, or effort flag (§8.1).
-    } as unknown as Parameters<typeof streamText>[0];
-
-    const result = stream(params);
-
-    // Accumulate deltas as they arrive and stage them on a throttle. streamText
-    // reports provider failures as `error` parts in the stream rather than by
-    // throwing, so the error is carried out of the loop and rethrown — the
-    // session loop's catch is what marks the session failed.
-    let partialReasoning = "";
-    let partialText = "";
-    let streamError: unknown = null;
-    let lastFlush = 0;
-    for await (const part of result.fullStream) {
-      if (part.type === "reasoning-delta") partialReasoning += part.text;
-      else if (part.type === "text-delta") partialText += part.text;
-      else if (part.type === "error") streamError = part.error;
-      else continue;
-      if (!config.onPartial || streamError !== null) continue;
-      const interval =
-        config.flushIntervalMs ?? partialFlushIntervalMs(partialReasoning.length + partialText.length);
-      const now = Date.now();
-      if (now - lastFlush < interval) continue;
-      lastFlush = now;
-      await config.onPartial({ stepNo, reasoning: partialReasoning, text: partialText });
+    let run = await attempt(providerOptions);
+    // Defensive fallback: if the very first thing back was an error — no
+    // reasoning, no text — and we had sent a visibility option, retry once
+    // without it. A gateway or provider that starts rejecting the option must
+    // cost the league its thinking display, never its sessions. An error after
+    // real output is a genuine provider failure and is not retried here (the
+    // tick's requeue owns that).
+    if (run.streamError !== null && providerOptions !== null && run.partialReasoning === "" && run.partialText === "") {
+      run = await attempt(null);
     }
-    if (streamError !== null) throw streamError;
+    if (run.streamError !== null) throw run.streamError;
+    const { result, partialReasoning } = run;
 
     const [text, rawToolCalls, usage, providerMetadata, content, finishReason] = await Promise.all([
       result.text,

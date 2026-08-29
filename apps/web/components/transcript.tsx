@@ -50,9 +50,14 @@ export function assistantReasoning(content: Record<string, unknown>): string {
   if (typeof content.reasoning === "string" && content.reasoning.trim() !== "") return content.reasoning;
   const raw = content.raw as { content?: unknown } | undefined;
   if (!raw || !Array.isArray(raw.content)) return "";
-  return (raw.content as Array<Record<string, unknown>>)
-    .filter((p) => p.type === "reasoning" && typeof p.text === "string")
-    .map((p) => p.text as string)
+  return (raw.content as unknown[])
+    .filter(
+      (p): p is { type: "reasoning"; text: string } =>
+        typeof p === "object" && p !== null &&
+        (p as Record<string, unknown>).type === "reasoning" &&
+        typeof (p as Record<string, unknown>).text === "string",
+    )
+    .map((p) => p.text)
     .join("\n\n")
     .trim();
 }
@@ -93,7 +98,7 @@ export function TranscriptEventItem({ event }: { event: TranscriptEvent }) {
           {reasoning !== "" ? (
             <div className="mt-2">
               <span className="text-xs uppercase tracking-wide text-muted">thinking</span>
-              <p className="whitespace-pre-wrap break-words text-sm italic leading-relaxed text-muted">
+              <p className="max-h-[32rem] overflow-auto whitespace-pre-wrap break-words text-sm italic leading-relaxed text-muted">
                 {reasoning}
               </p>
             </div>

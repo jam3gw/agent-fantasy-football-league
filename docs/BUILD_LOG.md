@@ -73,6 +73,36 @@ Suite after the change: 525 tests green across the five packages
 clean. The stale assertion in `spend.test.ts` ("no provider options at all",
 written for the BYOK removal) now pins exactly the one visibility option.
 
+**Review round 1** (fresh-context reviewer on the diff): no blockers; every
+finding fixed rather than argued —
+- The Anthropic option was keyed on the `anthropic/` prefix; adaptive-is-the-
+  default is only *verified* for the three league models, so a commissioner
+  swap to another Anthropic model would have silently forced a thinking mode
+  (a real §8.1 toggle). Now an exact-id allowlist (`ANTHROPIC_ADAPTIVE_BY_DEFAULT`),
+  with a test that an unlisted Anthropic id gets pure provider defaults.
+- No fallback if the gateway rejects the new option — a 400 would have failed
+  sessions for 6 of 12 teams. Now: if a step errors before producing any
+  output and a visibility option was sent, retry once without it. A rejected
+  option costs the league its thinking display, never a session. An error
+  after real output is a genuine provider failure and is not retried
+  (the tick's requeue owns that path). Both behaviors pinned by tests.
+- Closing-step reasoning and the empty-reasoning-omits-the-field behavior
+  were untested; both have tests now.
+- Consecutive reasoning blocks concatenated with no separator (durable field
+  vs raw fallback disagreed); `reasoning-start` now inserts a blank line.
+- The raw-content fallback would throw on a malformed element (`null` in
+  `raw.content`) and 500 a public page; now guarded, with a test.
+- The thinking block renders capped at the same `max-h-[32rem]` scroll the
+  JSON blocks use, so a 40 KB trace cannot make transcript pages megabytes
+  of DOM.
+The reviewer also noted the repo rule that a real session must run against a
+deployed build before merge. From this sandbox no preview session can be
+started (previews get no cron; the tick and admin need secrets that live in
+Vercel). The commissioner has asked for exactly that end-to-end run — a
+smoke round — so it runs on production immediately after the merge, with the
+defensive fallback above bounding the blast radius if the gateway rejects
+the option, and a revert as the rollback path.
+
 ## 2026-08-29 — v1.10 merged to main; production deploy verified
 
 Jake said "merge to main". Fast-forward 9755d94 → ae8cc5c (main had not
