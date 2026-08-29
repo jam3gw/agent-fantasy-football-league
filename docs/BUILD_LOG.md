@@ -8,8 +8,45 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 
 *(none blocking — FYI items below)*
 
-- **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
+- **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
+
+## 2026-08-29 — Commissioner login works; both admin secrets confirmed live
+
+`COMMISSIONER_PASSWORD` and `SESSION_SECRET` are both set and scoped to
+Production. `/admin` is reachable. Verified from outside without the password:
+
+| Probe | Answer | Means |
+|---|---|---|
+| `POST /api/admin/login`, wrong password | 303 | `COMMISSIONER_PASSWORD` is set |
+| `GET /admin/health` with `<digits>.<junk>` cookie | 307 | `SESSION_SECRET` is set **and the forged signature was rejected** |
+| `GET /api/admin/health`, same cookie | 401 | same, on the API branch |
+| `GET /admin/health`, no cookie | 307 | proxy redirect, as designed |
+
+The forged-cookie rows are the ones that carry weight: 500 would mean the
+secret is missing, but 307/401 means `sign()` ran *and* the signature check
+said no. A cookie that merely failed to throw would have been indistinguishable
+from one that was accepted.
+
+`/api/cron/tick` is 200 every minute across all four deployments in the window,
+so the scheduler is alive and `/admin/health`'s banner has what it keys on.
+Vercel's error table shows all three admin-secret error groups last occurring at
+15:54:21 or earlier, on deployments already replaced — nothing since.
+
+**It took two rounds, and the middle round is the lesson.** The first fix set
+`COMMISSIONER_PASSWORD` only, and that made the *wrong*-password path return a
+healthy-looking 303 while a correct password still answered 500 — visible in the
+error table as one `SESSION_SECRET is not set` on `/api/admin/login` at 15:54:21,
+which is a real login attempt with the real password failing. Anyone reading
+that 500 without the stack trace would reasonably conclude the password was
+wrong. The order in `login/route.ts` is why: `passwordMatches` returns first,
+`issueCookieValue` signs on the next line, so the two secrets fail on opposite
+branches of the same handler.
+
+The cheap external check for a signing secret, worth keeping: send a
+syntactically valid but bogus cookie (`<digits>.<junk>`). `verifyCookieValue`
+returns early on a malformed value and never signs, so only the well-formed
+shape reaches `sign()` and exposes whether the key exists.
 
 ## 2026-08-29 — Vercel Web Analytics on the public site
 
@@ -65,6 +102,21 @@ the root layout stays a server component and no page loses static rendering.
   render-once-inside-`<body>` placement, the same two silent failures the
   Speed Insights test guards: mounted deeper it misses pages, mounted twice it
   double-counts every view.
+- **Confirmed in a browser on the merged production deploy**
+  (`dpl_5BETqs1qqAR5daXnDdfxi5WDo8aG`), not by reading the bundle. Chromium
+  shows `<script src="/d90aa5d90e4aa1f2/script.js">` appended, `window.va` a
+  function, and `window.vam` `"production"` — so the mode detection resolves to
+  production and not to the debug script. `window.si` is live alongside it;
+  Speed Insights is unaffected.
+  - The script request was **aborted in the browser** rather than allowed, so
+    the pageview stayed queued in `window.vaq` (length 1) and nothing synthetic
+    was written to the dashboard. That queue length is itself the proof the
+    component fired.
+  - Chromium still cannot reach a deployed host from this session — the egress
+    proxy drops the tunnel (`ws_closed_mid_exchange`) while curl to the same
+    host is fine, exactly as the Speed Insights session found. So production
+    was mirrored (`prod.html` plus its eight `/_next/static/*` assets) and
+    served from `127.0.0.1`, which `noProxy` covers.
 - Lint, typecheck and the full suite (457 tests) green.
 - Data starts when this reaches production. Nothing is backfilled, so the
   dashboard stays empty until then — as of today it reports 0 visitors and
