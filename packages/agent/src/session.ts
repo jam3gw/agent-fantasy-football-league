@@ -157,6 +157,24 @@ export function contextSafetyMargin(contextWindow: number): number {
 }
 
 /**
+ * Wrap a tool result in the tagged output the SDK requires.
+ *
+ * `ToolResultPart.output` is a discriminated union — `{type: 'json', value}`,
+ * `{type: 'text', value}`, and so on — not a bare object. Passing the result
+ * object directly made every session die on its second step with
+ * `AI_InvalidPromptError: The messages do not match the ModelMessage[] schema`,
+ * once the first step's tool call came back.
+ *
+ * A failed tool result is `json`, not `error-json`: §8.4 defines
+ * `{ok: false, error, message, hint}` as data the agent is meant to read and
+ * act on, which is an ordinary turn in the conversation rather than a
+ * transport-level error.
+ */
+export function toolOutput(value: unknown): { type: "json"; value: unknown } {
+  return { type: "json", value };
+}
+
+/**
  * Stub the oldest tool results in place. Returns how many were stubbed, so a
  * caller can record it in the transcript and skip the work when it is zero.
  */
@@ -169,12 +187,13 @@ export function stubOldestToolResults(messages: ModelMessage[], keepRecent = CON
     if (!Array.isArray(message.content)) continue;
     for (const part of message.content as Array<Record<string, unknown>>) {
       if (part.type !== "tool-result") continue;
-      const already = (part.output as { context_trimmed?: boolean } | undefined)?.context_trimmed;
+      const already = (part.output as { value?: { context_trimmed?: boolean } } | undefined)?.value
+        ?.context_trimmed;
       if (already) continue;
-      part.output = {
+      part.output = toolOutput({
         context_trimmed: true,
         note: `Result of ${String(part.toolName)} removed to stay inside the context window. Call it again if you still need it.`,
-      };
+      });
       stubbed++;
     }
   }
@@ -257,7 +276,7 @@ export async function restoreSession(
         type: "tool-result",
         toolCallId: r.toolCallId,
         toolName: r.toolName,
-        output: r.output,
+        output: toolOutput(r.output),
       })),
     } as ModelMessage);
     pendingToolResults = [];
@@ -572,7 +591,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
           type: "tool-result",
           toolCallId: r.toolCallId,
           toolName: r.toolName,
-          output: r.result,
+          output: toolOutput(r.result),
         })),
       });
 

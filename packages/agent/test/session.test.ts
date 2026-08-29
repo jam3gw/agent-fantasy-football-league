@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { modelMessageSchema } from "ai";
 import { FixedClock } from "@league/shared";
 import {
   decisionLogs,
@@ -472,9 +473,19 @@ describe("§4.1 — resuming a session that died mid-batch", () => {
 
     // Both calls came back paired; the missing one says it never ran.
     const toolMessage = (seen as Array<{ role: string; content: unknown }>).find((m) => m.role === "tool")!;
-    const parts = toolMessage.content as Array<{ toolCallId: string; output: { error?: string } }>;
+    const parts = toolMessage.content as Array<{
+      toolCallId: string;
+      output: { type: string; value: { error?: string } };
+    }>;
     expect(parts.map((p) => p.toolCallId).sort()).toEqual(["c1", "c2"]);
-    expect(parts.find((p) => p.toolCallId === "c2")!.output.error).toBe("not_executed");
+    const missing = parts.find((p) => p.toolCallId === "c2")!;
+    // The result is wrapped the way the SDK requires; reading it means reading
+    // through `value`, which is the shape modelMessageSchema accepts.
+    expect(missing.output.type).toBe("json");
+    expect(missing.output.value.error).toBe("not_executed");
+    // The resume path builds messages too, so it gets the same validation the
+    // live loop gets in messageShape.test.ts.
+    expect(modelMessageSchema.safeParse(toolMessage).success).toBe(true);
 
     // And the resume did not re-execute the one that had already run.
     expect(toolRuns).toEqual(["write_decision_log"]);
