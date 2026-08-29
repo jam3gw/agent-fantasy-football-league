@@ -21,6 +21,7 @@ import {
 } from "@league/engine";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { createModelStep } from "../src/modelStep.ts";
+import { fakeStreamResult } from "./helpers/stream.ts";
 import {
   applyOptionalPause,
   evaluateAlarms,
@@ -295,16 +296,9 @@ describe("every step bills the AI Gateway", () => {
     // helper's input.
     let seen: Record<string, unknown> | null = null;
     const step = createModelStep({} as never, {
-      generate: (async (params: Record<string, unknown>) => {
+      stream: ((params: Record<string, unknown>) => {
         seen = params;
-        return {
-          text: "hello",
-          toolCalls: [],
-          usage: { inputTokens: 10, outputTokens: 2 },
-          providerMetadata: undefined,
-          content: "hello",
-          finishReason: "stop",
-        };
+        return fakeStreamResult({ text: "hello", usage: { inputTokens: 10, outputTokens: 2 } });
       }) as never,
     });
 
@@ -337,9 +331,9 @@ describe("every step bills the AI Gateway", () => {
     // nothing else in the suite exercises `withCaching`.
     let seen: Record<string, unknown> | null = null;
     const step = createModelStep({} as never, {
-      generate: (async (params: Record<string, unknown>) => {
+      stream: ((params: Record<string, unknown>) => {
         seen = params;
-        return { text: "", toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, content: "" };
+        return fakeStreamResult();
       }) as never,
     });
 
@@ -385,9 +379,9 @@ describe("every step bills the AI Gateway", () => {
     for (const modelId of ["anthropic/claude-opus-5", "openai/gpt-5.6-sol", "google/gemini-3.1-pro-preview"]) {
       let seen: Record<string, unknown> | null = null;
       const step = createModelStep({} as never, {
-        generate: (async (params: Record<string, unknown>) => {
+        stream: ((params: Record<string, unknown>) => {
           seen = params;
-          return { text: "", toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, content: "" };
+          return fakeStreamResult();
         }) as never,
       });
 
@@ -417,12 +411,7 @@ describe("every step bills the AI Gateway", () => {
     // spacexai/grok-4.6 and the two OpenAI models used to carry BYOK routes.
     for (const modelId of ["spacexai/grok-4.6", "openai/gpt-5.6-terra", "google/gemini-3.1-pro-preview"]) {
       const step = createModelStep({} as never, {
-        generate: (async () => ({
-          text: "",
-          toolCalls: [],
-          usage: { inputTokens: 1, outputTokens: 1 },
-          content: "",
-        })) as never,
+        stream: (() => fakeStreamResult()) as never,
       });
       const result = await step({ modelId, messages: [], tools: [] }, 0);
       expect(result.billedTo, modelId).toBe("gateway");

@@ -16,6 +16,7 @@ import { getSettings, modelPrices, sessionGuard, sessionEvents, sessions, teams 
 import { writeDecisionLog } from "@league/engine";
 import type { LeagueTool, ToolContext, ToolResult } from "./tools/types.ts";
 import { toolFailure } from "./tools/types.ts";
+import { clearPartial } from "./stream.ts";
 import type { BilledTo } from "./models.ts";
 import { MODEL_PRICE_SEED } from "./models.ts";
 import { applyOptionalPause, computeStepCost, evaluateAlarms, recordSpend, toolCallCost, updateRollups } from "./spend.ts";
@@ -514,6 +515,9 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
         // be replayed exactly as the model saw it (§4.1, §9.2).
         raw: result.assistantMessage as unknown as Record<string, unknown>,
       });
+      // The staged partial (§12.1) is superseded the moment the full assistant
+      // event above is durable; leaving it would show the step twice.
+      await clearPartial(db, sessionId);
       messages.push(result.assistantMessage);
 
       if (result.toolCalls.length === 0) break;
@@ -640,6 +644,11 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
         ? "timed_out"
         : "succeeded";
 
+    // A step that ended without recording an assistant event (deadline, ceiling
+    // break, closing step) may still have a staged partial; the session is over,
+    // so nothing live should keep showing.
+    await clearPartial(db, sessionId);
+
     // Only a row this invocation still owns. A session the tick reclaimed while
     // this one was quiet is `failed` and its slot has been handed on; writing
     // `succeeded` over it would erase the reclaim and hide the duplicate run.
@@ -666,6 +675,9 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
     };
   } catch (err) {
     await recordEvent(db, clock, sessionId, seq++, "error", { error: String(err) });
+    // Best-effort: a failed session must not leave a stale "thinking" preview,
+    // but clearing must not mask the error being recorded here.
+    await clearPartial(db, sessionId).catch(() => undefined);
     await db
       .update(sessions)
       .set({

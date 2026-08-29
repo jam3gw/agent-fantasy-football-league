@@ -1,10 +1,17 @@
 /**
  * The gateway model call (SPEC §8.1, §8.7).
  *
- * One call to `generateText` per session step. The tools are declared to the
+ * One call to `streamText` per session step. The tools are declared to the
  * model but NOT executed here — the session loop runs each tool as its own
  * durable workflow step, so `stopWhen` is never reached and the SDK returns
  * the tool calls for the loop to handle.
+ *
+ * Streaming instead of `generateText` exists for one reason: the live
+ * transcript (§12.1). Reasoning and text deltas are accumulated as they
+ * arrive and staged through the optional `onPartial` sink on a throttle, so
+ * the website can show what an agent is thinking while it thinks it. The
+ * step's *result* is identical either way — the loop still gets one complete
+ * assistant message per step.
  *
  * Absolutely no limits are set: no maxOutputTokens, no temperature, no
  * reasoning or thinking budget or effort flag. Provider defaults throughout.
@@ -17,16 +24,28 @@
  * accepts the message object rather than only a string, which is what keeps
  * the Anthropic cache breakpoint on the system prompt.
  */
-import { generateText, dynamicTool, jsonSchema } from "ai";
+import { streamText, dynamicTool, jsonSchema } from "ai";
 import { z } from "zod";
 import type { EngineDb } from "@league/engine";
 import type { ModelStepRequest, ModelStepResult, ModelMessage } from "./session.ts";
 import { supportsExplicitCaching } from "./models.ts";
+import type { PartialSink } from "./stream.ts";
 import type { UsageTokens } from "./spend.ts";
+
+/**
+ * How often the in-flight partial is flushed to the sink, wall clock. This is
+ * a mechanical write throttle (one small upsert per running session per
+ * interval), not league time, so it does not go through `Clock`.
+ */
+const PARTIAL_FLUSH_MS = 500;
 
 export interface ModelStepConfig {
   /** Optional override for tests. */
-  generate?: typeof generateText;
+  stream?: typeof streamText;
+  /** Receives the accumulated partial output as the step streams (§12.1). */
+  onPartial?: PartialSink;
+  /** Flush throttle override for tests; defaults to PARTIAL_FLUSH_MS. */
+  flushIntervalMs?: number;
 }
 
 /** Declare a league tool to the model without giving the SDK an executor. */
@@ -124,9 +143,10 @@ export function createModelStep(
   _db: EngineDb,
   config: ModelStepConfig = {},
 ): (req: ModelStepRequest, stepNo: number) => Promise<ModelStepResult> {
-  const generate = config.generate ?? generateText;
+  const stream = config.stream ?? streamText;
+  const flushIntervalMs = config.flushIntervalMs ?? PARTIAL_FLUSH_MS;
 
-  return async function modelStep(req: ModelStepRequest): Promise<ModelStepResult> {
+  return async function modelStep(req: ModelStepRequest, stepNo: number): Promise<ModelStepResult> {
     // The session loop keeps its own message and tool types so it can be unit
     // tested without the SDK; this is the one boundary where they meet, so the
     // call options are assembled here and handed over with a single cast.
@@ -140,25 +160,55 @@ export function createModelStep(
       messages,
       tools: declareTools(req),
       // No maxOutputTokens, temperature, reasoning budget, or effort flag (§8.1).
-    } as unknown as Parameters<typeof generateText>[0];
+    } as unknown as Parameters<typeof streamText>[0];
 
-    const result = await generate(params);
+    const result = stream(params);
 
-    const toolCalls = (result.toolCalls ?? []).map((c) => ({
+    // Accumulate deltas as they arrive and stage them on a throttle. streamText
+    // reports provider failures as `error` parts in the stream rather than by
+    // throwing, so the error is carried out of the loop and rethrown — the
+    // session loop's catch is what marks the session failed.
+    let partialReasoning = "";
+    let partialText = "";
+    let streamError: unknown = null;
+    let lastFlush = 0;
+    for await (const part of result.fullStream) {
+      if (part.type === "reasoning-delta") partialReasoning += part.text;
+      else if (part.type === "text-delta") partialText += part.text;
+      else if (part.type === "error") streamError = part.error;
+      else continue;
+      if (!config.onPartial || streamError !== null) continue;
+      const now = Date.now();
+      if (now - lastFlush < flushIntervalMs) continue;
+      lastFlush = now;
+      await config.onPartial({ stepNo, reasoning: partialReasoning, text: partialText });
+    }
+    if (streamError !== null) throw streamError;
+
+    const [text, rawToolCalls, usage, providerMetadata, content, finishReason] = await Promise.all([
+      result.text,
+      result.toolCalls,
+      result.usage,
+      result.providerMetadata,
+      result.content,
+      result.finishReason,
+    ]);
+
+    const toolCalls = (rawToolCalls ?? []).map((c) => ({
       toolCallId: c.toolCallId,
       toolName: c.toolName,
       args: (c as { input?: unknown }).input,
     }));
 
     return {
-      text: result.text ?? "",
+      text: text ?? "",
       toolCalls,
-      usage: usageOf(result.usage ?? {}),
-      gatewayCostUsd: gatewayCostFrom(result.providerMetadata),
+      usage: usageOf(usage ?? {}),
+      gatewayCostUsd: gatewayCostFrom(providerMetadata),
       // Every call bills the gateway (commissioner's decision, 2026-08-28).
       billedTo: "gateway",
-      assistantMessage: { role: "assistant", content: result.content ?? result.text ?? "" },
-      finishReason: result.finishReason,
+      assistantMessage: { role: "assistant", content: content ?? text ?? "" },
+      finishReason,
     };
   };
 }
