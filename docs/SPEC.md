@@ -1245,6 +1245,8 @@ Do the draft milestone (M4) as early as the engine allows. The draft is the firs
 
 ## 17. Go-live checklist
 
+*The person-facing version of this list, with the actual steps and where to check each one, is [`docs/SETUP.md`](SETUP.md).*
+
 - [ ] All environment variables set in Vercel (production).
 - [ ] Custom domain attached; `SITE_DOMAIN` set; agent web tools block it.
 - [ ] Neon backups/PITR enabled, and the plan checked against the season's storage. The free tier is 512 MB per branch; `session_events` stores every model message and every tool result, so a full season of twelve agents will not fit. Nothing watches this — writes simply start failing, and the admin pages render calm and empty because every read is defensive.

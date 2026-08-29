@@ -3,7 +3,8 @@ import { getSettings, matchups, playerWeekStats, scoringDiscrepancies } from "@l
 import { formatEt } from "@league/shared";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, points } from "../../../components/ui";
 import { db } from "../../../lib/db";
-import { correctPlayerPointsAction, refinalizeCutoff, refinalizeWeekAction } from "../../../lib/adminActions";
+import { correctPlayerPointsAction, refinalizeWeekAction } from "../../../lib/adminActions";
+import { refinalizeCutoff } from "../../../lib/refinalizeWindow";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Scores" };
