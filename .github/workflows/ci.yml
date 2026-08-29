@@ -18,11 +18,16 @@ jobs:
       - run: pnpm lint
       - run: pnpm typecheck
       - run: pnpm test
-      # The app builds without a database: pages render per request, so a
-      # broken page or workflow is caught here rather than on deploy.
+      # `next build` alone, without the migrate and seed steps the real build
+      # runs first: there is no database here. Pages are ISR-prerendered, so a
+      # page that throws, or a workflow that will not compile, is caught here
+      # rather than on the deploy. Every read degrades to an empty render.
       - run: pnpm --filter @league/web exec next build
         env:
           DATABASE_URL: postgresql://unused:unused@127.0.0.1:5432/unused
+          # Nothing is listening, so fail the connect in a second rather than
+          # eight — a prerender has 60 seconds and a page makes many reads.
+          DB_CONNECT_TIMEOUT_SECONDS: "1"
           SESSION_SECRET: ci
           CRON_SECRET: ci
           COMMISSIONER_PASSWORD: ci

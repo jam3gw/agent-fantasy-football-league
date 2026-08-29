@@ -64,8 +64,16 @@ The rest of the round, all real:
 
 **A process note worth keeping.** I had been running `pnpm -s typecheck`, and
 `-s` silences the per-package output — so packages with type errors reported
-green. Two real errors were hiding behind it, and a missing export that only
-`next build` caught. Checks are run unsilenced from here on.
+green to me. Two real errors were hiding behind it, and a missing export that
+only `next build` caught.
+
+Worse: **CI had been failing on it and I had not looked.** Runs 11, 12 and 13
+on this branch are all red, for exactly those three commits — the root
+`pnpm typecheck` exits non-zero correctly, so the pipeline was right and my
+local invocation was wrong. I had been checking the Vercel deploy after each
+push (which passed, because Vercel does not run the typecheck) and not the
+GitHub Actions run. Run 14 is green. Both are checked after every push from
+here on, and checks are run unsilenced.
 
 Test suite: **368 tests green**.
 
