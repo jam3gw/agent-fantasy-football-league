@@ -72,6 +72,20 @@ Program terms confirmed in docs on 2026-08-29:
   team cannot opt back out), and it is region-dependent. Plus $25 at signup,
   expiring 30 days later. Grok's heaviest month is well under $150, so this
   covers the slot outright.
+  - Setup path (docs, 2026-08-29): console.x.ai → Billing → Credits section →
+    a **team admin** enables "Share API Inputs and Outputs for Model Training"
+    → accept the terms. Credits appear within ~24 hours.
+  - **Region**: excluded are the 27 EU member states plus Iceland,
+    Liechtenstein, Norway and the UK. The US is eligible.
+  - **Data sharing is a team-level setting and one xAI account can hold several
+    teams.** Since the opt-in cannot be reversed, the league should get its own
+    xAI team, so the permanent consent covers only league traffic — which §8.9
+    already deems acceptable because everything here is public.
+  - The $5 threshold is prior *spend*. At Grok's $2/$6 that is ~2.5M input
+    tokens: one agent reaches it in roughly two or three days of live play, so
+    the opt-in comes after the season starts, not before. Whether the $25
+    signup promo counts toward the threshold is claimed by secondary sources
+    only and is unconfirmed.
 - **OpenAI**: complimentary daily tokens for shared traffic, ~1M/day on the
   flagship group at usage tiers 3–5 (250K at tiers 1–2), resetting 00:00 UTC.
   **The tool-use exclusion is still unverified** — the help-center article
