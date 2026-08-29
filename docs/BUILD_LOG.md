@@ -11,6 +11,68 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — thinking confirmed per model; thinking logs made durable and visible (commissioner request)
+
+Jake asked to (1) confirm thinking is enabled for the twelve models, (2) make
+sure the thinking logs are persisted for all of them, and (3) show them in the
+UI. Branch `claude/confirm-thinking-enabled-bncjs3`.
+
+**(1) Confirmed, with §8.1 precision.** We *enable* nothing and *disable*
+nothing: no thinking settings ever reach a provider, by spec. What provider
+defaults actually did on the smoke round (production DB, measured today —
+full table in VERIFIED.md): 8 of 12 models emitted reasoning tokens
+(DeepSeek 222, Gemini 186, Grok 104, Qwen 69, Kimi 63, Muse Spark 62,
+GPT-5.6 Terra 24, Fable 5 12). Opus 5, Sonnet 5, GPT-5.6 Sol, and GLM-5.3
+emitted zero — for the Anthropic pair that is adaptive thinking (on by
+default, model chooses; the smoke task is one trivial tool call) rather than
+thinking being off. §8.1 forbids forcing it, so zero-on-a-trivial-task is
+the correct reading. Re-judge on the first weekly review, as already noted.
+
+**(2) Persistence had a real gap.** Reasoning *text* only lived in the
+transient `session_stream` partial, deleted the moment each step's assistant
+event lands. It survived only incidentally, inside `raw.content` reasoning
+parts, and only for the 4 models whose provider returns raw reasoning text
+by default (DeepSeek, Kimi, Grok, Qwen — measured in prod). Fixed:
+`createModelStep` now returns the accumulated reasoning deltas (the same
+text the live stream shows) and the session loop records it as
+`reasoning` on the assistant event — durable in `session_events`, same as
+the message text.
+
+**(3) The UI dropped thinking once a step completed.** `TranscriptEventItem`
+rendered only `text`; reasoning was visible solely in the live ThinkingStream
+panel. Fixed: assistant events now render a "thinking" block (italic, muted,
+matching the live style) from `content.reasoning`, falling back to reasoning
+parts inside `content.raw` so the four models' existing production
+transcripts show their thinking retroactively, no migration needed.
+
+**Provider visibility options — a decision, logged.** Three providers run
+reasoning but hide the text unless asked: Anthropic's current models default
+to `display: "omitted"` (thinking blocks stream empty — exactly what prod
+shows for Fable 5), Gemini returns thought summaries only with
+`includeThoughts`, OpenAI only with a `reasoningSummary` mode. The step now
+sends visibility-only options: `anthropic.thinking = {type: "adaptive",
+display: "summarized"}` (adaptive is already the default on all three league
+Anthropic models; `display` cannot be sent without `type`),
+`google.thinkingConfig.includeThoughts = true`, `openai.reasoningSummary =
+"auto"`. Reading of §8.1: it forbids budgets, effort flags, toggles,
+temperature — things that change *behavior*. These change what the response
+carries, not how the model thinks, the same distinction §8.1 itself draws
+for prompt caching ("changes cost only, never behavior"), and §12.1 v1.10
+exists precisely so spectators can watch agents think. Not asked as a
+question because the commissioner's request is the authorization: thinking
+logs "for all of the models" are impossible while providers omit the text.
+
+**Verify item, open:** the pass-through of these three options via the AI
+Gateway is unverifiable from this sandbox (no `AI_GATEWAY_API_KEY`). On the
+next smoke round, check that anthropic/google/openai steps now record
+non-empty `reasoning` — and that no provider rejects the option (a 400
+would fail sessions; if one appears, drop that provider's option and log it).
+
+Suite after the change: 525 tests green across the five packages
+(shared 13, engine 167, data 23, agent 141, web 181), lint and typecheck
+clean. The stale assertion in `spend.test.ts` ("no provider options at all",
+written for the BYOK removal) now pins exactly the one visibility option.
+
 ## 2026-08-29 — v1.10 merged to main; production deploy verified
 
 Jake said "merge to main". Fast-forward 9755d94 → ae8cc5c (main had not
