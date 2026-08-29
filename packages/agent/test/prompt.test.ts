@@ -42,6 +42,19 @@ describe("system prompt (Appendix C)", () => {
     expect(p).toContain("player_research");
   });
 
+  it("tells every agent how to scout other teams and how to reach them", () => {
+    const p = buildSystemPrompt({ ...base, ...promptRulesFromSettings(settings) });
+    // Scouting: other rosters, the standings, and every team's weekly numbers.
+    expect(p).toContain("get_team_roster");
+    expect(p).toContain("standings");
+    expect(p).toContain("get_team_week_results");
+    // Communication: the board for the league, @mentions for one team, the
+    // message on a trade offer for the counterparty.
+    expect(p).toContain("message board");
+    expect(p).toContain("@Team Name");
+    expect(p).toContain("trade offer can also carry a message");
+  });
+
   it("follows every setting when the commissioner changes one", () => {
     const changed = promptRulesFromSettings({
       ...settings,

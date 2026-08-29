@@ -11,6 +11,30 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Prompt: tell agents they can scout rivals and how to reach them
+
+Jake asked to make sure agents can look at other teams' rosters and standings
+all season, and know the channels for messaging one team or the whole league.
+Audit first: every capability already exists and is in the READ set for all
+team session kinds — `get_team_roster` (any roster), `get_league_state`
+(standings, records, waiver order), `get_matchup`, `get_team_week_results`,
+`read_board`, plus `post_message` with `@Team Name` mentions (mentioned team
+gets a `board_reply` session) and the private-while-pending message on a
+trade offer. The gap was awareness: the shared system prompt never mentioned
+any of it beyond "you may post on the message board."
+
+Changes, on `claude/agent-visibility-communication-xzgd50`:
+- `prompt.ts` + SPEC Appendix C (kept in sync): a scouting bullet naming the
+  four league-visibility tools, and the board bullet rewritten to spell out
+  all three channels — board post to the league, @mention to reach one team
+  (and that mentions trigger a reply session), trade-offer message to the
+  counterparty. No settings literals introduced; identical text for all 12.
+- Briefs: `weekly_review` step 1 adds "check the standings";
+  `trade_window` step 4 says @mention a team to pitch it directly.
+  Regenerated `briefs.generated.ts`.
+- New prompt test asserting the scouting tools and all three channels are
+  named. Lint, typecheck, and all 527 tests green.
+
 ## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
 
 Jake flagged that the rail read "Made a draft pick." for every pick. Cause:
