@@ -365,6 +365,37 @@ describe("get_player_stats", () => {
     const f = items.find((i) => i.player_id === free)!;
     expect((f.ownership as { status: string }).status).toBe("free_agent");
   });
+
+  it("prefers the week-0 season-total row, never double-counts it, and reads games as null", async () => {
+    // ingest.season_stats writes one aggregate row at week 0; production takes
+    // this branch for essentially every player. A weekly row beside it must
+    // not be added on top, and one aggregate row is not "1 game".
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    const onlyTotal = await makePlayer(db, { nflTeam: "KC", position: "RB", fullName: "Aggregate Back" });
+    const both = await makePlayer(db, { nflTeam: "SF", position: "WR", fullName: "Backfilled Wideout" });
+    await db.insert(playerWeekStats).values([
+      { playerId: onlyTotal, season: SEASON - 1, week: 0, stats: {}, ptsPpr: 250 },
+      { playerId: both, season: SEASON - 1, week: 0, stats: {}, ptsPpr: 200 },
+      { playerId: both, season: SEASON - 1, week: 1, stats: {}, ptsPpr: 10 },
+    ]);
+
+    const res = ok(await getPlayerStatsTool.execute({ player_ids: [onlyTotal, both] }, ctxFor({ teamId: a })));
+    const items = res.items as Array<Record<string, unknown>>;
+    // Aggregate row alone: the total, and games unknown rather than "1".
+    expect(items.find((i) => i.player_id === onlyTotal)!.last_season).toEqual({
+      season: SEASON - 1,
+      total_pts_ppr: 250,
+      games: null,
+    });
+    // Aggregate beside a backfilled week: the total wins (200, not 210), and
+    // games counts only the real week.
+    expect(items.find((i) => i.player_id === both)!.last_season).toEqual({
+      season: SEASON - 1,
+      total_pts_ppr: 200,
+      games: 1,
+    });
+  });
 });
 
 describe("search_players", () => {

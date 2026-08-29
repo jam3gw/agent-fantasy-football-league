@@ -11,6 +11,72 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Review round on the mock-draft merge
+
+Fresh-context reviewer on the full diff before merging to main. Fixed:
+
+- **Late-draft lineups landed on a week nobody plays** (the real find): the
+  draft's auto-fill wrote entries for the draft-time week, but a draft that
+  slips past week 1's kickoff starts the season later (§3.7), stranding every
+  lineup on an unplayed week — the exact "team fields nobody" gap the feature
+  closes. `handleDraftCompleted` now moves the entries to the real start week;
+  engine test added.
+- `toolOutput` degrades a BigInt/circular result to a §8.4 failure instead of
+  throwing outside the per-tool catch and failing the whole session.
+- `get_player_stats.last_season` no longer reads "games: 1" off the week-0
+  season-total row (games counts real weeks or reads null), and neither read
+  path can double-count if weekly history is ever backfilled beside it.
+- SPEC self-contradictions from the day's changes: §7.8 vs the §3.1 carve-out,
+  §10.1/§9.1 vs the daily season-stats booking, §8.9 and the go-live checklist
+  vs gateway-held BYOK. The `/spend` footnote now explains why BYOK teams read
+  near zero in "paid".
+- Stale comments/titles; removed the dead mock-only debug module.
+
+Recorded, not fixed: the reviewer's claim that `MODEL_PRICE_SEED` is applied
+by no code path is wrong — `apps/web/scripts/seed.mts` inserts it with
+`onConflictDoNothing` on every build, which is what puts Mistral's price row
+on production. The fair kernel (no alarm if a model is ever missing a price
+row while BYOK makes the gateway report $0) is deferred: seeding covers every
+league model and the reporter, and a health check for price coverage is noted
+for M8 hardening.
+
+## 2026-08-29 — Draft picks auto-fill the lineup by position
+
+Jake's ask during the mock draft. A drafted player now fills his team's first
+open eligible starting slot for the coming week (QB, RB1, RB2, WR1, WR2, TE,
+FLEX, DST, K; bench only when nothing eligible is open), on both the agent
+pick path and the auto-pick path, inside the same transaction as the pick.
+`autofillDraftLineupSlot` in `packages/engine/src/lineup.ts`; recorded as a
+carve-out under SPEC §3.1 — placement by arrival order is not the engine
+choosing a starter. This also retires SETUP.md's "week 1 lineups have no
+fallback" gap: the draft itself now produces a full legal lineup, and agents
+rearrange with set_lineup. Landed after the mock draft ran (its rosters were
+drafted to the bench, as before); verified by engine tests and the updated
+make_pick test.
+
+## 2026-08-29 — Team 2: Opus 5 replaced with Mistral Large 3
+
+Slot 2 now runs `mistral/mistral-large-3` (was `anthropic/claude-opus-5`).
+**Reason: the price point of Opus 5.** The mock draft's per-session measurements
+put one Opus onboarding at $3.34 and its season projection at roughly $335 —
+about half of the projected bill for the entire twelve-team league on one seat.
+Mistral Large 3 prices at $2/$6 per M (~$16/season projected) and adds a lab
+the league did not have.
+
+Done so far:
+- id verified against the live gateway catalog (`mistral/mistral-large-3`);
+- swapped on the mock branch and re-onboarded there, so the full mock draft
+  rehearses the final roster;
+- `LEAGUE_MODELS` slot 2 and `MODEL_PRICE_SEED` updated in code (rides the
+  mock-draft merge; the seed is `onConflictDoNothing`, so code and data cannot
+  fight).
+
+Production landed too, with Jake's explicit go-ahead after the session's
+permission classifier blocked the first attempt: one transaction carrying the
+`teams` update, the public `model_swapped` transaction, the commissioner-action
+audit row, and the `model_prices` seed row. Verified after commit: team 2 reads
+`mistral/mistral-large-3`.
+
 ## 2026-08-29 — /sessions/[id] rebuilt as steps (Claude Design handoff)
 
 Jake designed a replacement for the session transcript in Claude Design and
@@ -348,7 +414,6 @@ production applies 0003 automatically via the build's migrate step.
 `AI_GATEWAY_API_KEY` in this environment). The stream-part shapes were checked
 against the installed `ai@7.0.84` types; first real session on the preview
 deploy will show the thinking panel — worth eyeballing after merge.
-
 ## 2026-08-29 — Commissioner login works; both admin secrets confirmed live
 
 `COMMISSIONER_PASSWORD` and `SESSION_SECRET` are both set and scoped to
