@@ -2,6 +2,54 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-29 — Smoke round verified thinking end to end; the harder probe found a real pre-existing bug
+
+Jake asked for a smoke round to verify the reasoning shows up, and gave the
+go-ahead to merge and deploy. Merged (with the activity-rail work another
+session had landed on main in the meantime), production deploy confirmed by
+watching `/sessions/613` start rendering its thinking block, then queued the
+round directly in `sessions` (the tick's five-minute sweep starts them; this
+sandbox holds no admin or cron secret).
+
+**Smoke round (sessions 857–868): 12 of 12 succeeded, zero errors, zero
+`visibility_option_dropped` events** — every provider accepted the visibility
+options. Durable `reasoning` landed for six models, two of them new since
+the morning measurement: Gemini 3.1 Pro (203 chars — `includeThoughts`
+works) and GLM-5.3 (931 chars, interestingly alongside a reported reasoning
+token count of zero). Grok, DeepSeek, Kimi, Qwen as before. The transcript
+pages render the blocks (Gemini 1, GLM 2, Grok 2 — matching the DB).
+Still nothing to show for: all three Anthropic models and GPT-5.6 Sol
+(0 reasoning tokens on the trivial task — adaptive thinking skipping, as
+before), GPT-5.6 Terra (20 tokens, no summary returned for so small a
+burst), Muse Spark (126 tokens, provider withholds text, no flag exists),
+and Mistral Large 3 (team 2's swapped model; not a reasoning model).
+
+**The probe that earned its cost.** The smoke task is too trivial to make an
+Anthropic model think, so one `manual` Sonnet 5 session (869) ran with a
+deliberative draft-strategy objective. Step 1 proved the Anthropic display
+option works: 23 reasoning tokens and a real summarized-thinking sentence
+recorded in the transcript. Step 2 then failed with the old
+`AI_InvalidPromptError: messages do not match the ModelMessage[] schema` —
+a **pre-existing** bug, nothing to do with the thinking change:
+`player_research` returns `updated_at` as a live `Date` (a drizzle
+timestamp), the SDK's JSON-value schema rejects a `Date` in a tool result,
+and the very next model step dies. Reproduced locally against the real
+`streamText`: the transcript's own bytes validate (JSONB had serialized the
+Date), the live object fails — which is exactly why no resumed session and
+no smoke test (which never calls `player_research`) ever saw it. Every
+session that researches players and then takes another step would have
+failed this way, including every onboarding and weekly review.
+
+Fix, two layers: `updated_at` now goes through `iso()` like every other
+date in the read tools (the only leak found by audit), and `toolOutput`
+JSON-normalizes every result, so the live step sees exactly what the
+transcript records and the two can never diverge again. Regression test
+drives a Date-returning tool through a live two-step session and validates
+every message with the SDK's own `modelMessageSchema` — the same
+run-their-validator lesson this log already recorded once. The tick's
+automatic retry of 869 (session 870) was cancelled before it could fail
+against the un-fixed deploy; a fresh probe runs after this deploys.
+
 ## Questions for Jake
 
 
@@ -104,6 +152,75 @@ pre-stamp has not already narrowed.
 Round two verified all six fixes — the mock genuinely exercises the route's
 catch, recovery clearing touches only capacity's keys, the snapshot hour
 confirmed live at 10:00 UTC — and reported nothing new. Loop closed.
+
+## 2026-08-29 — /sessions/[id] rebuilt as steps (Claude Design handoff)
+
+Jake designed a replacement for the session transcript in Claude Design and
+handed the bundle over for implementation. The old page was eighteen flat
+events, each a row of badges over a collapsed blob of JSON — everything §12.1
+asks for and none of what a reader came for.
+
+What shipped, on `sessions-transcript-redesign`:
+
+- `lib/sessionTranscript.ts` — pure derivation over `session_events`:
+  `groupSteps` (the brief, then one step per assistant turn with that turn's
+  tool calls nested by `tool_call_id`), `stepTitle`/`callSummary` (a step is
+  named after what it did — "Added a free agent", "15 of 16 active"),
+  `playerIndex`, and `outcomeOf`. No database reads, so the live view derives
+  exactly what the finished page does. 29 tests in
+  `test/sessionTranscript.test.ts`.
+- `components/session-steps.tsx` — the step card, plus purpose-built renderers
+  for `get_my_team`/`get_team_roster`, `get_free_agents`/`get_available_players`,
+  `get_player_stats`, `add_free_agent`/`drop_player`, `write_decision_log`/
+  `make_pick`, and the scratchpad/board writes. Every other tool falls back to
+  the JSON view the page always had. §12.1's raw arguments and result stay one
+  disclosure away inside the step that made the call.
+- `components/session-view.tsx` and `components/session-rail.tsx` — the header,
+  the six facts, the outcome banner, and a sticky scrollspy rail (the only
+  client island; open/close is set on the `<details>` elements directly so a
+  reader's open step survives a live re-render).
+- `live.tsx` now renders the same components with a thinking card above them,
+  so a running session and a finished one are one page rather than two.
+
+Three decisions worth recording. **The prototype's palette was stale** — it
+was drawn from a pre-redesign snapshot (Geist, `#1f6f4a`, a twelve-link nav),
+so the layout was taken from it and the colours from the design system already
+in `globals.css`; Jake confirmed. **No Finished/Live toggle**: the prototype
+showed one, but status decides which view renders, so a manual switch would
+lie about a finished session. **The prototype's tool names were invented**
+(`get_roster`, and `get_available_players` for a waivers session); the
+renderers are keyed on the tools that actually exist.
+
+Two real defects the work turned up, both fixed:
+
+- The opening `user` event (brief + context snapshot) was being grouped as a
+  mid-session nudge, so the brief rendered as a "Note". Caught by a test, not
+  by eye.
+- "Jump to the decision" rendered accent-on-accent — invisible. `globals.css`
+  colours every `a` *unlayered*, which outranks any Tailwind colour utility on
+  the anchor itself. The label carries its own colour on a `<span>` now. Worth
+  remembering: it will bite any future filled-accent link.
+
+Merged as PR #1 (`133023b`) and deployed: production
+`dpl_Bkt9k2mnytHLehwb5aF6oqmEAPdT` is READY on league.jake-moses.com.
+Probed `/sessions/857` (a real smoke session) on production: the header reads
+"Smoke test — team-1 · Claude Fable 5 · triggered by commissioner" with
+succeeded / 12s / $0.00 / 3 steps / 2 tool calls / 7.7k tokens; the banner
+says "Looked, and changed nothing." over the agent's own decision log; the
+rail lists "Read the brief", "Checked the league" (`get_league_state`) and
+"Wrote the decision log". A read-only session was the useful first case — it
+is the one the outcome banner has to say something honest about.
+
+Rebased onto main after the durable-thinking work landed below. That entry
+made `content.reasoning` first-class on assistant events and added
+`assistantReasoning` as its reader; the step card's "Thought" disclosure now
+delegates to that reader rather than carrying a second copy of the same
+fallback, so both the durable field and the older raw-parts events render.
+
+Verified: lint, typecheck and all tests green; `next build` clean; the page
+rendered to static HTML and screenshotted at 1280px and 390px (finished and
+running states) — no sideways scroll, tables scroll inside their scrollers,
+which `test/mobile.test.ts` now asserts for these tables too.
 
 ## 2026-08-29 — thinking confirmed per model; thinking logs made durable and visible (commissioner request)
 
