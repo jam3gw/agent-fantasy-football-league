@@ -34,17 +34,24 @@ import type { UsageTokens } from "./spend.ts";
 
 /**
  * How often the in-flight partial is flushed to the sink, wall clock. This is
- * a mechanical write throttle (one small upsert per running session per
- * interval), not league time, so it does not go through `Clock`.
+ * a mechanical write throttle, not league time, so it does not go through
+ * `Clock`. Each flush rewrites the whole accumulated partial (the sink is an
+ * upsert of one row), so the interval backs off as the partial grows —
+ * otherwise a long reasoning step would rewrite tens of kilobytes twice a
+ * second for minutes on end.
  */
-const PARTIAL_FLUSH_MS = 500;
+export function partialFlushIntervalMs(accumulatedChars: number): number {
+  if (accumulatedChars > 32_000) return 5_000;
+  if (accumulatedChars > 8_000) return 2_000;
+  return 500;
+}
 
 export interface ModelStepConfig {
   /** Optional override for tests. */
   stream?: typeof streamText;
   /** Receives the accumulated partial output as the step streams (§12.1). */
   onPartial?: PartialSink;
-  /** Flush throttle override for tests; defaults to PARTIAL_FLUSH_MS. */
+  /** Fixed flush throttle override for tests; defaults to the adaptive tiers. */
   flushIntervalMs?: number;
 }
 
@@ -144,7 +151,6 @@ export function createModelStep(
   config: ModelStepConfig = {},
 ): (req: ModelStepRequest, stepNo: number) => Promise<ModelStepResult> {
   const stream = config.stream ?? streamText;
-  const flushIntervalMs = config.flushIntervalMs ?? PARTIAL_FLUSH_MS;
 
   return async function modelStep(req: ModelStepRequest, stepNo: number): Promise<ModelStepResult> {
     // The session loop keeps its own message and tool types so it can be unit
@@ -178,8 +184,10 @@ export function createModelStep(
       else if (part.type === "error") streamError = part.error;
       else continue;
       if (!config.onPartial || streamError !== null) continue;
+      const interval =
+        config.flushIntervalMs ?? partialFlushIntervalMs(partialReasoning.length + partialText.length);
       const now = Date.now();
-      if (now - lastFlush < flushIntervalMs) continue;
+      if (now - lastFlush < interval) continue;
       lastFlush = now;
       await config.onPartial({ stepNo, reasoning: partialReasoning, text: partialText });
     }

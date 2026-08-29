@@ -78,9 +78,16 @@ export function resetRateLimits(): void {
 /**
  * Guard for a public API route: returns a 429 response when the caller is over
  * the limit, or `null` when the request may proceed.
+ *
+ * `bucket` gives an endpoint its own window per IP. The site's own polling
+ * endpoints (the pulse stamp, the live transcript) use it so a spectator with
+ * a live tab open cannot starve the data API of its §12.1 budget — or the
+ * reverse. Data-API routes omit it and share the plain per-IP window as
+ * before.
  */
-export function rateLimitResponse(request: Request): Response | null {
-  const verdict = checkRateLimit(clientIp(request));
+export function rateLimitResponse(request: Request, bucket?: string): Response | null {
+  const ip = clientIp(request);
+  const verdict = checkRateLimit(bucket ? `${bucket}:${ip}` : ip);
   if (verdict.ok) return null;
   return Response.json(
     {

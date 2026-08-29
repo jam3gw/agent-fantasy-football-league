@@ -364,6 +364,8 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       .update(sessions)
       .set({ status: "skipped", endedAt: clock.now(), updatedAt: clock.now() })
       .where(and(eq(sessions.id, sessionId), inArray(sessions.status, ["queued", "running"])));
+    // A killed invocation may have staged a partial; the session is over.
+    await clearPartial(db, sessionId);
     return { status: "skipped", endedBy: "deadline", toolCalls: 0, invalidToolCalls: 0, steps: 0 };
   }
 
@@ -410,6 +412,9 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
     messages = restored.messages;
     seq = restored.seq;
     await recordEvent(db, clock, sessionId, seq++, "info", { resumed: true, steps_so_far: restored.steps });
+    // The invocation this resumes from may have died mid-stream; its staged
+    // partial is a step that never completed, not what this one is thinking.
+    await clearPartial(db, sessionId);
   } else {
     const systemPrompt = await deps.buildSystemPrompt(ctx);
     const { brief, snapshot } = await deps.buildContext(ctx);
@@ -675,9 +680,8 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
     };
   } catch (err) {
     await recordEvent(db, clock, sessionId, seq++, "error", { error: String(err) });
-    // Best-effort: a failed session must not leave a stale "thinking" preview,
-    // but clearing must not mask the error being recorded here.
-    await clearPartial(db, sessionId).catch(() => undefined);
+    // A failed session must not leave a stale "thinking" preview.
+    await clearPartial(db, sessionId);
     await db
       .update(sessions)
       .set({

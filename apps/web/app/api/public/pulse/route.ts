@@ -9,7 +9,9 @@ import { computePulseStamp } from "../../../../lib/pulse";
 import { publicJson, rateLimitResponse } from "../../../../lib/rateLimit";
 
 export async function GET(request: Request): Promise<Response> {
-  const limited = rateLimitResponse(request);
+  // Own bucket: this is the site's own heartbeat, and it must not eat the
+  // data API's per-IP budget (nor be starved by a busy live-transcript tab).
+  const limited = rateLimitResponse(request, "pulse");
   if (limited) return limited;
   return publicJson({ stamp: await computePulseStamp(db()) });
 }

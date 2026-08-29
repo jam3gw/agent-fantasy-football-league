@@ -47,7 +47,18 @@ export function createPartialSink(db: EngineDb, clock: Clock, sessionId: number)
   };
 }
 
-/** Remove the staged partial once its step's assistant event is durable. */
+/**
+ * Remove the staged partial once its step's assistant event is durable (or
+ * the session is over). Swallows failures for the same reason the sink does:
+ * this is preview cleanup, and a hiccup deleting a throwaway row must never
+ * fail a session whose real work already succeeded. The row it would have
+ * removed stays invisible regardless — the live API only returns the partial
+ * while the session is `running`.
+ */
 export async function clearPartial(db: EngineDb, sessionId: number): Promise<void> {
-  await db.delete(sessionStream).where(eq(sessionStream.sessionId, sessionId));
+  try {
+    await db.delete(sessionStream).where(eq(sessionStream.sessionId, sessionId));
+  } catch {
+    // Preview only — dropped on any error.
+  }
 }

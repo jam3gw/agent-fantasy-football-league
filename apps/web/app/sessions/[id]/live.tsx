@@ -91,7 +91,12 @@ export default function LiveSession({
     onSuccess: (data) => {
       setSummary(data.session);
       if (data.team) setTeam(data.team);
-      setStream(data.stream);
+      // A batch that carries an assistant event supersedes the staged partial
+      // even when the runner has not deleted the row yet (the response can
+      // catch the moment between the event insert and the delete) — showing
+      // both would render the same step twice.
+      const supersedes = data.events.some((e) => e.type === "assistant");
+      setStream(supersedes ? null : data.stream);
       if (data.events.length > 0) {
         after.current = data.events[data.events.length - 1]!.seq;
         setEvents((prev) => {
