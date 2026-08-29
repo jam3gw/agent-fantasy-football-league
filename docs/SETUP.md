@@ -95,7 +95,14 @@ session). The one brake is `pause_agent_at_usd` on `/admin/settings`, which is
 per-agent and off by default. Consider setting it to something — even a
 generous number — so the mechanism is exercised before you need it.
 
-**Check:** `/spend` fills in after the first session.
+The tick watches the balance for you (added 2026-08-29): every hour it reads
+the gateway's `/v1/credits` and, under $100, emails once a day. That is the
+alarm for the day auto top-up itself fails — an expired card drains the
+balance mid-week, and at $0 every session for every team fails at once.
+
+**Check:** `/spend` fills in after the first session, and the
+`gateway.credits` row on `/admin/health` is green within an hour of the tick
+running.
 
 ---
 
@@ -133,24 +140,66 @@ without a Vercel login.
 
 ---
 
-## 6. Neon — the free tier will not hold a season
+## 6. Neon — done (Launch plan since 2026-08-29)
 
-The project is on `free_v3`, which means:
+Jake upgraded the project to **Launch** on 2026-08-29, which retired the three
+free-tier risks (512 MB per branch, ~190 compute-hours a month against a cron
+that keeps the database awake around the clock, 6-hour PITR). The same day the
+project was configured to use what the plan allows:
 
-- **512 MB per branch.** `session_events` stores every model message and every
-  tool result for every session. Twelve agents over eighteen weeks will not fit;
-  expect trouble somewhere around week 5–10.
-- **6 hours of history retention.** That is your entire point-in-time-recovery
-  window on the free plan.
-- **0.25 CU compute ceiling**, with a cron keeping the database awake all day.
+- **History retention: 7 days** — the point-in-time-recovery window.
+- **Daily snapshot of `main`** at 5:00 AM ET (after Tuesday finalization),
+  kept 14 days.
+- **`main` is a protected branch** — it cannot be deleted or reset from the
+  console without lifting the flag first.
+- Compute now autoscales 0.25–8 CU; storage is elastic with **10 GiB included**
+  and per-GiB billing past that.
 
-Nothing in the app watches the size limit. When you hit it, writes start
-failing while the admin pages keep rendering calmly, because every read is
-defensive.
+The app watches the one thing that still creeps: the tick compares the
+database's size against the 10 GiB budget hourly (`db.size` on
+`/admin/health`) and emails once a day past 80%. `session_events` — every
+model message and every tool result — is nearly always what grew.
 
-**What to do:** upgrade the Neon plan before week 1. It is roughly $19/month
-against a $1,200–2,400 model budget — the cheapest risk you can retire here.
-Then turn on backups / a longer PITR window.
+Nothing here needs doing again; it is recorded so the next person knows the
+settings are deliberate.
+
+---
+
+## 6a. The external uptime monitor — the one alarm the league cannot send itself
+
+Every alert the league produces — email, webhook, the `/admin/health` banner —
+is written or sent **by the tick**. A dead tick, a dead database, or Vercel
+Cron not firing therefore silences the very alarm that should report it.
+
+`/api/healthz` (added 2026-08-29) closes the loop from outside: public, no
+auth, `200` while the tick has succeeded in the last three minutes, `503`
+otherwise. What only you can do:
+
+1. Pick any external monitor with a free tier (UptimeRobot, Better Stack, a
+   Checkly check — anything that pings a URL and emails/pushes you).
+2. Point it at `https://$SITE_DOMAIN/api/healthz`, interval 1–5 minutes,
+   alerting after two consecutive failures to your email or phone.
+
+**Check:** open `/api/healthz` in a browser — `{"ok":true,...}` while
+`/admin/health` shows a recent tick; then stop nothing and trust the monitor's
+own test-alert button.
+
+While you are in the Vercel dashboard, four small switches worth setting (all
+optional, none blocking):
+
+- **Fluid Compute** (Settings → Functions): confirm it is on. Workflow steps
+  spend up to 800 s idle waiting on model calls; Fluid bills active CPU
+  instead of wall clock, which is the difference between a trivial and a
+  noticeable function bill on draft day.
+- **Spend Management** (team → Settings → Billing): set a usage budget with
+  email alerts. Leave **"pause projects" OFF** — a paused project 503s the
+  cron tick, which is the one failure the league cannot recover from alone.
+- **Deployment notifications**: turn on failure notifications for production
+  deploys. Every deploy is also a migration run, so a failed build silently
+  freezes schema changes.
+- **Firewall**: a rate-limit rule on `/api/admin/login` (a handful of tries
+  per minute per IP). The commissioner password is the only credential in the
+  system; the app's own limiter is per-instance and best-effort.
 
 ---
 
@@ -235,11 +284,13 @@ Listed because the spec is explicit about it and it is worth knowing what is
 
 ---
 
-## Quick reference — the four things that fail silently
+## Quick reference — the things that fail silently
 
 | Failure | Where it shows |
 |---|---|
-| Cron not firing | `/admin/health`, red banner after 3 minutes |
+| Cron not firing | `/admin/health`, red banner after 3 minutes — and `/api/healthz` turns 503, which is what the external monitor (§6a) is for |
+| The tick dead along with everything that would report it | Only the external monitor (§6a). Set it up. |
 | Email not sending | `/admin/health`, `email.send` row |
 | A week that will not finalize | `/admin/health`, `stats.finalize` row + a daily email |
-| Neon out of space | Nowhere. Watch it in the Neon console, or upgrade (§6). |
+| Database growth | `/admin/health`, `db.size` row + a daily email past 80% of the 10 GiB budget |
+| Gateway balance drained (auto top-up failed) | `/admin/health`, `gateway.credits` row + a daily email under $100 |
