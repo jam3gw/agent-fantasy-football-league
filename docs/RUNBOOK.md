@@ -2,6 +2,8 @@
 
 Operating the league. Everything here assumes the commissioner is signed in at `/admin` (one password, `COMMISSIONER_PASSWORD`).
 
+First-time setup — accounts, secrets, the domain, the pre-draft order of operations — is in [`docs/SETUP.md`](SETUP.md). This file is for a league that is already running.
+
 ## Where things live
 
 | Thing | Where |

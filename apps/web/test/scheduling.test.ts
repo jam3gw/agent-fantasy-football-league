@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import { snakeSlot } from "../lib/draft";
 import { groupKickoffWindows } from "../lib/weekPlan";
-import { refinalizeCutoff } from "../lib/adminActions";
+import { refinalizeCutoff } from "../lib/refinalizeWindow";
 
 describe("snakeSlot (§3.8)", () => {
   it("runs forward in odd rounds and backward in even rounds", () => {
