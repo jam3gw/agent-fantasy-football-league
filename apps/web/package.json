@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "pnpm --filter @league/engine migrate && tsx scripts/seed.mts && next build",
+    "build": "pnpm --filter @league/agent briefs && pnpm --filter @league/engine migrate && tsx scripts/seed.mts && next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",

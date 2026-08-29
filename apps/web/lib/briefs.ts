@@ -1,29 +1,27 @@
 import "server-only";
 /**
  * Session briefs (SPEC §8.6): short, plain text, identical for every model.
- * They live as markdown in packages/agent/briefs so they read as prose rather
- * than as string literals.
+ *
+ * They are authored as markdown in `packages/agent/briefs` so they read as
+ * prose rather than as string literals, and compiled into
+ * `packages/agent/src/briefs.generated.ts` so they travel in the bundle. They
+ * used to be read from disk with a path relative to `process.cwd()`, which
+ * does not exist inside a Vercel function — every session would have failed
+ * with ENOENT on the first deploy that actually ran one.
  */
-import { readFile } from "node:fs/promises";
-import path from "node:path";
+import { BRIEFS } from "@league/agent";
 import type { SessionKind } from "@league/engine";
 
-const BRIEF_DIR = path.join(process.cwd(), "..", "..", "packages", "agent", "briefs");
-const cache = new Map<string, string>();
-
 export async function readBrief(kind: SessionKind, context: Record<string, unknown> = {}): Promise<string> {
-  let text = cache.get(kind);
-  if (text === undefined) {
-    text = await readFile(path.join(BRIEF_DIR, `${kind}.md`), "utf8");
-    cache.set(kind, text);
-  }
+  const text = BRIEFS[kind];
+  if (text === undefined) throw new Error(`no brief for session kind: ${kind}`);
   // The commissioner types the objective for a manual session (§8.6).
   if (kind === "manual" && typeof context.objective === "string") {
-    return `${text.trim()}\n\nObjective: ${context.objective}`;
+    return `${text}\n\nObjective: ${context.objective}`;
   }
   // §8.10: the agent's own reason is the brief for the check-in it booked.
   if (kind === "self_check_in" && typeof context.reason === "string") {
-    return `${text.trim()}\n\nYour reason: ${context.reason}`;
+    return `${text}\n\nYour reason: ${context.reason}`;
   }
-  return text.trim();
+  return text;
 }

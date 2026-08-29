@@ -7,8 +7,8 @@ import "server-only";
  *  4. injury changes (handled inside the players ingest)
  *  5. expire stale offers and resolve trades whose review window ended
  */
-import { and, asc, eq, inArray, lte, ne, not, or, sql } from "drizzle-orm";
-import { parseDate } from "@league/shared";
+import { and, asc, desc, eq, inArray, lte, not, or, sql } from "drizzle-orm";
+import { etDay, parseDate } from "@league/shared";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import {
@@ -22,6 +22,7 @@ import {
   scoreWeek,
   sessionEvents,
   sessions,
+  teams,
 } from "@league/engine";
 import { db, leagueClock } from "./db";
 import { detectModelOutages, requeueFailedSessions, teamsForModels } from "./retry";
@@ -46,6 +47,8 @@ export interface TickSummary {
   queueSwept: boolean;
   /** Whether this tick had to book the first `book_daily_jobs` (§9.1). */
   queuePrimed: boolean;
+  /** Whether the season is stalled on a finalization that never happened. */
+  stalled: boolean;
   outages: number;
 }
 
@@ -106,6 +109,13 @@ const LIVE_POLL_MIN_INTERVAL_MS = 55_000;
  * 10:05 is started at 10:05, not up to five minutes later.
  */
 const QUEUE_SWEEP_INTERVAL_MS = 5 * 60_000;
+/**
+ * How long a session with no deadline may sit queued before it is retired.
+ * A week's worth of thinking is worthless a week late, and without this a team
+ * paused for the rest of the season would keep a growing pile of queued
+ * sessions that all fire the moment it is unpaused.
+ */
+const STALE_QUEUED_MS = 7 * 24 * 3600_000;
 const GAME_LENGTH_MS = 4.5 * 3600_000;
 
 export async function runTick(): Promise<TickSummary> {
@@ -129,6 +139,7 @@ export async function runTick(): Promise<TickSummary> {
     sessionsReclaimed: 0,
     queueSwept: false,
     queuePrimed: false,
+    stalled: false,
     outages: 0,
   };
 
@@ -206,36 +217,156 @@ export async function runTick(): Promise<TickSummary> {
   // interval is kept in `health` rather than derived from the clock, so a
   // missed tick delays the sweep by a minute instead of skipping a whole cycle.
   if (await dueForQueueSweep(database, now)) {
-    const swept = await startQueuedSessions(database, clock);
-    summary.sessionsStarted = swept.started;
-    summary.sessionsExpired = swept.expired;
-    summary.sessionsReclaimed = swept.reclaimed;
+    await stage(database, clock, "sessions.sweep", async () => {
+      const swept = await startQueuedSessions(database, clock);
+      summary.sessionsStarted = swept.started;
+      summary.sessionsExpired = swept.expired;
+      summary.sessionsReclaimed = swept.reclaimed;
+    });
     summary.queueSwept = true;
   }
 
   // 2. Games that kicked off since the last tick.
-  summary.gamesStarted = await startKickedOffGames(database, clock);
+  await stage(database, clock, "tick.games", async () => {
+    summary.gamesStarted = await startKickedOffGames(database, clock);
+  });
 
   // 3. Live score poll while any game is live.
-  summary.livePolled = await maybePollLiveScores(database, clock);
+  await stage(database, clock, "tick.live_scores", async () => {
+    summary.livePolled = await maybePollLiveScores(database, clock);
+  });
 
   // 4b. Re-queue sessions that failed, and notice a provider outage (§8.8).
-  const retries = await requeueFailedSessions(database, clock);
-  summary.sessionsRequeued = retries.requeued;
-  summary.outages = await notifyOutages(database, clock);
+  await stage(database, clock, "tick.retries", async () => {
+    const retries = await requeueFailedSessions(database, clock);
+    summary.sessionsRequeued = retries.requeued;
+    summary.outages = await notifyOutages(database, clock);
+  });
 
-  // 5. Offer expiry and trade review resolution.
-  const expired = await expireOffers(database, clock);
-  if (expired.ok) summary.offersExpired = expired.value.length;
-  const resolved = await resolveEndedReviews(database, clock);
-  if (resolved.ok) summary.tradesResolved = resolved.value.length;
+  // 5. Offer expiry and trade review resolution. A trade whose 24-hour window
+  // ended has to execute on time; it must not be skipped because Sleeper was
+  // down two stages earlier.
+  await stage(database, clock, "tick.trades", async () => {
+    const expired = await expireOffers(database, clock);
+    if (expired.ok) summary.offersExpired = expired.value.length;
+    const resolved = await resolveEndedReviews(database, clock);
+    if (resolved.ok) summary.tradesResolved = resolved.value.length;
+  });
+
+  // 6. The season-stall watchdog (§13.4). A finalization that fails every
+  // retry stops the season dead and silently, so it gets its own check.
+  await stage(database, clock, "tick.stall_watchdog", async () => {
+    summary.stalled = await checkFinalizationStall(database, clock);
+  });
+
+  return summary;
+}
+
+/**
+ * Run one stage of the tick. A stage that throws is recorded to `health` under
+ * its own key and the tick carries on: before this, a Sleeper outage during
+ * the live-score poll threw out of `runTick` and took trade resolution, offer
+ * expiry and the outage notifier with it for as long as Sleeper was down.
+ */
+async function stage(database: EngineDb, clock: Clock, key: string, run: () => Promise<void>): Promise<void> {
+  try {
+    await run();
+    await database
+      .insert(health)
+      .values({ key, lastSuccessAt: clock.now() })
+      .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: clock.now() } });
+  } catch (err) {
+    const at = clock.now();
+    await database
+      .insert(health)
+      .values({ key, lastError: String(err).slice(0, 500), lastErrorAt: at })
+      .onConflictDoUpdate({ target: health.key, set: { lastError: String(err).slice(0, 500), lastErrorAt: at } })
+      .catch(() => undefined);
+  }
+}
+
+/**
+ * Notice a week that never advanced (§13.4, §9.1). `stats.finalize` starts
+ * `finalizeWeekWorkflow` and that workflow owns the job row, so a total
+ * failure shows up as a `failed` job — but nothing was *watching* for it, and
+ * the consequences are entirely silent: `current_week` stays put, so the next
+ * week is never planned, lineups are never carried over, and Tuesday's
+ * `sessions.book` computes the same idempotency keys as last week and creates
+ * nothing at all. The league keeps looking alive while every team fields the
+ * lineup it had and the standings stop moving.
+ *
+ * The check: a `stats.finalize` booked for the week the league is *still* in,
+ * due more than `FINALIZE_GRACE_MS` ago. That can only mean the week did not
+ * advance. Records the error under `stats.finalize` (which /admin/health
+ * banners), re-books the finalization so it retries within the hour, and
+ * emails once a day.
+ */
+const FINALIZE_GRACE_MS = 3 * 3600_000;
+const FINALIZE_RETRY_MS = 30 * 60_000;
+
+export async function checkFinalizationStall(database: EngineDb, clock: Clock): Promise<boolean> {
+  const settings = await getSettings(database);
+  if (!["regular", "playoffs"].includes(settings.phase)) return false;
+
+  const now = clock.now();
+  const cutoff = new Date(now.getTime() - FINALIZE_GRACE_MS);
+  const overdue = await database
+    .select({ id: scheduledJobs.id, dueAt: scheduledJobs.dueAt, status: scheduledJobs.status, payload: scheduledJobs.payload })
+    .from(scheduledJobs)
+    .where(and(eq(scheduledJobs.type, "stats.finalize"), lte(scheduledJobs.dueAt, cutoff)))
+    .orderBy(desc(scheduledJobs.dueAt))
+    .limit(1);
+
+  const job = overdue[0];
+  if (!job) return false;
+  const bookedWeek = Number((job.payload as { week?: unknown }).week ?? 0);
+  // The week advanced past the one this finalization was for: all is well.
+  if (!bookedWeek || settings.currentWeek > bookedWeek) return false;
+
+  const hoursLate = Math.floor((now.getTime() - job.dueAt.getTime()) / 3600_000);
+  const message =
+    `week ${bookedWeek} has not finalized ${hoursLate}h after its scheduled time ` +
+    `(job ${job.id} is ${job.status}). The season cannot advance: no week plan, no lineup ` +
+    `carry-over, and no weekly reviews until it does.`;
 
   await database
     .insert(health)
-    .values({ key: "cron.tick", lastSuccessAt: clock.now() })
-    .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: clock.now() } });
+    .values({ key: "stats.finalize", lastError: message, lastErrorAt: now })
+    .onConflictDoUpdate({ target: health.key, set: { lastError: message, lastErrorAt: now } });
 
-  return summary;
+  // Re-book it rather than waiting a week for the next Tuesday. Idempotent per
+  // half-hour bucket, so this retries about twice an hour until it works.
+  const bucket = Math.floor(now.getTime() / FINALIZE_RETRY_MS);
+  await database
+    .insert(scheduledJobs)
+    .values({
+      type: "stats.finalize",
+      dueAt: now,
+      payload: { week: bookedWeek, reason: "stall retry" },
+      idempotencyKey: `job:stats.finalize:retry:${bookedWeek}:${bucket}`,
+    })
+    .onConflictDoNothing({ target: scheduledJobs.idempotencyKey });
+
+  await notifyOnce(database, clock, `stall:${bookedWeek}`, `[League] Week ${bookedWeek} has not finalized`, `<p>${message}</p>`);
+  return true;
+}
+
+/** Send an email at most once per ET day for a given key. */
+async function notifyOnce(
+  database: EngineDb,
+  clock: Clock,
+  key: string,
+  subject: string,
+  html: string,
+): Promise<void> {
+  const healthKey = `notify:${key}:${etDay(clock.now())}`;
+  const existing = await database.select({ key: health.key }).from(health).where(eq(health.key, healthKey));
+  if (existing.length > 0) return;
+  const sent = await sendEmail(subject, html);
+  await database
+    .insert(health)
+    .values({ key: healthKey, ...(sent ? { lastSuccessAt: clock.now() } : { lastError: "email not sent", lastErrorAt: clock.now() }) })
+    .onConflictDoNothing({ target: health.key });
 }
 
 /**
@@ -314,11 +445,26 @@ export async function startQueuedSessions(
   const reclaimed = await reclaimStuckSessions(database, clock);
 
   const queued = await database
-    .select({ id: sessions.id, teamId: sessions.teamId, kind: sessions.kind, context: sessions.context })
+    .select({
+      id: sessions.id,
+      teamId: sessions.teamId,
+      kind: sessions.kind,
+      context: sessions.context,
+      createdAt: sessions.createdAt,
+    })
     .from(sessions)
     .where(eq(sessions.status, "queued"))
     .orderBy(asc(sessions.createdAt))
     .limit(MAX_QUEUED_SESSIONS_PER_TICK);
+
+  // §4.3: a paused team runs nothing. Pausing was enforced only where sessions
+  // are *booked*, so a team paused mid-week still ran everything already in the
+  // queue — up to four lineup checks booked on Tuesday and three check-ins the
+  // agent booked up to a fortnight out. That made the pause button, which is
+  // also the commissioner's only spend brake, quietly not do what it says.
+  const pausedTeams = new Set(
+    (await database.select({ id: teams.id }).from(teams).where(eq(teams.paused, true))).map((t) => t.id),
+  );
 
   // §8.10: a check-in the agent booked itself goes last, always. It must never
   // take the slot a lineup check needs before kickoff — the league's own
@@ -333,7 +479,8 @@ export async function startQueuedSessions(
     // this is the only place a queued session is ever retired, so excluding a
     // kind from the *query* would leave its orphans queued for the season.
     const deadlineAt = parseDate(session.context.deadline_at);
-    if (deadlineAt && now >= deadlineAt) {
+    const staleAt = session.createdAt.getTime() + STALE_QUEUED_MS;
+    if ((deadlineAt && now >= deadlineAt) || now.getTime() >= staleAt) {
       const rows = await database
         .update(sessions)
         .set({ status: "skipped", endedBy: "deadline", endedAt: now, updatedAt: now })
@@ -342,6 +489,13 @@ export async function startQueuedSessions(
       if (rows.length > 0) expired++;
       continue;
     }
+
+    // A pause holds a session; it does not cancel it. Anything time-sensitive
+    // expires on its own deadline in the branch above, and everything else
+    // runs when the team is unpaused, which is what a commissioner pausing a
+    // team for a day actually wants. `STALE_QUEUED_MS` stops a team paused for
+    // the season from accumulating sessions for ever.
+    if (session.teamId !== null && pausedTeams.has(session.teamId)) continue;
 
     // Draft picks are never started here: the draft workflow creates each one
     // and runs it inline against the 180-second clock (§10.2). It commits the

@@ -15,6 +15,7 @@ import {
   toolsForKind,
   buildReporterSystemPrompt,
   buildSystemPrompt,
+  promptRulesFromSettings,
   type RunSessionResult,
 } from "@league/agent";
 import { getSettings, sessions, teams } from "@league/engine";
@@ -132,7 +133,7 @@ export async function runAgentSession(
         datetimeEt: formatEt(clock.now()),
         phase: settings.phase,
         week: settings.currentWeek,
-        startWeek: settings.startWeek,
+        ...promptRulesFromSettings(settings),
       };
       return team === null
         ? buildReporterSystemPrompt(vars)

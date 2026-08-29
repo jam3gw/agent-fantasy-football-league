@@ -5,7 +5,12 @@
 import { describe, expect, it } from "vitest";
 import type { SessionKind } from "@league/engine";
 import { DEFAULT_SESSION_GUARDS } from "@league/engine";
-import { toolsForKind } from "../src/toolsets.ts";
+import { z } from "zod";
+import { SETS, toolsForKind } from "../src/toolsets.ts";
+import { READ_TOOLS } from "../src/tools/read.ts";
+import { WRITE_TOOLS } from "../src/tools/write.ts";
+import { DRAFT_TOOLS } from "../src/tools/draft.ts";
+import { REPORTER_TOOLS } from "../src/tools/reporter.ts";
 import { endingToolFor } from "../src/session.ts";
 
 const ALL_KINDS = Object.keys(DEFAULT_SESSION_GUARDS) as SessionKind[];
@@ -151,6 +156,28 @@ describe("§8.10 — check-in tools", () => {
       const names = toolsForKind(kind).map((t) => t.name);
       expect(names).not.toContain("schedule_check_in");
       expect(names).not.toContain("cancel_check_in");
+    }
+  });
+});
+
+describe("tool names are unique", () => {
+  it("no two tools share a name", () => {
+    const all = [...READ_TOOLS, ...WRITE_TOOLS, ...DRAFT_TOOLS, ...REPORTER_TOOLS];
+    const seen = new Set<string>();
+    const dupes: string[] = [];
+    for (const t of all) {
+      if (seen.has(t.name)) dupes.push(t.name);
+      seen.add(t.name);
+    }
+    expect(dupes).toEqual([]);
+  });
+
+  it("every kind gets the paging read-table get_team_week_results", () => {
+    for (const kind of Object.keys(SETS) as SessionKind[]) {
+      const tool = toolsForKind(kind).find((t) => t.name === "get_team_week_results");
+      if (!tool) continue;
+      // The read-table version pages (§8.2); the removed reporter copy did not.
+      expect(Object.keys(z.toJSONSchema(tool.schema).properties ?? {}), kind).toContain("limit");
     }
   });
 });

@@ -11,7 +11,6 @@ import {
   scratchpads,
   sessionEvents,
   sessions,
-  teamWeekResults,
   teams,
 } from "@league/engine";
 import type { LeagueTool, ToolContext, ToolResult } from "./types.ts";
@@ -186,39 +185,6 @@ export const getSessionTranscript = defineTool({
   },
 });
 
-export const getTeamWeekResultsReporter = defineTool({
-  name: "get_team_week_results",
-  description:
-    "Per team and week: actual points, optimal points, points left on the bench, free-agent points, empty starting slots.",
-  schema: z.object({
-    week: z.number().int().optional(),
-    team_id: z.number().int().optional(),
-  }),
-  async execute(args, ctx) {
-    const filters = [
-      args.week !== undefined ? eq(teamWeekResults.week, args.week) : undefined,
-      args.team_id !== undefined ? eq(teamWeekResults.teamId, args.team_id) : undefined,
-    ].filter(Boolean);
-    const rows = await ctx.db
-      .select()
-      .from(teamWeekResults)
-      .where(filters.length > 0 ? and(...filters) : undefined);
-    const allTeams = await ctx.db.select().from(teams);
-    return {
-      results: rows.map((r) => ({
-        team_id: r.teamId,
-        team: allTeams.find((t) => t.id === r.teamId)?.name ?? null,
-        week: r.week,
-        actual_points: r.actualPoints,
-        optimal_points: r.optimalPoints,
-        points_left_on_bench: r.pointsLeftOnBench,
-        fa_points: r.faPoints,
-        empty_starting_slots: r.emptyStartingSlots,
-      })),
-    };
-  },
-});
-
 export const publishReport = defineTool({
   name: "publish_report",
   description: "Publish your finished post. This ends the session.",
@@ -252,6 +218,5 @@ export const REPORTER_TOOLS: LeagueTool[] = [
   getTeamScratchpad,
   listSessions,
   getSessionTranscript,
-  getTeamWeekResultsReporter,
   publishReport,
 ];

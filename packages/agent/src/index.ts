@@ -1,4 +1,5 @@
 export * from "./models.ts";
+export * from "./briefs.generated.ts";
 export * from "./prompt.ts";
 export * from "./spend.ts";
 export * from "./session.ts";

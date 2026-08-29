@@ -8,7 +8,8 @@
   "scripts": {
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "briefs": "tsx scripts/generateBriefs.mts"
   },
   "dependencies": {
     "@ai-sdk/gateway": "^4.0.68",
@@ -28,6 +29,7 @@
     "vitest": "^3.2.4",
     "@electric-sql/pglite": "^0.3.5",
     "postgres": "^3.4.5",
-    "@neondatabase/serverless": "^1.1.0"
+    "@neondatabase/serverless": "^1.1.0",
+    "tsx": "^4.23.12"
   }
 }
