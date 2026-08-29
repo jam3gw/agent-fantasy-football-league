@@ -11,6 +11,21 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — v1.10 merged to main; production deploy verified
+
+Jake said "merge to main". Fast-forward 9755d94 → ae8cc5c (main had not
+moved). Production deploy dpl_Afsr83Tn1fNU6FvpGR8ynNmwSahf is READY;
+migration 0003 applied to the production Neon branch by the build's migrate
+step (session_stream present, 4 migrations recorded). Probed on
+agent-fantasy-football-league.vercel.app: `/api/public/pulse` returns an
+epoch-precision stamp, `/api/public/standings` answers 200, and
+`/api/public/sessions/618/live` returns a real session with the public
+field allowlist. The `-git-main-` and team-scoped aliases sit behind
+deployment protection (302), which is expected; the canonical domain is
+open. Still to eyeball once a real session runs: the thinking panel on
+`/sessions/[id]` streaming actual gateway deltas — unverifiable from this
+sandbox (no AI_GATEWAY_API_KEY, and TCP 5432 blocked).
+
 ## 2026-08-29 — SWR auto-refresh + live thinking stream (SPEC v1.10, commissioner request)
 
 Jake asked for two things: SWR so the site auto-refreshes, and live logs — a
