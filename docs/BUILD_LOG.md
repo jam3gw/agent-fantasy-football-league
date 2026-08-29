@@ -27,10 +27,29 @@ layout stays a server component and no page loses static rendering.
 - `apps/web/test/speedInsights.test.ts` guards the import path and the
   render-once-inside-`<body>` placement; mounted deeper or twice it would
   under- or double-report, and both are silent failures.
-- **Still needed from Jake**: Speed Insights has to be switched on once in the
-  Vercel dashboard (Project → Speed Insights → Enable) before data flows. The
-  MCP connector cannot toggle it. The code is inert until then and costs
-  nothing, so this is not blocking.
+- Jake enabled Speed Insights on the project the same day. **Verified**: both
+  `/_vercel/speed-insights/script.js` and the obfuscated `/c03b0126f6fa88a8/
+  script.js` answer 200 with the same 12,567-byte script on the branch preview
+  *and* on `league.jake-moses.com`. Those routes exist only once the project has
+  it switched on, so serving them is the enablement check.
+- The obfuscated path is the one that matters and is easy to miss. Vercel's build
+  injects `"speedInsights":{"scriptSrc":"c03b0126f6fa88a8/script.js","endpoint":
+  "c03b0126f6fa88a8/vitals"}` into the page config, and the component uses it in
+  preference to the `/_vercel/...` path — it is per project, and unguessable so
+  that blocklists keyed on "speed-insights" cannot match it. Anything that
+  greps deploys for the literal string will conclude, wrongly, that this is not
+  installed.
+- **Verified in a browser**, not just by reading the bundle: the preview build
+  was mirrored and served locally, and headless Chromium shows
+  `<script src="/c03b0126f6fa88a8/script.js" defer>` appended to `<head>` with
+  `window.si` live — the exact success signal the quickstart names. (Chromium
+  cannot reach the preview host directly from this session: the egress proxy
+  drops its tunnel with `ws_closed_mid_exchange` mid-handshake, though curl to
+  the same host is fine. Hence the mirror. Worth knowing before the next
+  `scripts/mobile-audit.mjs` run, which drives Chromium the same way.)
+- Not yet on production: this is on the branch, and `main` has no Speed Insights
+  component, so `league.jake-moses.com` serves the routes but nothing calls
+  them. Data starts on merge.
 
 ## 2026-08-29 — Full audit: three findings that would each have stopped the season
 
