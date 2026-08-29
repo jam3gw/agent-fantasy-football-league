@@ -48,6 +48,11 @@ export interface ModelToolCall {
 
 export interface ModelStepResult {
   text: string;
+  /**
+   * Reasoning text streamed by this step, as far as the provider shows it
+   * (§12.1). Optional: providers without visible reasoning produce none.
+   */
+  reasoning?: string;
   toolCalls: ModelToolCall[];
   usage: UsageTokens;
   /** Gateway-reported cost when present in provider metadata (§8.7). */
@@ -512,6 +517,10 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
 
       await recordEvent(db, clock, sessionId, seq++, "assistant", {
         text: result.text,
+        // The thinking log (§12.1): durable, unlike the session_stream partial,
+        // which is deleted the moment this event lands. Only recorded when the
+        // provider actually surfaced reasoning text.
+        ...(result.reasoning ? { reasoning: result.reasoning } : {}),
         // The 0-based step this message came from — what the live view compares
         // against `session_stream.step_no` to tell a superseded partial from
         // the next step's genuinely new thinking.
@@ -742,6 +751,7 @@ async function closeSession(
     );
     await recordEvent(db, clock, args.sessionId, seq++, "assistant", {
       text: extra.text,
+      ...(extra.reasoning ? { reasoning: extra.reasoning } : {}),
       closing_step: true,
     });
     for (const call of extra.toolCalls) {

@@ -56,6 +56,48 @@ describe("createModelStep streaming", () => {
     // The step's result is unchanged by streaming: one complete message.
     expect(result.text).toBe("final text");
     expect(result.usage.inputTokens).toBe(5);
+    // The accumulated reasoning is the step's durable thinking log (§12.1).
+    expect(result.reasoning).toBe("hmm, the flex spot");
+  });
+
+  it("asks each provider to show its reasoning, without any behavior setting (§8.1)", async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const step = createModelStep({} as never, {
+      stream: ((params: Record<string, unknown>) => {
+        captured.push(params);
+        return fakeStreamResult({});
+      }) as never,
+      flushIntervalMs: 0,
+    });
+
+    for (const modelId of [
+      "anthropic/claude-opus-5",
+      "google/gemini-3.1-pro-preview",
+      "openai/gpt-5.6-sol",
+      "deepseek/deepseek-v4-pro",
+    ]) {
+      await step({ modelId, messages: [], tools: [] }, 0);
+    }
+
+    expect(captured[0]!.providerOptions).toEqual({
+      anthropic: { thinking: { type: "adaptive", display: "summarized" } },
+    });
+    expect(captured[1]!.providerOptions).toEqual({
+      google: { thinkingConfig: { includeThoughts: true } },
+    });
+    expect(captured[2]!.providerOptions).toEqual({ openai: { reasoningSummary: "auto" } });
+    // Providers with no visibility flag get provider defaults, nothing else.
+    expect(captured[3]!.providerOptions).toBeUndefined();
+
+    // §8.1: visibility only — never a budget, effort flag, toggle, or limit.
+    for (const params of captured) {
+      const flat = JSON.stringify(params);
+      expect(params.maxOutputTokens).toBeUndefined();
+      expect(params.temperature).toBeUndefined();
+      for (const forbidden of ["budget", "effort", "disabled", "enabled", "maxOutputTokens", "temperature"]) {
+        expect(flat).not.toContain(forbidden);
+      }
+    }
   });
 
   it("throttles flushes by wall clock rather than writing one per delta", async () => {
@@ -209,6 +251,7 @@ describe("partial sink and session_stream lifecycle", () => {
         await sink({ stepNo: 0, reasoning: "let me think", text: "half-written" });
         return {
           text: "done",
+          reasoning: "let me think",
           toolCalls: [{ toolCallId: "c1", toolName: "write_decision_log", args: { summary: "ok" } }],
           usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cachedInputTokens: 0 },
           gatewayCostUsd: null,
@@ -221,6 +264,12 @@ describe("partial sink and session_stream lifecycle", () => {
     const result = await runSession(id, deps);
     expect(result.status).toBe("succeeded");
     expect(await db.select().from(sessionStream).where(eq(sessionStream.sessionId, id))).toEqual([]);
+
+    // The thinking survives the partial's deletion: it is durable in the
+    // assistant event, which is what the transcript page renders (§12.1).
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
+    const assistant = events.find((e) => e.type === "assistant");
+    expect((assistant!.content as { reasoning?: string }).reasoning).toBe("let me think");
   });
 
   it("a resumed session discards the killed invocation's stale partial before its first step", async () => {

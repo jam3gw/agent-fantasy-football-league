@@ -104,6 +104,32 @@ export function gatewayCostFrom(metadata: unknown): number | null {
 }
 
 /**
+ * Reasoning visibility (§12.1). Some providers run their default reasoning but
+ * return the text only when asked: Anthropic's current models default to
+ * `display: "omitted"` (empty thinking blocks), Gemini returns thought
+ * summaries only with `includeThoughts`, and OpenAI returns reasoning
+ * summaries only when a summary mode is requested. These options change what
+ * the response *carries*, never how the model thinks — like prompt caching,
+ * they are not limits, budgets, effort flags, or toggles, so §8.1 stands.
+ * Anthropic's `type: "adaptive"` is spelled out because `display` cannot be
+ * sent alone, and adaptive is already the default on all three league models.
+ */
+export function reasoningVisibilityOptions(
+  modelId: string,
+): Record<string, Record<string, unknown>> | null {
+  if (modelId.startsWith("anthropic/")) {
+    return { anthropic: { thinking: { type: "adaptive", display: "summarized" } } };
+  }
+  if (modelId.startsWith("google/")) {
+    return { google: { thinkingConfig: { includeThoughts: true } } };
+  }
+  if (modelId.startsWith("openai/")) {
+    return { openai: { reasoningSummary: "auto" } };
+  }
+  return null;
+}
+
+/**
  * Anthropic prompt caching (§8.1): mark the system prompt and the context
  * snapshot as cache breakpoints. Other providers cache prefixes on their own.
  * Caching changes cost only, never behavior.
@@ -160,11 +186,13 @@ export function createModelStep(
     // so splitting first would move the breakpoints.
     const { instructions, messages } = splitInstructions(withCaching(req.messages, req.modelId));
 
+    const providerOptions = reasoningVisibilityOptions(req.modelId);
     const params = {
       model: req.modelId,
       ...(instructions.length > 0 ? { instructions } : {}),
       messages,
       tools: declareTools(req),
+      ...(providerOptions ? { providerOptions } : {}),
       // No maxOutputTokens, temperature, reasoning budget, or effort flag (§8.1).
     } as unknown as Parameters<typeof streamText>[0];
 
@@ -210,6 +238,9 @@ export function createModelStep(
 
     return {
       text: text ?? "",
+      // The reasoning deltas accumulated above ARE the thinking log: the same
+      // text the live stream shows, made durable by the session loop (§12.1).
+      reasoning: partialReasoning,
       toolCalls,
       usage: usageOf(usage ?? {}),
       gatewayCostUsd: gatewayCostFrom(providerMetadata),
