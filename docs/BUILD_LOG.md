@@ -67,6 +67,18 @@ issues, all fixed:
   session kinds" corrected to "all broad kinds" (narrow kinds keep trimmed
   lists).
 
+Reviewer round four (fresh context) traced every write to `reviewEndsAt`
+and every status transition, commissioner reversal included, and found the
+gate sound in both directions (a reversed trade keeps its timestamp and
+stays public — proof the timestamp, not the status list, is the right
+marker). Three text alignments applied: the reporter prompt's privacy rule
+(and §11) moved from "pending offer" to the never-entered-review boundary
+and now names transcripts alongside scratchpads (transcripts carry
+propose_trade args verbatim); the post_message tool description now says
+"usually gets a session to reply" to match the prompt; the /trades footer
+now draws the line at review entry instead of a status list (which was
+wrong for accept-time failures and commissioner-reversed trades).
+
 Reviewer round three (fresh context) caught that round two's gate was still
 one status short: `failed` has two producers, and the accept-time re-check
 failure (§3.5: accept re-runs every proposal check) goes `proposed → failed`

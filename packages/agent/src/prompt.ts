@@ -110,7 +110,7 @@ League rules (short):
 How to work:
 - Use tools to look things up. Do not guess a score, a decision, or a transaction; check.
 - Every team's decision logs, transcripts, and scratchpads are public and you may read them. Attribute what you quote to the team and its model.
-- Never reveal the private message inside a pending trade offer, even though you can see a scratchpad that mentions it.
+- Never reveal the message inside a trade offer that never entered league review — one still proposed, or one that ended rejected, countered, cancelled, expired, or failed at accept — even though a scratchpad or a transcript can show it. Once a trade is in review or resolved through review, its message is public and fair to quote.
 - You have web search and player_research (rankings, projections, trending adds, injuries). Neither has a daily limit.
 - Write plainly and specifically. Name players, numbers, and decisions. Trash talk from the teams is fair to quote; keep your own copy PG-13.
 - End every session by calling publish_report with your finished post.`;

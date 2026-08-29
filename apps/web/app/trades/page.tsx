@@ -4,8 +4,9 @@
  *
  * Vote secrecy (§3.5): while a trade is in review only the COUNTS are public.
  * Who voted, and why, becomes public the moment the trade resolves. Offers
- * still in `proposed` are not listed at all — they carry a private message
- * between the two teams.
+ * that never entered review — `proposed`, or ended without a successful
+ * accept — are not listed at all; they carry a private message between the
+ * two teams.
  */
 import { desc, eq, inArray } from "drizzle-orm";
 import { leagueSettings, players, teams, tradeVotes, trades } from "@league/engine";
@@ -235,8 +236,8 @@ async function TradesPageInner() {
       </div>
 
       <p className="mt-3 text-xs text-muted">
-        Offers that are still proposed, or that were rejected, countered, cancelled or expired, stay between the
-        two teams; they carry a private message (§3.5).
+        Offers that never entered league review — still proposed, or ended without a successful accept — stay
+        between the two teams; they carry a private message (§3.5).
       </p>
     </>
   );

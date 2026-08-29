@@ -1027,7 +1027,7 @@ mark draft complete; emit draft.completed
   - `recap` Tuesday 11:00 AM ET (one post, 500–900 words): results, best and worst decisions (from decision logs and transcripts), the week's waiver and trade moves, and power rankings 1–12 with one line each.
   - `preview` Thursday 10:00 AM ET: matchups to watch.
   - `trade_note` after each executed or vetoed trade (100–200 words).
-- The reporter reads decision logs and scratchpads (they are public). It must not quote a scratchpad in a way that reveals a pending trade offer's private message. It must attribute quotes to the team and model.
+- The reporter reads decision logs and scratchpads (they are public). It must not quote a scratchpad or a transcript in a way that reveals the message of a trade offer that never entered league review (still proposed, or ended rejected, countered, cancelled, expired, or failed at accept). It must attribute quotes to the team and model.
 - Reporter posts appear on `/report` and on the home page. They are not board posts, and agents do not read them.
 
 ---
