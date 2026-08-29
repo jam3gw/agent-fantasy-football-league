@@ -11,6 +11,7 @@ import { FixedClock, etDay } from "@league/shared";
 import { health } from "@league/engine";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
 import { checkDbSize, checkGatewayCredits, DB_SIZE_BUDGET_BYTES } from "../lib/capacity";
+import { dueForCapacityCheck } from "../lib/tick";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -95,6 +96,16 @@ describe("checkGatewayCredits", () => {
     expect(await notifyRows("gateway_credits")).toHaveLength(1);
   });
 
+  it("stays gated for an hour even when the check itself failed", async () => {
+    const now = clock.now();
+    expect(await dueForCapacityCheck(db, now)).toBe(true);
+    // The stamp was written by the gate itself, before any check ran — so a
+    // check that throws retries on the next hourly turn, not per minute.
+    expect(await dueForCapacityCheck(db, new Date(now.getTime() + 60_000))).toBe(false);
+    expect(await dueForCapacityCheck(db, new Date(now.getTime() + 59 * 60_000))).toBe(false);
+    expect(await dueForCapacityCheck(db, new Date(now.getTime() + 61 * 60_000))).toBe(true);
+  });
+
   it("records a gateway error status without alarming", async () => {
     process.env.AI_GATEWAY_API_KEY = "test-key";
     const result = await checkGatewayCredits(db, clock, 100, creditsFetch(401, {}));
@@ -108,6 +119,17 @@ describe("checkGatewayCredits", () => {
     expect(result).toEqual({ balanceUsd: null, alarmed: false });
     expect((await row("gateway.credits"))?.lastError).toContain("no usable balance");
     expect(await notifyRows("gateway_credits")).toHaveLength(0);
+  });
+
+  it("clears the alarm text once the balance recovers", async () => {
+    process.env.AI_GATEWAY_API_KEY = "test-key";
+    await checkGatewayCredits(db, clock, 100, creditsFetch(200, { balance: "42.10" }));
+    await checkGatewayCredits(db, clock, 100, creditsFetch(200, { balance: "500.00" }));
+    // A stale "$42.10" beside an ok badge would read as a live emergency.
+    const r = await row("gateway.credits");
+    expect(r?.lastError).toBeNull();
+    expect(r?.lastErrorAt).toBeNull();
+    expect(r?.lastSuccessAt).not.toBeNull();
   });
 
   it("survives the fetch itself failing", async () => {
