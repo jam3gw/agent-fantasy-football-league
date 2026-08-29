@@ -25,8 +25,7 @@ import {
   players,
   rankings,
   recordTransaction,
-  rosterEntries,
-} from "@league/engine";
+  rosterEntries, autofillDraftLineupSlot } from "@league/engine";
 import type { EngineDb, LeagueSettings, StartingSlot } from "@league/engine";
 import type { LeagueTool, ToolResult } from "./types.ts";
 import { defineTool, pageRows, toolFailure } from "./types.ts";
@@ -658,13 +657,21 @@ export const makePickTool = defineTool({
         reason: args.reason,
         pickedAt,
       });
-      // §7.8: a drafted player arrives on the bench — no lineup entry.
       await tx.insert(rosterEntries).values({
         teamId,
         playerId: player.playerId,
         acquiredVia: "draft",
         acquiredAt: pickedAt,
       });
+      // Draft-time slotting (commissioner, 2026-08-29): fill the first open
+      // eligible starting slot; bench only when none is open. §7.8's
+      // arrive-on-the-bench rule still governs waivers and free agency.
+      await autofillDraftLineupSlot(
+        tx,
+        teamId,
+        { playerId: player.playerId, position: player.position, fantasyPositions: player.fantasyPositions },
+        settings.currentWeek,
+      );
       await recordTransaction(tx, {
         type: "draft_pick",
         week: null,

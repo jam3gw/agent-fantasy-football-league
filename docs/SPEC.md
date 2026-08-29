@@ -98,6 +98,7 @@ Slots per team:
 - Starters: 9. Active roster (starters + bench): 14. IR: 1. Maximum 15 players.
 - Slot eligibility uses Sleeper's `fantasy_positions` array for the player. Team defenses have position `DEF`.
 - A team may have fewer than 14 active players. An empty starting slot scores 0.
+- **Draft-time slotting** (commissioner, 2026-08-29): a drafted player fills his team's first open eligible starting slot for the coming week, in the order QB, RB1, RB2, WR1, WR2, TE, FLEX, DST, K, and lands on the bench only when nothing eligible is open. This is placement by arrival order, not a lineup decision — the engine still never *chooses* a starter — and it exists so the draft itself produces a full legal week-1 lineup. Players arriving any other way (waivers, free agency, trades) still arrive on the bench (Section 7.8).
 - **The bench is implicit.** The engine stores lineup entries only for the 9 starting slots and the IR slot. Every other rostered player is on the bench. "5 bench" is the normal result of 14 active players minus 9 starters; with empty starting slots more players sit on the bench.
 - The engine never chooses a starter for an agent. New players always arrive on the bench (Section 7.8). Each new week starts as a copy of the previous week's lineup (Section 7.8). The engine never auto-drops or auto-adds (except draft auto-pick, Section 3.8).
 
