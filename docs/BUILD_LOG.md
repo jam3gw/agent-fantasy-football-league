@@ -11,6 +11,78 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Vercel/Neon audit: the alarms that could not fire
+
+Jake asked for an audit of the Vercel and Neon setup and what monitoring to
+add. Findings first, from live state (Vercel MCP, Neon MCP, the production
+`health` table), then what was changed.
+
+### Found healthy
+
+Tick green every minute; all feeds green; smoke sessions 13/13; deployment
+protection right (`all_except_custom_domains`, custom domain public); Web
+Analytics collecting; CI covering lint/typecheck/tests/no-database build. The
+morning's smoke-test failures fired the outage notices and `email.send`
+recorded successful sends — the alert path has now worked for real.
+
+### Found broken or missing
+
+- **Neon was at its 10-branch free-plan limit the day of the audit** — the
+  next preview deploy would have failed to create its branch. Resolved by the
+  Launch upgrade (limit 5000), not by deletions; stale preview branches remain
+  and are cosmetic.
+- **The free plan could not carry the season on compute, not just storage**:
+  ~190 CU-hours/month included, and the per-minute cron holds `main`'s
+  0.25 CU compute awake 24/7 ≈ 180 CU-hours before `dev` or any preview.
+  Jake upgraded to Launch the same day.
+- **Every alarm channel ran through the tick**, so the tick dying (or Cron,
+  or the database) silenced its own alarm. §17 also warned nothing watched
+  database growth; nothing watched the gateway balance either, and a $0
+  balance is a twelve-team outage.
+- **Migration 0002's column drop briefly broke the still-serving deployment**
+  (16:23–19:43 UTC error burst: old code selecting
+  `fantasypros_daily_allowance` after the new build's migration dropped it).
+  Standing rule going forward: a destructive migration ships one deploy
+  *after* the code stops reading the column (expand/contract).
+
+### Changed (this entry's deploy)
+
+- **`/api/healthz`** — public heartbeat: `200` while `cron.tick` succeeded in
+  the last three minutes (the admin banner's own constant, now shared from
+  `lib/healthz.ts`), `503` otherwise, database-unreachable included. Body is
+  `ok` + `lastTickAt`, nothing else. For the external uptime monitor only a
+  person can create (SETUP §6a).
+- **`tick.capacity` stage, hourly** — `db.size` (pg_database_size vs a 10 GiB
+  Launch budget; alarm + daily email past 80%) and `gateway.credits`
+  (`GET /v1/credits`; alarm + daily email under $100; a malformed response
+  reads as unusable, never as $0). Gate pre-stamps like the queue sweep so a
+  throwing check retries hourly, not per minute. `notifyOnce` moved from
+  `tick.ts` to `alarms.ts` so capacity → alarms keeps imports one-directional.
+- **Neon settings applied over MCP** (Launch unlocked them): history
+  retention 6h → **7 days**; **daily snapshot** of `main` 09:00 UTC kept 14
+  days; **`main` protected**. Autoscaling had already moved to 0.25–8 CU with
+  the plan.
+- Docs: RUNBOOK (tick stage 9, external-monitor section, gateway-balance
+  paragraph), SETUP (§3 check, §6 rewritten as done, §6a external monitor +
+  four Vercel dashboard switches, fails-silently table), this entry.
+
+**Verify after deploy** (recorded below when done): `/api/healthz` answers 200
+from outside; `tick.capacity`, `db.size`, `gateway.credits` rows appear green
+in production `health` within the hour.
+
+### Left alone deliberately
+
+- Stale preview branches and `backup-pre-smoke-cleanup` not deleted — branch
+  deletion is destructive and the limit pressure is gone; flagged to Jake
+  instead, along with the Neon integration's auto-cleanup toggle.
+- No Sentry/APM, no log drain: the health table plus Vercel's error clustering
+  answered every question this audit asked, and the league's own Postgres is
+  already the season's system of record.
+- `GATEWAY_CREDITS_ALARM_USD` ($100) and `DB_SIZE_BUDGET_BYTES` (10 GiB) are
+  code constants, not settings — they encode the plan and Appendix F, and a
+  commissioner who changes plans edits one line next to the comment that
+  explains it.
+
 ## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
 
 Jake flagged that the rail read "Made a draft pick." for every pick. Cause:
