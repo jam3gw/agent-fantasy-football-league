@@ -496,6 +496,23 @@ export const sessionEvents = pgTable(
   (t) => [index("session_events_session_seq_idx").on(t.sessionId, t.seq)],
 );
 
+/**
+ * The in-flight partial output of a running session's current model step, so
+ * the live transcript can show what an agent is writing while it writes it.
+ * One row per session, overwritten as deltas stream in and deleted once the
+ * step's assistant event lands in `session_events`. Transient by design: it is
+ * never part of the durable transcript and never read by `restoreSession`.
+ */
+export const sessionStream = pgTable("session_stream", {
+  sessionId: integer("session_id")
+    .primaryKey()
+    .references(() => sessions.id),
+  stepNo: integer("step_no").notNull(),
+  reasoning: text("reasoning").notNull().default(""),
+  text: text("text").notNull().default(""),
+  updatedAt: updatedAt(),
+});
+
 export const scheduledJobs = pgTable(
   "scheduled_jobs",
   {

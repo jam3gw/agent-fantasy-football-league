@@ -22,6 +22,13 @@
       "when": 1788019276179,
       "tag": "0002_drop_fantasypros",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1788030499790,
+      "tag": "0003_session_stream",
+      "breakpoints": true
     }
   ]
 }
