@@ -46,4 +46,12 @@ describe("assistantReasoning", () => {
     expect(assistantReasoning({ text: "done" })).toBe("");
     expect(assistantReasoning({ raw: { content: "done" } })).toBe("");
   });
+
+  it("survives malformed raw content — a public page must degrade, not crash", () => {
+    expect(
+      assistantReasoning({
+        raw: { content: [null, "a string part", 42, { type: "reasoning", text: "still here" }] },
+      }),
+    ).toBe("still here");
+  });
 });

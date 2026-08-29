@@ -100,6 +100,81 @@ describe("createModelStep streaming", () => {
     }
   });
 
+  it("sends the Anthropic option only to the exact models whose default is verified adaptive", async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const step = createModelStep({} as never, {
+      stream: ((params: Record<string, unknown>) => {
+        captured.push(params);
+        return fakeStreamResult({});
+      }) as never,
+      flushIntervalMs: 0,
+    });
+    // A commissioner swap to an unverified Anthropic model must get pure
+    // provider defaults — sending `type` there would be a §8.1 thinking toggle.
+    await step({ modelId: "anthropic/claude-haiku-4.5", messages: [], tools: [] }, 0);
+    expect(captured[0]!.providerOptions).toBeUndefined();
+  });
+
+  it("retries once without the visibility option when a step errors before any output", async () => {
+    const captured: Array<Record<string, unknown>> = [];
+    const step = createModelStep({} as never, {
+      stream: ((params: Record<string, unknown>) => {
+        captured.push(params);
+        // First attempt (with the option): rejected before producing anything.
+        if (captured.length === 1) {
+          return fakeStreamResult({
+            parts: [{ type: "error", error: new Error("unknown provider option") }],
+          });
+        }
+        return fakeStreamResult({ parts: [{ type: "text-delta", text: "ok" }], text: "ok" });
+      }) as never,
+      flushIntervalMs: 0,
+    });
+
+    const result = await step({ modelId: "anthropic/claude-opus-5", messages: [], tools: [] }, 0);
+    expect(captured.length).toBe(2);
+    expect(captured[0]!.providerOptions).toBeDefined();
+    expect(captured[1]!.providerOptions).toBeUndefined();
+    expect(result.text).toBe("ok");
+  });
+
+  it("does not retry an error that arrives after real output — that is a provider failure, not an option rejection", async () => {
+    let calls = 0;
+    const step = createModelStep({} as never, {
+      stream: (() => {
+        calls++;
+        return fakeStreamResult({
+          parts: [
+            { type: "reasoning-delta", text: "half a thought" },
+            { type: "error", error: new Error("provider fell over") },
+          ],
+        });
+      }) as never,
+      flushIntervalMs: 0,
+    });
+    await expect(step({ modelId: "anthropic/claude-opus-5", messages: [], tools: [] }, 0)).rejects.toThrow(
+      "provider fell over",
+    );
+    expect(calls).toBe(1);
+  });
+
+  it("separates consecutive reasoning blocks instead of running their words together", async () => {
+    const step = createModelStep({} as never, {
+      stream: (() =>
+        fakeStreamResult({
+          parts: [
+            { type: "reasoning-start" },
+            { type: "reasoning-delta", text: "first block." },
+            { type: "reasoning-start" },
+            { type: "reasoning-delta", text: "second block." },
+          ],
+        })) as never,
+      flushIntervalMs: 0,
+    });
+    const result = await step({ modelId: "test/model", messages: [], tools: [] }, 0);
+    expect(result.reasoning).toBe("first block.\n\nsecond block.");
+  });
+
   it("throttles flushes by wall clock rather than writing one per delta", async () => {
     const flushes: StreamPartial[] = [];
     const step = createModelStep({} as never, {
@@ -270,6 +345,96 @@ describe("partial sink and session_stream lifecycle", () => {
     const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
     const assistant = events.find((e) => e.type === "assistant");
     expect((assistant!.content as { reasoning?: string }).reasoning).toBe("let me think");
+  });
+
+  it("a step with no visible reasoning records no reasoning field at all", async () => {
+    const id = await makeSession();
+    const logTool: LeagueTool = defineTool({
+      name: "write_decision_log",
+      description: "end the session",
+      ending: true,
+      schema: z.object({ summary: z.string() }),
+      async execute() {
+        return { ok: true };
+      },
+    });
+    const deps: RunSessionDeps = {
+      db,
+      clock,
+      tools: [logTool],
+      toolConfig: {},
+      buildSystemPrompt: async () => "system",
+      buildContext: async () => ({ brief: "brief", snapshot: {} }),
+      modelStep: async (): Promise<ModelStepResult> => ({
+        text: "done",
+        reasoning: "",
+        toolCalls: [{ toolCallId: "c1", toolName: "write_decision_log", args: { summary: "ok" } }],
+        usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cachedInputTokens: 0 },
+        gatewayCostUsd: null,
+        billedTo: "gateway",
+        assistantMessage: { role: "assistant", content: "done" },
+      }),
+    };
+
+    await runSession(id, deps);
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
+    const assistant = events.find((e) => e.type === "assistant");
+    expect(Object.keys(assistant!.content as Record<string, unknown>)).not.toContain("reasoning");
+  });
+
+  it("the closing step's reasoning is persisted too — often the only assistant event that matters", async () => {
+    const id = await makeSession();
+    const logTool: LeagueTool = defineTool({
+      name: "write_decision_log",
+      description: "end the session",
+      ending: true,
+      schema: z.object({ summary: z.string() }),
+      async execute() {
+        return { ok: true };
+      },
+    });
+    let calls = 0;
+    const deps: RunSessionDeps = {
+      db,
+      clock,
+      tools: [logTool],
+      toolConfig: {},
+      buildSystemPrompt: async () => "system",
+      buildContext: async () => ({ brief: "brief", snapshot: {} }),
+      modelStep: async (): Promise<ModelStepResult> => {
+        calls++;
+        // First step: no tool calls, so the loop breaks and closeSession runs
+        // the one extra step asking for the decision log.
+        if (calls === 1) {
+          return {
+            text: "I am done here.",
+            reasoning: "",
+            toolCalls: [],
+            usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cachedInputTokens: 0 },
+            gatewayCostUsd: null,
+            billedTo: "gateway",
+            assistantMessage: { role: "assistant", content: "I am done here." },
+          };
+        }
+        return {
+          text: "writing the log",
+          reasoning: "closing thoughts",
+          toolCalls: [{ toolCallId: "c9", toolName: "write_decision_log", args: { summary: "ok" } }],
+          usage: { inputTokens: 10, outputTokens: 5, reasoningTokens: 0, cachedInputTokens: 0 },
+          gatewayCostUsd: null,
+          billedTo: "gateway",
+          assistantMessage: { role: "assistant", content: "writing the log" },
+        };
+      },
+    };
+
+    const result = await runSession(id, deps);
+    expect(result.status).toBe("succeeded");
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
+    const closing = events.find(
+      (e) => e.type === "assistant" && (e.content as { closing_step?: boolean }).closing_step === true,
+    );
+    expect((closing!.content as { reasoning?: string }).reasoning).toBe("closing thoughts");
   });
 
   it("a resumed session discards the killed invocation's stale partial before its first step", async () => {
