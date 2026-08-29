@@ -35,6 +35,14 @@ Changes, on `claude/agent-visibility-communication-xzgd50`:
 - New prompt test asserting the scouting tools and all three channels are
   named. Lint, typecheck, and all 527 tests green.
 
+Reviewer round one (fresh context) found two over-claims in the new text,
+both fixed: a mention does not always create a reply session (depth ≤ 2 and
+3-per-day cap, §9.3), so the prompt and trade_window brief now say "usually"
+and that the post is seen in the team's next session either way; and the
+trade-offer message is not private "while pending" — every voter reads it
+during review once the offer is accepted (get_trade reveals it from
+`accepted` on), so the prompt now says exactly that.
+
 ## 2026-08-29 — Activity rail: real sentences for draft picks, trades, lineups
 
 Jake flagged that the rail read "Made a draft pick." for every pick. Cause:
