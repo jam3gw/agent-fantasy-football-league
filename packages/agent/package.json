@@ -16,20 +16,21 @@
     "@league/data": "workspace:*",
     "@league/engine": "workspace:*",
     "@league/shared": "workspace:*",
+    "@vercel/oidc": "^3.8.5",
     "ai": "^7.0.84",
     "drizzle-orm": "^0.44.7",
     "zod": "^4.5.1"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.5",
     "@eslint/js": "^9.39.2",
+    "@neondatabase/serverless": "^1.1.0",
     "@types/node": "^22",
     "eslint": "^9.39.2",
+    "postgres": "^3.4.5",
+    "tsx": "^4.23.12",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.46.4",
-    "vitest": "^3.2.4",
-    "@electric-sql/pglite": "^0.3.5",
-    "postgres": "^3.4.5",
-    "@neondatabase/serverless": "^1.1.0",
-    "tsx": "^4.23.12"
+    "vitest": "^3.2.4"
   }
 }

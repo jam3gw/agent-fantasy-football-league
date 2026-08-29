@@ -28,7 +28,7 @@ import { streamText, dynamicTool, jsonSchema } from "ai";
 import { z } from "zod";
 import type { EngineDb } from "@league/engine";
 import type { ModelStepRequest, ModelStepResult, ModelMessage } from "./session.ts";
-import { supportsExplicitCaching } from "./models.ts";
+import { billedToFor, supportsExplicitCaching } from "./models.ts";
 import type { PartialSink } from "./stream.ts";
 import type { UsageTokens } from "./spend.ts";
 
@@ -298,8 +298,9 @@ export function createModelStep(
       toolCalls,
       usage: usageOf(usage ?? {}),
       gatewayCostUsd: gatewayCostFrom(providerMetadata),
-      // Every call bills the gateway (commissioner's decision, 2026-08-28).
-      billedTo: "gateway",
+      // Who pays depends on the provider: gateway-held BYOK keys for
+      // Anthropic, OpenAI and xAI (2026-08-29); everyone else the gateway.
+      billedTo: billedToFor(req.modelId),
       assistantMessage: { role: "assistant", content: content ?? text ?? "" },
       finishReason,
     };
