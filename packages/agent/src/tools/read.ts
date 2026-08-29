@@ -1734,7 +1734,7 @@ export const playerResearchTool = readTool(
         })),
         offset,
         limit,
-        { kind: args.kind, position, season, week: rankingSet === "draft" ? 0 : week, updated_at: kept[0]?.fetchedAt ?? null },
+        { kind: args.kind, position, season, week: rankingSet === "draft" ? 0 : week, updated_at: iso(kept[0]?.fetchedAt ?? null) },
       );
     }
 
