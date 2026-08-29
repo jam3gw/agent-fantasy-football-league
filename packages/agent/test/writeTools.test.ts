@@ -345,7 +345,7 @@ describe("make_pick", () => {
     expect(DRAFT_TOOLS.map((t) => t.name)).toEqual(["get_draft_state", "get_available_players", "make_pick"]);
   });
 
-  it("records the pick, the roster entry and the transaction — and no lineup entry", async () => {
+  it("records the pick, the roster entry, the transaction — and slots the player", async () => {
     await seedLeague(db, { phase: "drafting" });
     const teamIds = await seedTeams(db);
     await startDraft(teamIds, 1);
@@ -378,8 +378,11 @@ describe("make_pick", () => {
     expect(txns).toHaveLength(1);
     expect(txns[0]!.payload).toMatchObject({ pick_no: 1, player_id: pid, made_by: "agent" });
 
-    // §7.8: drafted players arrive on the bench.
-    expect(await db.select().from(lineupEntries)).toHaveLength(0);
+    // Draft-time slotting (2026-08-29): the first RB drafted starts at RB1.
+    // §7.8's arrive-on-the-bench rule still governs waivers and free agency.
+    const lineup = await db.select().from(lineupEntries);
+    expect(lineup).toHaveLength(1);
+    expect(lineup[0]).toMatchObject({ teamId: teamIds[0], playerId: pid, slot: "RB1", week: 1 });
   });
 
   it("rejects a second pick of the same player with already_drafted", async () => {

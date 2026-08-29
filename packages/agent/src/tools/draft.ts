@@ -5,8 +5,9 @@
  * `get_draft_state` and `get_available_players` are reads over the draft board
  * (§10.3). `make_pick` is the one write: it validates §8.4's four checks plus
  * the §10.4 roster rules and then writes the pick, the roster entry and the
- * public transaction in a single database transaction. A drafted player lands
- * on the bench — no lineup entry is created (§7.8).
+ * public transaction in a single database transaction. A drafted player also
+ * fills his team's first open eligible starting slot (§3.1 draft-time
+ * slotting, 2026-08-29); §7.8's bench-arrival rule covers every other route.
  *
  * `autoPickCandidate` implements §10.4's auto-pick choice and is exported for
  * the draft workflow (§10.2) to reuse when a clock expires.
@@ -25,8 +26,7 @@ import {
   players,
   rankings,
   recordTransaction,
-  rosterEntries,
-} from "@league/engine";
+  rosterEntries, autofillDraftLineupSlot } from "@league/engine";
 import type { EngineDb, LeagueSettings, StartingSlot } from "@league/engine";
 import type { LeagueTool, ToolResult } from "./types.ts";
 import { defineTool, pageRows, toolFailure } from "./types.ts";
@@ -265,10 +265,12 @@ export async function availableDraftPlayers(db: EngineDb, season: number): Promi
       })
       .from(rankings)
       .where(and(eq(rankings.set, "draft"), eq(rankings.week, 0))),
+    // Prefer the week-0 season-total row (ingest.season_stats) and fall back
+    // to summing weekly rows, so the two shapes never double-count.
     db
       .select({
         playerId: playerWeekStats.playerId,
-        points: sql<number>`sum(coalesce(${playerWeekStats.ptsPpr}, 0))`.mapWith(Number),
+        points: sql<number>`coalesce(sum(${playerWeekStats.ptsPpr}) filter (where ${playerWeekStats.week} = 0), sum(coalesce(${playerWeekStats.ptsPpr}, 0)) filter (where ${playerWeekStats.week} > 0), 0)`.mapWith(Number),
       })
       .from(playerWeekStats)
       .where(eq(playerWeekStats.season, season - 1))
@@ -658,13 +660,21 @@ export const makePickTool = defineTool({
         reason: args.reason,
         pickedAt,
       });
-      // §7.8: a drafted player arrives on the bench — no lineup entry.
       await tx.insert(rosterEntries).values({
         teamId,
         playerId: player.playerId,
         acquiredVia: "draft",
         acquiredAt: pickedAt,
       });
+      // Draft-time slotting (commissioner, 2026-08-29): fill the first open
+      // eligible starting slot; bench only when none is open. §7.8's
+      // arrive-on-the-bench rule still governs waivers and free agency.
+      await autofillDraftLineupSlot(
+        tx,
+        teamId,
+        { playerId: player.playerId, position: player.position, fantasyPositions: player.fantasyPositions },
+        settings.currentWeek,
+      );
       await recordTransaction(tx, {
         type: "draft_pick",
         week: null,

@@ -3,12 +3,12 @@
  * transaction; handlers create session rows with status `queued`. The queued
  * row is the queue: the per-minute tick starts it when a slot is free (§9.2).
  */
-import { and, eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, ne, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import { etDay, injurySessionKey, zonedTimeToUtc } from "@league/shared";
 import type { EngineDb } from "./db/index.ts";
 import type { SessionKind } from "./db/schema.ts";
-import { draft, nflGames, players, scheduledJobs, sessions, teams } from "./db/schema.ts";
+import { draft, lineupEntries, nflGames, players, scheduledJobs, sessions, teams } from "./db/schema.ts";
 import { sessionGuard } from "./guards.ts";
 import { playerKickoff } from "./locks.ts";
 import type { LeagueSettings } from "./settings.ts";
@@ -309,6 +309,13 @@ async function handleDraftCompleted(db: EngineDb, clock: Clock, settings: League
   }
 
   await updateSettings(db, { phase: "regular", startWeek, currentWeek: startWeek });
+
+  // Draft-time slotting (§3.1) wrote lineup entries for the week the draft ran
+  // in — week 1, normally. A draft that slips past week 1's first kickoff
+  // starts the season later, and a lineup parked on a week nobody plays is the
+  // "team fields nobody" gap coming straight back. Only draft-produced entries
+  // can exist before the season starts, so moving them wholesale is safe.
+  await db.update(lineupEntries).set({ week: startWeek }).where(ne(lineupEntries.week, startWeek));
 
   // Rule 3 of §3.4: after the draft every unrostered player is a free agent.
   await db.update(players).set({ waiverUntil: null });
