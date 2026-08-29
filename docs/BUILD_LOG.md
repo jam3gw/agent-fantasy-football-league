@@ -65,6 +65,21 @@ the root layout stays a server component and no page loses static rendering.
   render-once-inside-`<body>` placement, the same two silent failures the
   Speed Insights test guards: mounted deeper it misses pages, mounted twice it
   double-counts every view.
+- **Confirmed in a browser on the merged production deploy**
+  (`dpl_5BETqs1qqAR5daXnDdfxi5WDo8aG`), not by reading the bundle. Chromium
+  shows `<script src="/d90aa5d90e4aa1f2/script.js">` appended, `window.va` a
+  function, and `window.vam` `"production"` — so the mode detection resolves to
+  production and not to the debug script. `window.si` is live alongside it;
+  Speed Insights is unaffected.
+  - The script request was **aborted in the browser** rather than allowed, so
+    the pageview stayed queued in `window.vaq` (length 1) and nothing synthetic
+    was written to the dashboard. That queue length is itself the proof the
+    component fired.
+  - Chromium still cannot reach a deployed host from this session — the egress
+    proxy drops the tunnel (`ws_closed_mid_exchange`) while curl to the same
+    host is fine, exactly as the Speed Insights session found. So production
+    was mirrored (`prod.html` plus its eight `/_next/static/*` assets) and
+    served from `127.0.0.1`, which `noProxy` covers.
 - Lint, typecheck and the full suite (457 tests) green.
 - Data starts when this reaches production. Nothing is backfilled, so the
   dashboard stays empty until then — as of today it reports 0 visitors and
