@@ -15,11 +15,10 @@ import {
   playerWeekStats,
   updateSettings,
 } from "@league/engine";
-import { fetchWeekStats, fpRequest, upsertWeekStats } from "@league/data";
+import { fetchWeekStats, upsertWeekStats } from "@league/data";
 import type { SleeperStatsEntry } from "@league/data";
-import { env } from "./env";
 
-export type ScoringSource = "sleeper" | "fantasypros" | "nflverse";
+export type ScoringSource = "sleeper" | "nflverse";
 
 export interface FinalizeResult {
   week: number;
@@ -34,8 +33,9 @@ export interface FinalizeResult {
 }
 
 /**
- * Finalize a week. Tries Sleeper, then FantasyPros player-points, then
- * nflverse; whichever succeeds is recorded on the week (§13.4).
+ * Finalize a week. Tries Sleeper, then nflverse; whichever succeeds is
+ * recorded on the week (§13.4). FantasyPros sat between them until 2026-08-29;
+ * it was removed with the rest of that integration, so the ladder is two deep.
  */
 export async function finalizeWeek(db: EngineDb, clock: Clock, week: number): Promise<FinalizeResult> {
   const settings = await getSettings(db);
@@ -55,27 +55,7 @@ export async function finalizeWeek(db: EngineDb, clock: Clock, week: number): Pr
     source = "none";
   }
 
-  // Source 2 — FantasyPros player-points (documented; one request per week).
-  if (source === "none") {
-    try {
-      const entries = await fetchFantasyProsPoints(db, clock, season, week);
-      if (entries.length > 0) {
-        const res = await upsertWeekStats(db, clock, {
-          season,
-          week,
-          entries,
-          markFinal: true,
-          source: "fantasypros",
-        });
-        playersScored = res.count;
-        source = "fantasypros";
-      }
-    } catch {
-      source = "none";
-    }
-  }
-
-  // Source 3 — nflverse weekly stats through scoring_settings. Offense and
+  // Source 2 — nflverse weekly stats through scoring_settings. Offense and
   // kickers only; D/ST scores 0 and the week is flagged (§13.4).
   if (source === "none") {
     try {
@@ -177,8 +157,8 @@ export async function auditAgainstNflverse(
     ]),
   );
   // The points that scored the week, which is what §5.6 audits — not
-  // `engine_pts`, which is 0 on a week scored by FantasyPros, because source 2
-  // supplies computed points rather than a stat line.
+  // `engine_pts`, which a source supplying computed points rather than a stat
+  // line leaves at 0.
   const scored = new Map(
     (await db.select().from(playerWeekStats))
       .filter((r) => r.season === season && r.week === week)
@@ -232,56 +212,6 @@ async function recordHealth(
       target: health.key,
       set: input.error ? { lastSuccessAt: now, lastError: input.error, lastErrorAt: now } : { lastSuccessAt: now },
     });
-}
-
-/** Source 2: FantasyPros PPR player-points for one week (§13.4). */
-async function fetchFantasyProsPoints(
-  db: EngineDb,
-  clock: Clock,
-  season: number,
-  week: number,
-): Promise<SleeperStatsEntry[]> {
-  const apiKey = env.toolConfig.fantasyprosApiKey;
-  if (!apiKey) return [];
-  const res = await fpRequest(
-    db,
-    clock,
-    {
-      apiKey,
-      baseUrl: env.toolConfig.fantasyprosBaseUrl,
-      dailyCap: env.toolConfig.fantasyprosDailyCap,
-    },
-    { kind: "engine" },
-    `/nfl/${season}/player-points`,
-    { scoring: "PPR", position: "ALL", start: week, end: week },
-  );
-  if (!res.ok) return [];
-
-  const body = res.body as {
-    players?: Array<{ player_id?: string | number; weeks?: Record<string, number> }>;
-  };
-  const out: SleeperStatsEntry[] = [];
-  const { fpPlayerMap } = await import("@league/engine");
-  const map = await db.select().from(fpPlayerMap);
-  const toSleeper = new Map(map.map((m) => [m.fpPlayerId, m.playerId]));
-
-  for (const p of body.players ?? []) {
-    const fpId = p.player_id === undefined ? null : String(p.player_id);
-    if (!fpId) continue;
-    const sleeperId = toSleeper.get(fpId);
-    if (!sleeperId) continue;
-    const points = p.weeks?.[String(week)];
-    if (typeof points !== "number") continue;
-    out.push({
-      player_id: sleeperId,
-      season,
-      week,
-      // FantasyPros gives points, not the stat lines, so the stats object
-      // carries only the computed total.
-      stats: { pts_ppr: points },
-    });
-  }
-  return out;
 }
 
 /**

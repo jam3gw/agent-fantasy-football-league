@@ -11,7 +11,6 @@ export const metadata = { title: "Scores" };
 
 const SOURCE_LABEL: Record<string, string> = {
   sleeper: "Sleeper pts_ppr",
-  fantasypros: "FantasyPros PPR",
   nflverse: "nflverse + scoring_settings",
   none: "no source reached",
 };
@@ -114,7 +113,6 @@ export default async function AdminScoresPage({
               <select name="source" defaultValue="auto" className="w-full rounded border border-border bg-background px-2 py-1.5">
                 <option value="auto">auto — walk the §13.4 ladder</option>
                 <option value="sleeper">sleeper — pts_ppr</option>
-                <option value="fantasypros">fantasypros — PPR player-points</option>
                 <option value="nflverse">nflverse — scored through scoring_settings (no D/ST)</option>
               </select>
             </label>

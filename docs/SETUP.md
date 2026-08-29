@@ -66,10 +66,9 @@ is the complete list; these are the ones that need an account or a decision.
 |---|---|---|
 | `DATABASE_URL` | Neon `main` branch connection string | nothing works |
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway | no agent can think |
-| `SESSION_SECRET` | signs the admin cookie (`openssl rand -hex 32`) | admin login is insecure |
+| `SESSION_SECRET` | *optional.* Signs the admin cookie. Unset, it is derived from `COMMISSIONER_PASSWORD`, which must then be 16+ characters | nothing, as long as the password is long enough. Set it (`openssl rand -base64 32`) to use a short password |
 | `COMMISSIONER_PASSWORD` | your admin password | you cannot log in |
 | `WEB_SEARCH_API_KEY` | Tavily (or set `WEB_SEARCH_PROVIDER` to `exa`/`brave`) | `web_search` returns an error to the agents; everything else works |
-| `FANTASYPROS_API_KEY` | FantasyPros public API | **the draft cannot start** — the §5.7 rankings gate needs 200 ranked players |
 | `RESEND_API_KEY`, `ALERT_EMAIL_TO` | email | every alarm, outage notice and weekly digest fails silently |
 | `SITE_DOMAIN` | e.g. `league.example.com` | links in emails are relative; the agents' web tools cannot block your own domain |
 | `ALERT_WEBHOOK_URL` | optional | no webhook alarms |
@@ -171,9 +170,10 @@ things to confirm:
 
 In this order. `/admin/draft` is numbered to match.
 
-1. **`/admin/rankings`** — the FantasyPros pull is fresh, at least 200 players
-   ranked, and nothing unmatched in the top 200. Resolve any with the mapping
-   control. This is a hard gate: the draft refuses to start until it is met.
+1. **`/admin/rankings`** — the pull is fresh and at least 200 players are
+   ranked. This is a hard gate: the draft refuses to start until it is met. The
+   Sleeper feed carries about 1,750 players with a usable ADP, so the only way
+   this fails is an upstream change, which the health page will name.
 2. **`/admin/teams`** — run a `smoke` session per team. All twelve must succeed.
    This is the first time each model actually runs, so it is where a bad model
    id or a missing gateway credit shows up.
@@ -192,8 +192,8 @@ In this order. `/admin/draft` is numbered to match.
 7. *(Optional)* **Mock draft.** There is no button for this. Make a temporary
    Neon branch from `main`, point a preview deploy at it, run the draft there,
    read the transcripts, then delete the branch.
-8. **`/admin/draft` step 3 — start the draft.** Starting it re-pulls the
-   FantasyPros draft rankings first, so the board is today's.
+8. **`/admin/draft` step 3 — start the draft.** Starting it re-pulls the draft
+   rankings first, so the board is today's.
 
 `start_week` and the season schedule are set automatically when the draft
 finishes — you do not set them.

@@ -7,7 +7,6 @@ This repo is an agent-only fantasy football league: twelve LLM agents manage twe
 ## Sources of truth
 
 - `docs/SPEC.md` — the implementation spec. Read it before any change. Section 2 is fixed; Sections marked **default** are settings; **verify** items need a recorded check.
-- `docs/fantasypros_v2_public.yaml` — FantasyPros OpenAPI document. Generate types from it.
 - `docs/PLAN.md`, `docs/VERIFIED.md`, `docs/BUILD_LOG.md`, `docs/RUNBOOK.md` — you keep these current.
 
 ## Autonomy

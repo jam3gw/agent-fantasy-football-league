@@ -14,9 +14,9 @@
  */
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { and, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
-import { etDay, formatEt, sessionKey } from "@league/shared";
+import { formatEt, sessionKey } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
 import {
   commissionerActions,
@@ -25,15 +25,12 @@ import {
   createSession,
   draftPicks,
   finalizeWeekCore,
-  fpPlayerMap,
-  fpUsage,
   getSettings,
   lineupEntries,
   maxActiveRoster,
   players,
   playerWeekStats,
   rankings,
-  rankingsUnmatched,
   recordTransaction,
   reporterModelId,
   rosterEntries,
@@ -46,10 +43,9 @@ import {
   updateSettings,
 } from "@league/engine";
 import { LEAGUE_MODELS, checkGatewayModelId, seedAlarmRules } from "@league/agent";
-import { fetchWeekStats, fetchNflverseWeeklyStats, fpRequest, upsertWeekStats } from "@league/data";
+import { fetchWeekStats, fetchNflverseWeeklyStats, upsertWeekStats } from "@league/data";
 import type { SleeperStatsEntry } from "@league/data";
 import { db, leagueClock } from "./db";
-import { env } from "./env";
 import { isCommissioner } from "./auth";
 import { bookJobNow, runJob } from "./jobs";
 import { finalizeWeek } from "./finalize";
@@ -71,8 +67,7 @@ const BOOKABLE_JOBS = [
   "ingest.stats",
   "ingest.projections",
   "ingest.season_stats",
-  "ingest.fp_rankings",
-  "ingest.fp_injuries",
+  "ingest.rankings",
   "waivers.run",
   "stats.finalize",
   "reporter.run",
@@ -200,37 +195,10 @@ async function statsFromSource(
   c: Ctx,
   season: number,
   week: number,
-  source: "sleeper" | "fantasypros" | "nflverse",
+  source: "sleeper" | "nflverse",
 ): Promise<SleeperStatsEntry[]> {
   if (source === "sleeper") {
     return fetchWeekStats(season, week, { db: c.database });
-  }
-  if (source === "fantasypros") {
-    const apiKey = env.toolConfig.fantasyprosApiKey;
-    if (!apiKey) throw new Error("FANTASYPROS_API_KEY is not configured");
-    const res = await fpRequest(
-      c.database,
-      c.clock,
-      { apiKey, baseUrl: env.toolConfig.fantasyprosBaseUrl, dailyCap: env.toolConfig.fantasyprosDailyCap },
-      { kind: "engine" },
-      `/nfl/${season}/player-points`,
-      { scoring: "PPR", position: "ALL", start: week, end: week },
-    );
-    if (!res.ok) throw new Error("the FantasyPros player-points call did not succeed");
-    const body = res.body as { players?: Array<{ player_id?: string | number; weeks?: Record<string, number> }> };
-    const map = await c.database.select().from(fpPlayerMap);
-    const toSleeper = new Map(map.map((m) => [m.fpPlayerId, m.playerId]));
-    const out: SleeperStatsEntry[] = [];
-    for (const p of body.players ?? []) {
-      const fpId = p.player_id === undefined ? null : String(p.player_id);
-      if (!fpId) continue;
-      const sleeperId = toSleeper.get(fpId);
-      if (!sleeperId) continue;
-      const pts = p.weeks?.[String(week)];
-      if (typeof pts !== "number") continue;
-      out.push({ player_id: sleeperId, season, week, stats: { pts_ppr: pts } });
-    }
-    return out;
   }
   // nflverse: offense and kickers only; D/ST scores 0 on this rung (§13.4).
   const rows = await fetchNflverseWeeklyStats(season, { db: c.database });
@@ -633,7 +601,7 @@ export async function refinalizeWeekAction(form: FormData): Promise<void> {
   if (source === "auto") {
     const result = await finalizeWeek(c.database, c.clock, week);
     message = `Week ${week} re-finalized from ${result.source} (${result.playersScored} players).`;
-  } else if (source === "sleeper" || source === "fantasypros" || source === "nflverse") {
+  } else if (source === "sleeper" || source === "nflverse") {
     const entries = await statsFromSource(c, settings.season, week, source);
     if (entries.length === 0) throw new Error(`${source} returned no rows for week ${week}`);
     const res = await upsertWeekStats(c.database, c.clock, {
@@ -738,7 +706,6 @@ export async function saveSettingsAction(form: FormData): Promise<void> {
   setNum("tradeDeadlineWeek", "tradeDeadlineWeek");
   setNum("draftClockSeconds", "draftClockSeconds");
   setNum("draftRounds", "draftRounds");
-  setNum("fantasyprosDailyAllowance", "fantasyprosDailyAllowance");
 
   const waiverRunTimeEt = str(form, "waiverRunTimeEt");
   if (waiverRunTimeEt) {
@@ -881,68 +848,30 @@ export async function saveToolCostsAction(form: FormData): Promise<void> {
 
 // ---------------------------------------------------------------- rankings
 
-export async function mapUnmatchedPlayerAction(form: FormData): Promise<void> {
-  const c = await ctx();
-  const unmatchedId = num(form, "unmatchedId");
-  const chosen = str(form, "playerId");
-  const custom = str(form, "customPlayerId");
-  const playerId = custom || chosen;
-  if (unmatchedId === null) throw new Error("unmatchedId is required");
-  if (!playerId) throw new Error("a Sleeper player id is required");
-
-  const row = (await c.database.select().from(rankingsUnmatched).where(eq(rankingsUnmatched.id, unmatchedId)))[0];
-  if (!row) throw new Error(`unmatched row ${unmatchedId} not found`);
-  const exists = (await c.database.select({ id: players.playerId }).from(players).where(eq(players.playerId, playerId)))[0];
-  if (!exists) throw new Error(`no Sleeper player with id ${playerId}`);
-
-  await c.database
-    .insert(fpPlayerMap)
-    .values({ fpPlayerId: row.fpPlayerId, playerId, matchedBy: "manual", updatedAt: c.now })
-    .onConflictDoUpdate({
-      target: fpPlayerMap.fpPlayerId,
-      set: { playerId, matchedBy: "manual", updatedAt: c.now },
-    });
-  await c.database
-    .update(rankingsUnmatched)
-    .set({ resolvedPlayerId: playerId })
-    .where(eq(rankingsUnmatched.id, unmatchedId));
-
-  await logAction(c, "fp_player_mapped", { fpPlayerId: row.fpPlayerId, fpName: row.fpName, playerId });
-  finish("/admin/rankings", `${row.fpName} mapped to ${playerId}. Re-run the rankings pull to pick it up.`);
-}
-
 export async function refreshRankingsAction(): Promise<void> {
   const c = await ctx();
-  await bookJobNow(c.database, c.clock, "ingest.fp_rankings");
+  await bookJobNow(c.database, c.clock, "ingest.rankings");
   await logAction(c, "rankings_refresh_booked", {});
   finish("/admin/rankings", "Rankings refresh booked; the next tick runs it.");
 }
 
 // ------------------------------------------------------------------- draft
 
-/** §5.7 gate: at least 200 ranked players and nothing unmatched in the top 200. */
-async function draftGate(database: EngineDb): Promise<{ ranked: number; unmatchedTop200: number; ok: boolean }> {
+/**
+ * §5.7 gate: at least 200 ranked players on the draft board.
+ *
+ * It used to also require nothing unmatched inside the top 200. That clause
+ * went with FantasyPros on 2026-08-29: the board is now keyed by Sleeper's own
+ * player ids, which are already ours, so an unmatched player is not a state
+ * that can occur.
+ */
+async function draftGate(database: EngineDb): Promise<{ ranked: number; ok: boolean }> {
   const rankedRows = await database
     .select({ n: sql<number>`count(*)::int` })
     .from(rankings)
     .where(and(eq(rankings.set, "draft"), sql`${rankings.rank} is not null`));
   const ranked = rankedRows[0]?.n ?? 0;
-  // The unmatched rows keep the raw FantasyPros payload; `rank_ecr` there is
-  // whatever the API sent, so the top-200 test happens in JS rather than as a
-  // SQL cast that would blow up on a non-numeric value.
-  const unresolved = await database
-    .select()
-    .from(rankingsUnmatched)
-    .where(isNull(rankingsUnmatched.resolvedPlayerId));
-  const unmatchedTop200 = unresolved.filter((r) => unmatchedRank(r.raw) !== null && unmatchedRank(r.raw)! <= 200).length;
-  return { ranked, unmatchedTop200, ok: ranked >= 200 && unmatchedTop200 === 0 };
-}
-
-/** The FantasyPros ECR carried on an unmatched row, when it parses as a number. */
-function unmatchedRank(raw: Record<string, unknown> | null): number | null {
-  const v = raw?.rank_ecr ?? raw?.rank;
-  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
-  return Number.isFinite(n) ? n : null;
+  return { ranked, ok: ranked >= 200 };
 }
 
 export async function drawDraftOrderAction(): Promise<void> {
@@ -962,9 +891,7 @@ export async function startDraftAction(): Promise<void> {
 
   const gate = await draftGate(c.database);
   if (!gate.ok) {
-    throw new Error(
-      `the §5.7 gate is not met: ${gate.ranked} ranked players (200 needed), ${gate.unmatchedTop200} unmatched inside the top 200`,
-    );
+    throw new Error(`the §5.7 gate is not met: ${gate.ranked} ranked players, 200 needed`);
   }
 
   // §5.7: the draft rankings are pulled again when the draft starts, so the
@@ -972,7 +899,7 @@ export async function startDraftAction(): Promise<void> {
   // failure here must not block the draft — the gate above already proved the
   // rankings on hand are usable — so it is booked, not awaited.
   if (state.currentPick === null || state.currentPick <= 1) {
-    await bookJobNow(c.database, c.clock, "ingest.fp_rankings");
+    await bookJobNow(c.database, c.clock, "ingest.rankings");
   }
 
   await logAction(c, "draft_started", { from: state.currentPick ?? 1 });
@@ -1014,7 +941,7 @@ export async function emergencyAutoPickAction(): Promise<void> {
 // --------------------------------------------------------------- read-side
 
 /** Used by /admin/draft to show the §5.7 gate. Read-only. */
-export async function draftGateStatus(): Promise<{ ranked: number; unmatchedTop200: number; ok: boolean }> {
+export async function draftGateStatus(): Promise<{ ranked: number; ok: boolean }> {
   await guard();
   return draftGate(db());
 }
@@ -1029,21 +956,3 @@ export async function autoPickCount(): Promise<number> {
   return rows[0]?.n ?? 0;
 }
 
-/** FantasyPros requests used today, globally and per agent (health page). */
-export async function fpUsageToday(): Promise<{ day: string; total: number; byTeam: Record<string, number> }> {
-  await guard();
-  const clock = await leagueClock();
-  const day = etDay(clock.now());
-  const rows = await db()
-    .select({ teamId: fpUsage.teamId, n: sql<number>`count(*)::int` })
-    .from(fpUsage)
-    .where(eq(fpUsage.dayEt, day))
-    .groupBy(fpUsage.teamId);
-  const byTeam: Record<string, number> = {};
-  let total = 0;
-  for (const r of rows) {
-    byTeam[r.teamId === null ? "engine" : String(r.teamId)] = r.n;
-    total += r.n;
-  }
-  return { day, total, byTeam };
-}

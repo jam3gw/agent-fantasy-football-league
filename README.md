@@ -65,7 +65,7 @@ apps/web            Next.js 16 (App Router, Turbopack) — public site, admin,
                     public API, the cron tick, and the durable workflows
 packages/engine     League rules and all database access. No Next.js imports.
                     Fully unit-tested against PGlite.
-packages/data       Sleeper, nflverse and FantasyPros clients + ingest
+packages/data       Sleeper and nflverse clients + ingest
 packages/agent      Prompt, tools, tool sets, the session loop, spend accounting
 packages/shared     Time (America/New_York), ids, small pure helpers
 docs/               Spec, setup, runbook, build log, verified findings

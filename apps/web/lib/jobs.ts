@@ -13,7 +13,6 @@ import {
   carryOverLineups,
   createSession,
   getSettings,
-  health,
   runWaivers,
   scheduledJobs,
   teams,
@@ -33,7 +32,6 @@ import {
   upsertWeekStats,
 } from "@league/data";
 import { reporterModelId } from "@league/engine";
-import { env } from "./env";
 
 /**
  * §4.3 job gating: `waivers.run`, every `sessions.*` job, the `reporter.*`
@@ -142,37 +140,14 @@ export async function runJob(
       await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek));
       return;
     }
-    case "ingest.fp_rankings": {
-      const { ingestFpRankings } = await import("@league/data");
-      const { fantasyprosApiKey, fantasyprosBaseUrl, fantasyprosDailyCap } = env.toolConfig;
-      // A missing key used to `return` here, so the job reported `done` having
-      // done nothing at all — no rankings, no health row, no error. §5.7's
-      // rankings gate then blocks the draft, and the only evidence anywhere is
-      // an empty /admin/rankings page. That is a misconfiguration, not a normal
-      // state (§17 requires the key), so it fails loudly and lands in the
-      // failed-jobs card with a message that says what to do.
-      const apiKey = await requireFantasyprosKey(db, clock, fantasyprosApiKey);
+    case "ingest.rankings": {
+      const { ingestRankings } = await import("@league/data");
+      // Sleeper's projection feed needs no key and no quota, so the only way
+      // this fails is the feed itself — which throws and lands in the
+      // failed-jobs card. §5.7's gate is checked inside, against the number of
+      // players actually stored.
       const set = settings.phase === "pre_draft" || settings.phase === "drafting" ? "draft" : "weekly";
-      await ingestFpRankings(
-        db,
-        clock,
-        { apiKey, baseUrl: fantasyprosBaseUrl, dailyCap: fantasyprosDailyCap },
-        { season, set, week: settings.currentWeek },
-      );
-      return;
-    }
-    case "ingest.fp_injuries": {
-      const { fpRequest } = await import("@league/data");
-      const { fantasyprosApiKey, fantasyprosBaseUrl, fantasyprosDailyCap } = env.toolConfig;
-      const injuriesKey = await requireFantasyprosKey(db, clock, fantasyprosApiKey);
-      await fpRequest(
-        db,
-        clock,
-        { apiKey: injuriesKey, baseUrl: fantasyprosBaseUrl, dailyCap: fantasyprosDailyCap },
-        { kind: "engine" },
-        "/nfl/injuries",
-        { year: season, week: settings.currentWeek, include_probabilities: "true" },
-      );
+      await ingestRankings(db, clock, { season, set, week: settings.currentWeek });
       return;
     }
     case "draft.run": {
@@ -199,28 +174,6 @@ export async function runJob(
 }
 
 /**
- * The FantasyPros key, or a failure that is visible in three places: the job
- * row, the failed-jobs card on /admin/health, and a `fp.key` health row that
- * says exactly what is wrong and how to fix it.
- *
- * Silence was the old behaviour and it cost an afternoon: the job ran, wrote
- * nothing, and reported success.
- */
-async function requireFantasyprosKey(db: EngineDb, clock: Clock, key: string | undefined): Promise<string> {
-  if (key) return key;
-  const at = clock.now();
-  const message =
-    "FANTASYPROS_API_KEY is not set on this deployment, so no rankings or injuries can be " +
-    "ingested and the draft cannot start (§5.7). Set it in the Vercel project for Production " +
-    "and redeploy — a deployment only sees the environment it was built with.";
-  await db
-    .insert(health)
-    .values({ key: "fp.key", lastError: message, lastErrorAt: at })
-    .onConflictDoUpdate({ target: health.key, set: { lastError: message, lastErrorAt: at } });
-  throw new Error(message);
-}
-
-/**
  * Recurring jobs (§9.1 table), booked for the next 48 hours. Idempotent, so
  * `book_daily_jobs` at 12:05 AM ET simply tops the queue back up.
  */
@@ -241,8 +194,7 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
     const at = (hh: number, mm: number) => zonedTimeToUtc(y!, m!, d!, hh, mm);
 
     await book("ingest.schedule", at(5, 0));
-    await book("ingest.fp_rankings", at(5, 30));
-    await book("ingest.fp_injuries", at(5, 35));
+    await book("ingest.rankings", at(5, 30));
     // §7.2: the daily waiver run time is a setting, not a constant. Booking it
     // at a hardcoded 4:30 meant changing it on /admin/settings moved the clear
     // window and what all twelve agents were told, but not when waivers ran.
@@ -281,8 +233,9 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
       }
     }
 
-    // §9.1: the optional Sunday injuries pull for the site.
-    if (dow === 0) await book("ingest.fp_injuries", at(11, 0));
+    // Injuries used to be a separate FantasyPros pull. They now arrive on the
+    // hourly `ingest.players` feed above, which is what raises `injury.changed`
+    // anyway, so there is nothing extra to book.
   }
 
   // Same reason as after the waiver run: rosters move all week, and a team

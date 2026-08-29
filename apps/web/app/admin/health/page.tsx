@@ -13,11 +13,11 @@ import {
   STARTING_SLOTS,
   teams,
 } from "@league/engine";
-import { Badge, Banner, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel, money } from "../../../components/ui";
+import { Badge, Banner, Card, Cell, Empty, PageTitle, Row, Table, money } from "../../../components/ui";
 import { db, leagueClock } from "../../../lib/db";
 import { weekScoringSource } from "../../../lib/finalize";
 import { MAX_CONCURRENT_SESSIONS } from "../../../lib/runSession";
-import { acknowledgeAlarmAction, fpUsageToday, sendDigestNowAction } from "../../../lib/adminActions";
+import { acknowledgeAlarmAction, sendDigestNowAction } from "../../../lib/adminActions";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Health" };
@@ -45,7 +45,7 @@ export default async function AdminHealthPage({
   const season = settings?.season ?? 0;
   const week = settings?.currentWeek ?? 0;
 
-  const [feeds, allTeams, failed, discrepancies, dueJobs, failedJobs, alarms, rules, liveGames, recentSessions, fp, liveQueue] =
+  const [feeds, allTeams, failed, discrepancies, dueJobs, failedJobs, alarms, rules, liveGames, recentSessions, liveQueue] =
     await Promise.all([
       database.select().from(health).catch(() => []),
       database.select().from(teams).catch(() => []),
@@ -86,7 +86,6 @@ export default async function AdminHealthPage({
         .catch(() => []),
       // Enough history to see a model's recent run of failures (§8.8).
       database.select().from(sessions).orderBy(desc(sessions.createdAt)).limit(400).catch(() => []),
-      fpUsageToday().catch(() => ({ day: "—", total: 0, byTeam: {} as Record<string, number> })),
       // The session queue: since sessions are no longer represented by a job
       // row, this is the only place the queue is visible (§9.2). One query for
       // both states, so a session that changes status mid-render cannot appear
@@ -409,26 +408,6 @@ export default async function AdminHealthPage({
               ))}
             </Table>
           )}
-        </Card>
-
-        <Card title={`FantasyPros requests today (${fp.day}) — ${fp.total}`}>
-          <Table head={["Caller", "Requests", "Allowance"]}>
-            <Row>
-              <Cell>Engine pulls</Cell>
-              <Cell align="right">{fp.byTeam.engine ?? 0}</Cell>
-              <Cell>exempt from the per-agent allowance (§5.8)</Cell>
-            </Row>
-            {allTeams.map((t) => (
-              <Row key={t.id}>
-                <Cell>
-                  <TeamLabel slug={t.slug} name={t.name} model={t.modelLabel} />
-                </Cell>
-                <Cell align="right">{fp.byTeam[String(t.id)] ?? 0}</Cell>
-                <Cell>{settings?.fantasyprosDailyAllowance ?? 3} per day</Cell>
-              </Row>
-            ))}
-          </Table>
-          <p className="mt-3 text-xs text-muted">A cache hit still counts against an agent&apos;s allowance — the allowance is a league rule, not a cost control.</p>
         </Card>
 
         <Card title={`Scoring discrepancies — ${discrepancies.length} most recent`}>

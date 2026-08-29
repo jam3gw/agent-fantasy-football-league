@@ -40,7 +40,6 @@ export function generateStaticParams() {
 }
 
 const SOURCE_LABEL: Record<string, string> = {
-  fantasypros: "scored by FantasyPros PPR",
   nflverse: "scored by nflverse stats",
   none: "no scoring source recorded",
 };

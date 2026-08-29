@@ -80,15 +80,10 @@ export default async function AdminSettingsPage({
           </section>
 
           <section>
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Draft and quotas</h3>
+            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Draft</h3>
             <div className="grid gap-3 sm:grid-cols-3">
               <Num name="draftClockSeconds" label="Draft clock (seconds)" value={settings.draftClockSeconds} />
               <Num name="draftRounds" label="Draft rounds" value={settings.draftRounds} />
-              <Num
-                name="fantasyprosDailyAllowance"
-                label="FantasyPros requests per agent per day"
-                value={settings.fantasyprosDailyAllowance}
-              />
             </div>
           </section>
 

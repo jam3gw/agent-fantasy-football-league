@@ -3,7 +3,6 @@ import { eq, sql } from "drizzle-orm";
 import {
   computeStandings,
   draftPicks,
-  fpUsage,
   sessions,
   spendLedger,
   teamWeekResults,
@@ -55,13 +54,12 @@ interface BenchRow {
   sessionsFailed: number;
   invalidToolCalls: number;
   autoPicks: number;
-  fpRequests: number;
 }
 
 export default async function BenchmarkPage() {
   const database = db();
 
-  const [allTeams, standings, results, claims, allTrades, sessionAgg, ledger, autopicks, fp] = await Promise.all([
+  const [allTeams, standings, results, claims, allTrades, sessionAgg, ledger, autopicks] = await Promise.all([
     database.select().from(teams).orderBy(teams.id).catch(() => []),
     computeStandings(database).catch(() => []),
     database
@@ -122,11 +120,6 @@ export default async function BenchmarkPage() {
       .where(eq(draftPicks.madeBy, "autopick"))
       .groupBy(draftPicks.teamId)
       .catch(() => []),
-    database
-      .select({ teamId: fpUsage.teamId, n: sql<number>`count(*)::int` })
-      .from(fpUsage)
-      .groupBy(fpUsage.teamId)
-      .catch(() => []),
   ]);
 
   const rows: BenchRow[] = allTeams.map((t) => {
@@ -172,7 +165,6 @@ export default async function BenchmarkPage() {
       sessionsFailed: Number(s?.failed ?? 0),
       invalidToolCalls: Number(s?.invalid ?? 0),
       autoPicks: Number(autopicks.find((x) => x.teamId === t.id)?.n ?? 0),
-      fpRequests: Number(fp.find((x) => x.teamId === t.id)?.n ?? 0),
     };
   });
 
@@ -333,7 +325,6 @@ export default async function BenchmarkPage() {
               "Invalid calls",
               "Auto-picks",
               "Empty slots",
-              "FP requests",
             ]}
           >
             {rows.map((r) => (
@@ -369,7 +360,6 @@ export default async function BenchmarkPage() {
                 <Cell align="right">{r.invalidToolCalls}</Cell>
                 <Cell align="right">{r.autoPicks}</Cell>
                 <Cell align="right">{r.emptySlots}</Cell>
-                <Cell align="right">{r.fpRequests}</Cell>
               </Row>
             ))}
           </Table>

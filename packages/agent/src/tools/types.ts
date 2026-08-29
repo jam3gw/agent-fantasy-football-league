@@ -23,9 +23,6 @@ export interface ToolContext {
   season: number;
   /** Secrets live here and never reach a model or a transcript. */
   config: {
-    fantasyprosApiKey?: string;
-    fantasyprosBaseUrl?: string;
-    fantasyprosDailyCap?: number;
     webSearchProvider?: string;
     webSearchApiKey?: string;
     /** Blocked in agent web tools (§12.1). */

@@ -51,7 +51,6 @@ function ctxFor(teamId: number | null, sessionId: number): ToolContext {
     kind: "weekly_review",
     season: 2026,
     config: {
-      fantasyprosApiKey: SECRET_KEY,
       webSearchApiKey: SECRET_KEY,
       siteDomain: "league.example.com",
     },

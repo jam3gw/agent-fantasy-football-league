@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { COOKIE_NAME, COOKIE_OPTIONS, issueCookieValue, passwordMatches } from "../../../../lib/auth";
+import { adminConfigProblem } from "../../../../lib/adminConfig";
 
 /**
  * Commissioner login (SPEC §12.2). The password is compared in constant time
@@ -11,6 +12,13 @@ import { COOKIE_NAME, COOKIE_OPTIONS, issueCookieValue, passwordMatches } from "
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest): Promise<NextResponse> {
+  // A missing variable throws inside passwordMatches/issueCookieValue. Send the
+  // browser back to the login page, which names the variable and the remedy,
+  // rather than answering a bare 500 the commissioner cannot act on.
+  if (adminConfigProblem()) {
+    return NextResponse.redirect(new URL("/admin/login", request.url), { status: 303 });
+  }
+
   const form = await request.formData();
   const password = form.get("password");
   const next = safeNext(typeof form.get("next") === "string" ? String(form.get("next")) : undefined);

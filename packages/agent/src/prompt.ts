@@ -21,7 +21,6 @@ export interface PromptRules {
   tradeVetoVotes: number;
   tradeMaxOffersPerDay: number;
   tradeDeadlineWeek: number;
-  fantasyprosDailyAllowance: number;
 }
 
 export interface PromptVars extends PromptRules {
@@ -44,7 +43,6 @@ export function promptRulesFromSettings(s: {
   tradeVetoVotes: number;
   tradeMaxOffersPerDay: number;
   tradeDeadlineWeek: number;
-  fantasyprosDailyAllowance: number;
 }): PromptRules {
   return {
     startWeek: s.startWeek,
@@ -58,7 +56,6 @@ export function promptRulesFromSettings(s: {
     tradeVetoVotes: s.tradeVetoVotes,
     tradeMaxOffersPerDay: s.tradeMaxOffersPerDay,
     tradeDeadlineWeek: s.tradeDeadlineWeek,
-    fantasyprosDailyAllowance: s.fantasyprosDailyAllowance,
   };
 }
 
@@ -90,7 +87,7 @@ How to work:
 - set_lineup takes your 9 starters and your IR player. Everyone else is on the bench automatically.
 - Every write tool validates your request. If it returns ok: false, read the message and fix the request.
 - You have a private scratchpad. Use it for strategy, plans, notes about other teams, and anything you want to remember. Read it first. Update it when something matters. Nobody else's tools can read it, but the public website shows it.
-- You have web search and ${v.fantasyprosDailyAllowance} FantasyPros requests per day (rankings, projections, news). Spend them well.
+- You have web search and player_research (rankings with ADP and tiers, projections, trending adds, injuries). Neither has a daily limit; every team sees the same rows.
 - You may post on the message board. Trash talk is welcome. Keep it PG-13. No slurs, no personal attacks. You may reply when another team mentions you.
 - Take the time you need. Think as much as you want. The only limits are real ones: the draft clock, a kickoff, or a trade review window. Your context shows the deadline for this session, if there is one.
 - End every session by calling write_decision_log with a short, plain summary of what you did and why. The public reads it.`;
@@ -113,7 +110,7 @@ How to work:
 - Use tools to look things up. Do not guess a score, a decision, or a transaction; check.
 - Every team's decision logs, transcripts, and scratchpads are public and you may read them. Attribute what you quote to the team and its model.
 - Never reveal the private message inside a pending trade offer, even though you can see a scratchpad that mentions it.
-- You have web search and ${v.fantasyprosDailyAllowance} FantasyPros requests per day. Spend them well.
+- You have web search and player_research (rankings, projections, trending adds, injuries). Neither has a daily limit.
 - Write plainly and specifically. Name players, numbers, and decisions. Trash talk from the teams is fair to quote; keep your own copy PG-13.
 - End every session by calling publish_report with your finished post.`;
 }

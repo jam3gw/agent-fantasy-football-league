@@ -90,6 +90,25 @@ export async function fetchSeasonStats(season: number, opts: SleeperClientOption
   return (await fetchWithRetry(url, { ...opts, healthKey: "sleeper.stats_season" })) as SleeperStatsEntry[];
 }
 
+/**
+ * §5.7 — season-long projections carrying ADP. One call, no key, no quota.
+ * `order_by=adp_ppr` asks Sleeper for the draft ordering directly; every row
+ * also carries `pts_ppr` season projections, which is where tiers come from.
+ * Rows are keyed by Sleeper `player_id`, which is already our canonical id,
+ * so nothing here needs a player-id mapping.
+ */
+export async function fetchSeasonProjections(
+  season: number,
+  opts: SleeperClientOptions = {},
+): Promise<SleeperStatsEntry[]> {
+  const url = `${STATS}/projections/nfl/${season}?season_type=regular&${positionsQuery()}&order_by=adp_ppr`;
+  return (await fetchWithRetry(url, {
+    ...opts,
+    timeoutMs: opts.timeoutMs ?? 60_000,
+    healthKey: "sleeper.season_projections",
+  })) as SleeperStatsEntry[];
+}
+
 /** §5.4 — weekly projections (undocumented, optional; do not fail the caller). */
 export async function fetchWeekProjections(
   season: number,

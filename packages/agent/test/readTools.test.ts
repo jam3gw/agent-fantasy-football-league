@@ -2,21 +2,21 @@
  * Read tools (§8.4 table 1) against a real PGlite database with the production
  * migrations applied. Covers the league-state shape, lock and bye flags,
  * free-agent filtering, scratchpad isolation (§15.5), vote secrecy during a
- * trade review (§3.5), the web-search domain block (§12.1), the FantasyPros
- * quota passthrough (§5.8), and paging (§8.2).
+ * trade review (§3.5), the web-search domain block (§12.1), player_research
+ * (§5.7), and paging (§8.2).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
-import { FixedClock, etDay } from "@league/shared";
+import { FixedClock } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
 import {
   boardPosts,
-  fpPlayerMap,
-  fpUsage,
   lineupEntries,
   matchups,
+  playerWeekProj,
   playerWeekStats,
   players,
+  rankings,
   scratchpads,
   teams,
   tradeVotes,
@@ -25,7 +25,6 @@ import {
 } from "@league/engine";
 import {
   READ_TOOLS,
-  fantasyprosLookupTool,
   getFreeAgentsTool,
   getLeagueStateTool,
   getMatchupTool,
@@ -38,6 +37,7 @@ import {
   getTransactionsTool,
   getWaiverClaimsTool,
   isBlockedSearchHost,
+  playerResearchTool,
   readBoardTool,
   readScratchpadTool,
   searchPlayersTool,
@@ -99,7 +99,7 @@ describe("READ_TOOLS", () => {
   it("exposes exactly the §8.4 read tools, each with a schema", () => {
     expect(READ_TOOLS.map((t) => t.name).sort()).toEqual(
       [
-        "fantasypros_lookup",
+        "player_research",
         "get_free_agents",
         "get_league_state",
         "get_matchup",
@@ -782,152 +782,132 @@ describe("web_search", () => {
 });
 
 /* ========================================================================== */
-/* fantasypros_lookup (§5.8)                                                  */
+/* player_research (§5.7)                                                     */
 /* ========================================================================== */
 
-describe("fantasypros_lookup", () => {
-  it("maps FantasyPros players to our ids and reports remaining_today", async () => {
-    await seedLeague(db);
-    const [a] = (await seedTeams(db)) as [number];
-    const ours = await makePlayer(db, { fullName: "Mapped Man", position: "RB", nflTeam: "KC" });
-    await rosterPlayer(db, a, ours);
-    await db.insert(fpPlayerMap).values({ fpPlayerId: "17240", playerId: ours, matchedBy: "yahoo_id" });
-
-    const calls: string[] = [];
-    vi.stubGlobal("fetch", async (url: string | URL) => {
-      calls.push(String(url));
-      return new Response(
-        JSON.stringify({
-          players: [
-            {
-              player_id: "17240",
-              player_name: "Mapped Man",
-              player_team_id: "KC",
-              player_position_id: "RB",
-              rank_ecr: 3,
-              pos_rank: "RB2",
-              tier: 1,
-              player_ecr_delta: -1,
-              player_bye_week: "10",
-              player_owned_avg: 99.5,
-            },
-            { player_id: "99999", player_name: "Unmapped Guy", rank_ecr: 40 },
-          ],
-        }),
-        { status: 200 },
-      );
-    });
-
-    const res = ok(
-      await fantasyprosLookupTool.execute(
-        { kind: "weekly_rankings", position: "RB" },
-        ctxFor({ teamId: a, config: { fantasyprosApiKey: "fp-secret" } }),
-      ),
-    );
-    expect(calls[0]).toContain("/nfl/2026/consensus-rankings");
-    expect(calls[0]).toContain("scoring=PPR");
-    expect(calls[0]).toContain("position=RB");
-    expect(res.remaining_today).toBe(2);
-    expect(res.cache_hit).toBe(false);
-    const items = res.items as Array<Record<string, unknown>>;
-    expect(items[0]!.player_id).toBe(ours);
-    expect(items[0]!.rank_ecr).toBe(3);
-    expect(items[0]!.tier).toBe(1);
-    expect(items[0]!.bye).toBe(10);
-    expect((items[0]!.ownership as { status: string }).status).toBe("rostered");
-    expect(items[1]!.player_id).toBeNull();
-    expect(res.unmapped_players).toBe(1);
-    expect(JSON.stringify(res)).not.toContain("fp-secret");
-  });
-
-  it("passes the fantasypros_quota failure through unchanged after 3 requests", async () => {
-    await seedLeague(db);
-    const [a] = (await seedTeams(db)) as [number];
-    const day = etDay(new Date(NOW));
-    for (let i = 1; i <= 3; i++) {
-      await db.insert(fpUsage).values({
-        teamId: a,
-        dayEt: day,
-        requestNo: i,
-        endpoint: "/nfl/2026/consensus-rankings",
-        params: { caller: String(a) },
-        cacheHit: true,
+describe("player_research", () => {
+  /** A draft board of `n` players, ranked 1..n, alternating RB and WR. */
+  async function seedBoard(n: number): Promise<string[]> {
+    const ids: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const position = i % 2 === 0 ? "RB" : "WR";
+      const id = await makePlayer(db, { fullName: `Board Man ${i}`, position, nflTeam: "KC" });
+      ids.push(id);
+      await db.insert(rankings).values({
+        playerId: id,
+        set: "draft",
+        week: 0,
+        rank: i + 1,
+        posRank: `${position}${Math.floor(i / 2) + 1}`,
+        tier: Math.floor(i / 4) + 1,
+        adp: (i + 1) * 1.5,
+        fetchedAt: new Date(NOW),
       });
     }
-    const fetchSpy = vi.fn();
+    return ids;
+  }
+
+  it("returns the draft board in rank order with tier and ADP", async () => {
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    const ids = await seedBoard(6);
+    await rosterPlayer(db, a, ids[0]!);
+
+    const res = (await playerResearchTool.execute({ kind: "draft_rankings" }, ctxFor({ teamId: a }))) as {
+      items: Array<Record<string, unknown>>;
+      total: number;
+    };
+    expect(res.total).toBe(6);
+    expect(res.items.map((i) => i.rank)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(res.items[0]!.adp).toBe(1.5);
+    expect(res.items[0]!.tier).toBe(1);
+    expect(res.items[0]!.pos_rank).toBe("RB1");
+    // Ownership comes from the league, so an agent can see who is already taken
+    // and who is still there to draft.
+    expect((res.items[0]!.ownership as { status: string }).status).toBe("rostered");
+    expect((res.items[1]!.ownership as { status: string }).status).toBe("free_agent");
+  });
+
+  it("filters by position and by player_ids", async () => {
+    await seedLeague(db);
+    const ids = await seedBoard(6);
+
+    const rbs = (await playerResearchTool.execute(
+      { kind: "draft_rankings", position: "RB" },
+      ctxFor(),
+    )) as { items: Array<Record<string, unknown>>; total: number };
+    expect(rbs.total).toBe(3);
+    expect(rbs.items.every((i) => i.position === "RB")).toBe(true);
+
+    const two = (await playerResearchTool.execute(
+      { kind: "draft_rankings", player_ids: [ids[0]!, ids[3]!] },
+      ctxFor(),
+    )) as { total: number };
+    expect(two.total).toBe(2);
+  });
+
+  it("reads projections and trending from our own ingests", async () => {
+    await seedLeague(db);
+    const hot = await makePlayer(db, { fullName: "Waiver Darling", position: "WR", nflTeam: "SF" });
+    const cold = await makePlayer(db, { fullName: "Nobody Wants Him", position: "WR", nflTeam: "NYJ" });
+    await db.insert(playerWeekProj).values({ playerId: hot, season: SEASON, week: 1, projPtsPpr: 18.4 });
+    await db.insert(playerWeekProj).values({ playerId: cold, season: SEASON, week: 1, projPtsPpr: 2.1 });
+    await db.update(players).set({ trendingAdds: 4200 }).where(eq(players.playerId, hot));
+
+    const proj = (await playerResearchTool.execute({ kind: "projections", week: 1 }, ctxFor())) as {
+      items: Array<Record<string, unknown>>;
+    };
+    expect(proj.items[0]!.player_id).toBe(hot);
+    expect(proj.items[0]!.proj_pts_ppr).toBe(18.4);
+
+    const trending = (await playerResearchTool.execute({ kind: "trending" }, ctxFor())) as {
+      items: Array<Record<string, unknown>>;
+      total: number;
+    };
+    expect(trending.total).toBe(1);
+    expect(trending.items[0]!.trending_adds).toBe(4200);
+  });
+
+  it("reads injuries from the hourly player feed", async () => {
+    await seedLeague(db);
+    const hurt = await makePlayer(db, { fullName: "Sore Hamstring", position: "RB", nflTeam: "DAL" });
+    await makePlayer(db, { fullName: "Perfectly Fine", position: "RB", nflTeam: "DAL" });
+    await db
+      .update(players)
+      .set({ injuryStatus: "Questionable", injuryBodyPart: "Hamstring" })
+      .where(eq(players.playerId, hurt));
+
+    const res = (await playerResearchTool.execute({ kind: "injuries" }, ctxFor())) as {
+      items: Array<Record<string, unknown>>;
+      total: number;
+    };
+    expect(res.total).toBe(1);
+    expect(res.items[0]!.injury_status).toBe("Questionable");
+    expect(res.items[0]!.injury_body_part).toBe("Hamstring");
+  });
+
+  it("makes no outbound request and has no allowance to spend", async () => {
+    await seedLeague(db);
+    await seedBoard(3);
+    const fetchSpy = vi.fn(async () => new Response("{}", { status: 200 }));
     vi.stubGlobal("fetch", fetchSpy);
 
-    const res = await fantasyprosLookupTool.execute(
-      { kind: "news" },
-      ctxFor({ teamId: a, config: { fantasyprosApiKey: "fp-secret" } }),
-    );
-    expect(res.ok).toBe(false);
-    expect((res as { error: string }).error).toBe("fantasypros_quota");
-    expect((res as { message: string }).message).toContain("3 FantasyPros requests for today");
+    // Ten calls in a row: the FantasyPros tool refused after three.
+    for (let i = 0; i < 10; i++) {
+      const res = (await playerResearchTool.execute({ kind: "draft_rankings" }, ctxFor())) as {
+        ok?: boolean;
+        total?: number;
+      };
+      expect(res.ok, `call ${i + 1} should not fail`).not.toBe(false);
+      expect(res.total).toBe(3);
+    }
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
-  it("returns fantasypros_unavailable when upstream fails, and when no key is configured", async () => {
+  it("says so when a set has not been ingested yet", async () => {
     await seedLeague(db);
-    const [a] = (await seedTeams(db)) as [number];
-    const noKey = await fantasyprosLookupTool.execute({ kind: "injuries" }, ctxFor({ teamId: a }));
-    expect((noKey as { error: string }).error).toBe("fantasypros_unavailable");
-    expect((noKey as { hint: string }).hint).toContain("web_search");
-
-    vi.stubGlobal("fetch", async () => new Response("nope", { status: 500 }));
-    const failed = await fantasyprosLookupTool.execute(
-      { kind: "injuries" },
-      ctxFor({ teamId: a, config: { fantasyprosApiKey: "fp-secret" } }),
-    );
-    expect(failed.ok).toBe(false);
-    expect((failed as { error: string }).error).toBe("fantasypros_unavailable");
-  });
-
-  it("requires a position for projections", async () => {
-    await seedLeague(db);
-    const [a] = (await seedTeams(db)) as [number];
-    const res = await fantasyprosLookupTool.execute(
-      { kind: "projections" },
-      ctxFor({ teamId: a, config: { fantasyprosApiKey: "fp-secret" } }),
-    );
-    expect(res.ok).toBe(false);
-    expect((res as { error: string }).error).toBe("invalid_args");
-  });
-
-  it("maps news rows and counts against the reporter's own allowance", async () => {
-    await seedLeague(db);
-    await seedTeams(db);
-    vi.stubGlobal(
-      "fetch",
-      async () =>
-        new Response(
-          JSON.stringify({
-            news: [
-              {
-                player_id: "17240",
-                title: "Starter returns to practice",
-                desc: "full participant",
-                impact: "start him",
-                created: "2026-09-12",
-              },
-            ],
-          }),
-          { status: 200 },
-        ),
-    );
-    const res = ok(
-      await fantasyprosLookupTool.execute(
-        { kind: "news", category: "injury", limit: 5 },
-        ctxFor({ teamId: null, config: { fantasyprosApiKey: "fp-secret" } }),
-      ),
-    );
-    const items = res.items as Array<Record<string, unknown>>;
-    expect(items[0]!.headline).toBe("Starter returns to practice");
-    expect(items[0]!.impact).toBe("start him");
-    expect(res.remaining_today).toBe(2);
-    const usage = await db.select().from(fpUsage);
-    expect(usage).toHaveLength(1);
-    expect(usage[0]!.teamId).toBeNull();
+    const res = (await playerResearchTool.execute({ kind: "ros_rankings" }, ctxFor())) as { error: string };
+    expect(res.error).toBe("not_found");
   });
 });
 

@@ -21,7 +21,7 @@ export async function upsertWeekStats(
     week: number;
     entries: SleeperStatsEntry[];
     markFinal: boolean;
-    source?: "sleeper" | "fantasypros" | "nflverse";
+    source?: "sleeper" | "nflverse";
   },
 ): Promise<{ count: number; discrepancies: number }> {
   return db.transaction(async (tx) => {

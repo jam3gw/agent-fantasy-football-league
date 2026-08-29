@@ -110,7 +110,7 @@ export async function recordSpend(db: EngineDb, clock: Clock, entry: LedgerEntry
     .where(eq(sessions.id, entry.sessionId));
 }
 
-/** Price of a paid tool call, or 0 when the tool is free (FantasyPros is $0). */
+/** Price of a paid tool call, or 0 when the tool is free (player_research is $0). */
 export async function toolCallCost(db: EngineDb, toolName: string): Promise<number> {
   const rows = await db.select().from(toolCosts).where(eq(toolCosts.toolName, toolName));
   return rows[0]?.usdPerCall ?? 0;
