@@ -15,6 +15,7 @@ import {
 } from "@league/engine";
 import { Badge, Banner, Card, Cell, Empty, PageTitle, Row, Table, money } from "../../../components/ui";
 import { db, leagueClock } from "../../../lib/db";
+import { TICK_STALE_MS } from "../../../lib/healthz";
 import { weekScoringSource } from "../../../lib/finalize";
 import { MAX_CONCURRENT_SESSIONS } from "../../../lib/runSession";
 import { acknowledgeAlarmAction, sendDigestNowAction } from "../../../lib/adminActions";
@@ -24,8 +25,6 @@ export const metadata = { title: "Health" };
 
 const WEEK_MS = 7 * 24 * 3600_000;
 /** §13.4: the live feed is "delayed" once Sleeper has been silent for 10 minutes. */
-/** The tick runs every minute; three missed in a row is a real outage, not a blip. */
-const TICK_STALE_MS = 3 * 60_000;
 const LIVE_STALE_MS = 10 * 60_000;
 /** Rows in the queue card. Comfortably over the cap plus a full booking sweep. */
 const SESSION_QUEUE_LIMIT = 60;

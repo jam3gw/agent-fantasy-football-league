@@ -8,7 +8,7 @@ import "server-only";
  *  5. expire stale offers and resolve trades whose review window ended
  */
 import { and, asc, desc, eq, inArray, lte, not, or, sql } from "drizzle-orm";
-import { etDay, formatEt, parseDate } from "@league/shared";
+import { formatEt, parseDate } from "@league/shared";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import {
@@ -30,7 +30,8 @@ import {
 } from "@league/engine";
 import { db, leagueClock } from "./db";
 import { detectModelOutages, requeueFailedSessions, teamsForModels } from "./retry";
-import { sendEmail } from "./alarms";
+import { notifyOnce } from "./alarms";
+import { CAPACITY_CHECK_INTERVAL_MS, checkDbSize, checkGatewayCredits } from "./capacity";
 import { runJob } from "./jobs";
 
 export interface TickSummary {
@@ -271,6 +272,19 @@ export async function runTick(): Promise<TickSummary> {
     summary.draftRestarted = await restartStalledDraft(database, clock);
   });
 
+  // 7. Capacity watchdogs, hourly: database size and gateway credit. Both are
+  // silent and league-wide when exhausted — §17 warns that a full database
+  // fails writes while the admin pages render calm and empty, and a $0
+  // gateway balance fails every session for every team at once. Gated like
+  // the queue sweep: the stamp is pre-written, so a check that throws retries
+  // on the next hourly turn instead of sixty times an hour.
+  if (await dueForCapacityCheck(database, now)) {
+    await stage(database, clock, "tick.capacity", async () => {
+      await checkDbSize(database, clock);
+      await checkGatewayCredits(database, clock);
+    });
+  }
+
   // The heartbeat, last and unconditional. /admin/health's red "the scheduler
   // has never run" banner keys on this row and on nothing else, so a tick that
   // did its work and forgot to stamp it would leave the page shouting that the
@@ -447,36 +461,6 @@ export async function checkFinalizationStall(database: EngineDb, clock: Clock): 
 }
 
 /**
- * Send an email at most once per ET day for a given key, and record whether it
- * left. Recording the outcome is the point: writing the once-a-day marker
- * before sending meant a failed send still consumed the day, so an outage that
- * nobody was told about looked exactly like no outage at all.
- */
-async function notifyOnce(
-  database: EngineDb,
-  clock: Clock,
-  key: string,
-  subject: string,
-  html: string,
-  detail = subject,
-): Promise<void> {
-  const healthKey = `notify:${key}:${etDay(clock.now())}`;
-  const existing = await database.select({ key: health.key }).from(health).where(eq(health.key, healthKey));
-  if (existing.length > 0) return;
-  const sent = await sendEmail(subject, html);
-  const at = clock.now();
-  await database
-    .insert(health)
-    .values({
-      key: healthKey,
-      lastError: sent ? null : `${detail} — the email did NOT send; see the email.send row`,
-      lastErrorAt: sent ? null : at,
-      ...(sent ? { lastSuccessAt: at } : {}),
-    })
-    .onConflictDoNothing({ target: health.key });
-}
-
-/**
  * Make sure the recurring-job chain is running. `book_daily_jobs` re-books
  * every recurring job for the next 48 hours and re-books itself, so the chain
  * sustains itself once started — it just was never started.
@@ -514,6 +498,23 @@ async function dueForQueueSweep(database: EngineDb, now: Date): Promise<boolean>
   await database
     .insert(health)
     .values({ key: "sessions.sweep", lastSuccessAt: now })
+    .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: now } });
+  return true;
+}
+
+/**
+ * Is this the tick that runs the capacity watchdogs? Same shape as the queue
+ * sweep's gate: the interval lives in `health` under the stage's own key, and
+ * the stamp is written *before* the checks run, so a check that throws is
+ * retried on the next hourly turn rather than every minute.
+ */
+export async function dueForCapacityCheck(database: EngineDb, now: Date): Promise<boolean> {
+  const last = await database.select().from(health).where(eq(health.key, "tick.capacity"));
+  const lastAt = last[0]?.lastSuccessAt?.getTime() ?? 0;
+  if (now.getTime() - lastAt < CAPACITY_CHECK_INTERVAL_MS) return false;
+  await database
+    .insert(health)
+    .values({ key: "tick.capacity", lastSuccessAt: now })
     .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: now } });
   return true;
 }
