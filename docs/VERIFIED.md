@@ -38,13 +38,23 @@ same:
 count: 512 (/nfl/players), 518 ALL, 105 QB, 196 RB, 256 WR, 178 TE, 44 K, 32 DST
 ```
 
-Still 68 ranked players. The key that the running production deployment sends is
-one FantasyPros answers as `free`. Two things can produce that, and the payload
-cannot tell them apart: the upgrade has not taken on FantasyPros' side, or a new
-key value was saved in Vercel *after* the current production deployment was built
-(15:23:14 UTC) and so is not in that deployment's environment snapshot — the same
-trap `CRON_SECRET` hit on 2026-08-28. Pushing this commit rebuilds production and
-rules the second one out.
+Still 68 ranked players.
+
+### The key itself is free-tier — measured directly, 15:41 UTC
+
+Production was rebuilt (15:37:38 UTC) so no stale environment snapshot could be
+blamed, and Jake reset the FantasyPros key. Calling the API by hand with the new
+key — no deployment, no cache, no code of ours in the path:
+
+```
+GET /public/v2/json/nfl/2026/consensus-rankings?position=ALL&scoring=PPR&week=0
+HTTP 200 → "tier": "free", "limit": 10, "count": 518, 10 rows returned
+```
+
+**Conclusive.** The key FantasyPros issued is on the free tier at the source. The
+§5.7 gate stays blocked until the account carries a paid Hall of Fame subscription
+(premium API is not granted by a HOF free trial, and production keys are activated
+as a separate step after upgrading).
 
 ## 2026-08-28 — §12.1 cache windows on the real CDN (Next 16 + Vercel)
 
