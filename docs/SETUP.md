@@ -166,7 +166,10 @@ In this order. `/admin/draft` is numbered to match.
    This is the first time each model actually runs, so it is where a bad model
    id or a missing gateway credit shows up.
 3. **`/admin/settings`** — set the reporter's model (§11). Review the cost alarm
-   thresholds. Set `pause_agent_at_usd` if you want the brake.
+   thresholds. Set `pause_agent_at_usd` if you want the brake. Check the
+   `web_search` tool cost: it is seeded at $0.008 per call (Tavily's list price)
+   and feeds `/benchmark`'s cost-per-point, so correct it if you are on a
+   different provider or plan.
 4. **`/admin/health`** — send a test digest, confirm `email.send` is green (§4).
 5. **`/admin/draft` step 1 — draw the order.** This comes *first*: onboarding
    tells each agent which slot it is preparing for, and it refuses to run before
