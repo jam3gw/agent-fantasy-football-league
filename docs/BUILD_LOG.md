@@ -38,9 +38,33 @@ distinguish the two causes:
    sending the old one — a deployment only ever sees the environment snapshot
    taken at build time, which is exactly what `CRON_SECRET` did yesterday.
 
-Pushing this commit rebuilds production, which rules out (2) at no cost. If the
-next run still reports `free`, the key in Vercel is the free-tier key and the
-fix is on the FantasyPros account, not here.
+Pushing this commit rebuilt production, which ruled out (2) at no cost.
+
+**Settled: it is (1).** Jake then reset the key and passed the new value to me
+directly. I called `consensus-rankings?position=ALL&scoring=PPR&week=0` with it
+by hand, out of band from production and from any cache — HTTP 200,
+`"tier": "free", "limit": 10, "count": 518`, ten rows. So the key itself is a
+free-tier key at the source; nothing about our deployment, our environment
+snapshot or our cache is involved. The fix is on the FantasyPros account.
+
+Per §17 the key was **not** written to the repo, to `.env.local`, or to Vercel by
+me: I hold no Vercel environment-variable tool, and the value is free-tier anyway,
+so installing it would change nothing. It was used once from a scratch file that
+was shredded immediately after. Because it has been through a chat transcript it
+should be reset again once a paid key is in hand.
+
+From FantasyPros' own documentation, premium API access rides on a **paid Hall of
+Fame subscription** — $107.88/year or $71.94/6 months — and two details match
+what we are seeing: a HOF *free trial* explicitly does not grant premium API
+access, and HOF members activate production API keys as a separate step, so the
+upgrade may not promote an existing key in place. (Read from search results;
+`www.fantasypros.com` and `support.fantasypros.com` are both blocked by this
+session's egress proxy, so the price should be confirmed at checkout.)
+
+Also worth Jake's attention before he buys: the HOF API licence is worded for
+personal, non-commercial use and the free tier for non-production use. A public
+league site sits awkwardly against both, and commercial use is a separate
+agreement with their sales team.
 
 The draft stays blocked until this passes; nothing else in the league is waiting
 on it, and the rest of the pre-draft checklist in `docs/SETUP.md` §8 is unaffected.
