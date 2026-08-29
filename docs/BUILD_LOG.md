@@ -11,6 +11,43 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Vercel Web Analytics on the public site
+
+`@vercel/analytics` 2.0.1 added to `apps/web`, with `<Analytics />` mounted at
+the end of `<body>` in `app/layout.tsx`, beside `<SpeedInsights />` — the App
+Router placement from Vercel's quickstart. The `/next` entry is the one used:
+it reads the router's params, so the eighteen weeks of `/matchups/[week]` are
+one row in the dashboard rather than eighteen rows. The component is `"use client"`
+and wraps itself in `Suspense` (it calls `useSearchParams`), so the root layout
+stays a server component and no page loses static rendering.
+
+- No new environment variable and no CSP to widen — the site sets none — and
+  the beacon is same-origin under `/_vercel/insights/*`, which Vercel adds at
+  the edge. Web Analytics is already enabled on the project: that route answers
+  200 with a 2,495-byte script on `league.jake-moses.com` today, and it only
+  exists once the project has it switched on.
+- **Unlike Speed Insights, this package does not no-op in development.** With
+  `NODE_ENV` `development` or `test` it injects
+  `https://va.vercel-scripts.com/v1/script.debug.js` instead of the same-origin
+  script, which logs each view to the console and reports nothing to the
+  project. So `next dev` makes one third-party request per page that production
+  does not; nothing is recorded either way. The test suite never renders the
+  layout, so it makes no request at all.
+- Like Speed Insights, the script Vercel actually serves in production is at a
+  per-project obfuscated path, injected into the page config at build time
+  (`NEXT_PUBLIC_VERCEL_OBSERVABILITY_CLIENT_CONFIG`, key `analytics`) and
+  preferred over `/_vercel/insights/script.js` — it is unguessable so that
+  blocklists keyed on the literal string cannot match it. Anything that greps a
+  deploy for "insights" will conclude, wrongly, that this is not installed.
+- `apps/web/test/analytics.test.ts` guards the import path and the
+  render-once-inside-`<body>` placement, the same two silent failures the
+  Speed Insights test guards: mounted deeper it misses pages, mounted twice it
+  double-counts every view.
+- Lint, typecheck and the full suite (455 tests) green.
+- Data starts when this reaches production. Nothing is backfilled, so the
+  dashboard stays empty until then — as of today it reports 0 visitors and
+  0 pageviews.
+
 ## 2026-08-29 — Vercel Speed Insights on the public site
 
 `@vercel/speed-insights` added to `apps/web`, with `<SpeedInsights />` mounted at
