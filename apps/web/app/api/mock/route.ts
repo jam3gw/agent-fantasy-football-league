@@ -135,6 +135,30 @@ export async function GET(request: Request): Promise<Response> {
         return Response.json(await debugValidateSession(database, sessionId));
       }
 
+      case "probe": {
+        // Execute the read tools live and validate each output as the SDK
+        // will — the transcript cannot show NaN/Infinity/Date/undefined.
+        const { debugProbeTools, toolsForKind } = await import("@league/agent");
+        const kit = toolsForKind("onboarding") as unknown as Array<{
+          name: string;
+          execute: (args: unknown, ctx: unknown) => Promise<unknown>;
+        }>;
+        return Response.json(
+          await debugProbeTools(database, clock, kit, [
+            { tool: "get_league_state", args: {} },
+            { tool: "get_draft_state", args: {} },
+            { tool: "read_scratchpad", args: {} },
+            { tool: "get_available_players", args: { sort: "rank", limit: 60 } },
+            { tool: "player_research", args: { kind: "draft_rankings", limit: 100 } },
+            { tool: "player_research", args: { kind: "injuries", limit: 50 } },
+            { tool: "player_research", args: { kind: "projections", week: 0, limit: 100 } },
+            { tool: "player_research", args: { kind: "ros_rankings", limit: 40 } },
+            { tool: "player_research", args: { kind: "weekly_rankings", week: 1, limit: 40 } },
+            { tool: "player_research", args: { kind: "trending", limit: 25 } },
+          ]),
+        );
+      }
+
       case "tick": {
         const summary = await runTick();
         return Response.json({ ok: true, ...summary });
