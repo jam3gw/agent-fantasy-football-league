@@ -65,11 +65,45 @@ the root layout stays a server component and no page loses static rendering.
   render-once-inside-`<body>` placement, the same two silent failures the
   Speed Insights test guards: mounted deeper it misses pages, mounted twice it
   double-counts every view.
-- Lint, typecheck and the full suite (455 tests) green.
+- Lint, typecheck and the full suite (457 tests) green.
 - Data starts when this reaches production. Nothing is backfilled, so the
   dashboard stays empty until then — as of today it reports 0 visitors and
   0 pageviews. The routes have been live on production all along; nothing was
   calling them.
+
+## 2026-08-29 — FantasyPros re-run after the plan upgrade: still `free`
+
+Jake upgraded the FantasyPros plan and asked for another run of
+`ingest.fp_rankings`.
+
+**Production data edit, recorded per the standing rules:** deleted the eight rows
+in `fp_cache` on the `main` Neon branch — `/nfl/players` and the seven
+`consensus-rankings` calls. `fp_cache` holds nothing but responses from an
+external API under a six-hour TTL (§5.8), so this is derived data and the delete
+only forces a refetch; nothing in league state depends on it and no backup is
+meaningful. Without it the re-run would have been served the earlier free-tier
+bodies out of cache and the upgrade would have looked like it had done nothing.
+
+Booked the job (`scheduled_jobs` id 237, `due_at = now()`), the tick claimed it a
+minute later, and all eight calls went to the live API at 15:31:34–15:31:41 UTC.
+**Every one still answers `"tier": "free", "limit": 10`.** 68 ranked players
+again, against §5.7's gate of 200. Numbers in `docs/VERIFIED.md`.
+
+The response says only what tier the key it received is on, so it cannot
+distinguish the two causes:
+
+1. the upgrade has not taken effect on FantasyPros' side; or
+2. a new key value was saved in Vercel **after** the current production
+   deployment was built (15:23:14 UTC), so the running deployment is still
+   sending the old one — a deployment only ever sees the environment snapshot
+   taken at build time, which is exactly what `CRON_SECRET` did yesterday.
+
+Pushing this commit rebuilds production, which rules out (2) at no cost. If the
+next run still reports `free`, the key in Vercel is the free-tier key and the
+fix is on the FantasyPros account, not here.
+
+The draft stays blocked until this passes; nothing else in the league is waiting
+on it, and the rest of the pre-draft checklist in `docs/SETUP.md` §8 is unaffected.
 
 ## 2026-08-29 — Vercel Speed Insights on the public site
 
