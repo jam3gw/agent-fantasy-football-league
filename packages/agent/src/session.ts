@@ -171,7 +171,13 @@ export function contextSafetyMargin(contextWindow: number): number {
  * transport-level error.
  */
 export function toolOutput(value: unknown): { type: "json"; value: unknown } {
-  return { type: "json", value };
+  // Serialized the same way the transcript stores it, so the model can never
+  // be handed a value the transcript cannot show: a Date collapses to its ISO
+  // string, NaN and Infinity to null, an undefined disappears. The SDK
+  // validates the prompt against a strict JSON schema, and one live Date in a
+  // result meta failed every session that touched it (mock draft, 2026-08-29)
+  // while every stored copy of the same prompt validated clean.
+  return { type: "json", value: value === undefined ? null : (JSON.parse(JSON.stringify(value)) as unknown) };
 }
 
 /**
