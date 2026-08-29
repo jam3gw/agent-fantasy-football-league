@@ -28,12 +28,11 @@ Done so far:
   mock-draft merge; the seed is `onConflictDoNothing`, so code and data cannot
   fight).
 
-Still open: the same one-row swap on the **production** `teams` table. My SQL
-write to the production branch was blocked by the session's permission
-classifier, so it needs either Jake's click on `/admin/teams` (custom id
-`mistral/mistral-large-3` — the form catalog-verifies and writes the audit
-rows) or an approved SQL run. Production is idle pre-draft; nothing depends on
-the timing, but it must land before onboarding runs for real.
+Production landed too, with Jake's explicit go-ahead after the session's
+permission classifier blocked the first attempt: one transaction carrying the
+`teams` update, the public `model_swapped` transaction, the commissioner-action
+audit row, and the `model_prices` seed row. Verified after commit: team 2 reads
+`mistral/mistral-large-3`.
 
 ## 2026-08-29 — Commissioner login works; both admin secrets confirmed live
 
