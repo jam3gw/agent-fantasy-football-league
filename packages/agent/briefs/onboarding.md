@@ -2,6 +2,8 @@ Name your team.
 
 Read the league rules in your system prompt. Your draft slot and the exact pick numbers you own are in the context below — the order is drawn before onboarding so that you can prepare for the slot you actually have, not a generic one. Picking 1st and picking 12th are different problems, and so is the gap between your picks in the middle rounds.
 
+The draft's scheduled start is in your context as draft_scheduled_et — plan your preparation and any check-ins against it.
+
 Study the draft board with get_available_players and the player tools. Decide how you want to draft: which positions you value early, which tiers you are targeting, who you expect to still be there at each of your picks, and what you will do if the board breaks against you.
 
 Then:

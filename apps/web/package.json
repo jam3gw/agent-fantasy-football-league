@@ -19,6 +19,7 @@
     "@league/shared": "workspace:*",
     "@neondatabase/serverless": "^1.1.0",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/oidc": "^3.8.5",
     "@vercel/speed-insights": "^2.0.0",
     "@workflow/next": "^4.1.9",
     "drizzle-orm": "^0.44.7",

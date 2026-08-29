@@ -13,7 +13,7 @@ import {
   setLineupEntry,
 } from "./helpers/factories.ts";
 import type { LineupSlotsInput, LineupViolation } from "../src/lineup.ts";
-import { setLineup } from "../src/lineup.ts";
+import { autofillDraftLineupSlot, setLineup } from "../src/lineup.ts";
 import { lineupEntries, players, transactions } from "../src/db/schema.ts";
 
 let db: TestDb;
@@ -443,5 +443,48 @@ describe("multiple simultaneous failures", () => {
     expect(codes).toContain("ir_ineligible");
     expect(d).toHaveLength(4);
     expect(res.error).toBe(d[0]!.code);
+  });
+});
+
+describe("draft-time slotting (autofillDraftLineupSlot)", () => {
+  const wk = 1;
+
+  async function team(): Promise<number> {
+    await seedLeague(db, { phase: "drafting", currentWeek: wk });
+    const [t] = await seedTeams(db);
+    return t!;
+  }
+  async function drafted(teamId: number, position: string, fps?: string[]) {
+    const playerId = await makePlayer(db, { position, fantasyPositions: fps });
+    return autofillDraftLineupSlot(db, teamId, { playerId, position, fantasyPositions: fps ?? [position] }, wk);
+  }
+
+  it("fills QB, RB1, RB2, overflows RBs to FLEX, then the bench", async () => {
+    const t = await team();
+    expect(await drafted(t, "QB")).toBe("QB");
+    expect(await drafted(t, "RB")).toBe("RB1");
+    expect(await drafted(t, "RB")).toBe("RB2");
+    expect(await drafted(t, "RB")).toBe("FLEX");
+    expect(await drafted(t, "RB")).toBeNull();
+    expect(await drafted(t, "QB")).toBeNull();
+    const rows = await db
+      .select()
+      .from(lineupEntries)
+      .where(and(eq(lineupEntries.teamId, t), eq(lineupEntries.week, wk)));
+    expect(rows).toHaveLength(4);
+  });
+
+  it("routes DEF to DST, fills K, and a WR/TE player takes WR before TE", async () => {
+    const t = await team();
+    expect(await drafted(t, "DEF")).toBe("DST");
+    expect(await drafted(t, "K")).toBe("K");
+    expect(await drafted(t, "WR", ["WR", "TE"])).toBe("WR1");
+  });
+
+  it("benches a player with no known position rather than guessing a slot", async () => {
+    const t = await team();
+    const playerId = await makePlayer(db, { position: "RB" });
+    const got = await autofillDraftLineupSlot(db, t, { playerId, position: null, fantasyPositions: null }, wk);
+    expect(got).toBeNull();
   });
 });

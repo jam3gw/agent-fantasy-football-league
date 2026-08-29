@@ -20,7 +20,19 @@ export interface GatewayCatalog {
 export async function fetchGatewayModelIds(
   opts: { apiKey?: string; fetchImpl?: typeof fetch; timeoutMs?: number } = {},
 ): Promise<GatewayCatalog> {
-  const apiKey = opts.apiKey ?? process.env.AI_GATEWAY_API_KEY;
+  let apiKey = opts.apiKey ?? process.env.AI_GATEWAY_API_KEY;
+  if (!apiKey) {
+    // Preview deployments carry no AI_GATEWAY_API_KEY (Production scope); the
+    // gateway accepts the deployment's OIDC token in the same Bearer header,
+    // which is how the AI SDK itself authenticates there. Outside Vercel the
+    // import or the call fails and the original error stands.
+    try {
+      const { getVercelOidcToken } = await import("@vercel/oidc");
+      apiKey = await getVercelOidcToken();
+    } catch {
+      /* not on Vercel; fall through */
+    }
+  }
   if (!apiKey) return { ok: false, ids: [], error: "AI_GATEWAY_API_KEY is not set" };
   const doFetch = opts.fetchImpl ?? fetch;
   const controller = new AbortController();

@@ -190,8 +190,24 @@ export function contextSafetyMargin(contextWindow: number): number {
  * cannot diverge on the same result.
  */
 export function toolOutput(value: unknown): { type: "json"; value: unknown } {
-  return { type: "json", value: value === undefined ? null : JSON.parse(JSON.stringify(value)) };
-}
+  // Serialized the same way the transcript stores it, so the model can never
+  // be handed a value the transcript cannot show: a Date collapses to its ISO
+  // string, NaN and Infinity to null, an undefined disappears. The SDK
+  // validates the prompt against a strict JSON schema, and one live Date in a
+  // result meta failed every session that touched it (mock draft, 2026-08-29)
+  // while every stored copy of the same prompt validated clean.
+  if (value === undefined) return { type: "json", value: null };
+  try {
+    return { type: "json", value: JSON.parse(JSON.stringify(value)) as unknown };
+  } catch (err) {
+    // A BigInt or a circular reference cannot serialize at all. Failing one
+    // tool result beats failing the whole session from outside the per-tool
+    // catch — the agent reads this like any other §8.4 failure and moves on.
+    return {
+      type: "json",
+      value: { ok: false, error: "unserializable_result", message: String(err).slice(0, 200) },
+    };
+  }}
 
 /**
  * Stub the oldest tool results in place. Returns how many were stubbed, so a
@@ -714,7 +730,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       ...(closing.error ? { error: closing.error } : {}),
     };
   } catch (err) {
-    await recordEvent(db, clock, sessionId, seq++, "error", { error: String(err) });
+    await recordEvent(db, clock, sessionId, seq++, "error", { error: String(err), ...errorDetail(err) });
     // A failed session must not leave a stale "thinking" preview.
     await clearPartial(db, sessionId);
     await db
@@ -730,6 +746,52 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       .where(and(eq(sessions.id, sessionId), eq(sessions.status, "running")));
     return { status: "failed", endedBy, toolCalls, invalidToolCalls, steps, error: String(err) };
   }
+}
+
+/**
+ * The one string `AI_InvalidPromptError` shows names the schema but not the
+ * field: the zod error rides in `cause`, and its issue paths say exactly which
+ * message and part failed. Losing that cost a day of guessing once (mock
+ * draft, 2026-08-29), so the transcript keeps the first few issues.
+ */
+function errorDetail(err: unknown): Record<string, unknown> {
+  // The zod error may sit one or two causes deep (InvalidPromptError wraps
+  // TypeValidationError wraps ZodError), so follow the chain to the issues.
+  let cause: unknown = err;
+  let issues: unknown;
+  for (let depth = 0; depth < 3; depth++) {
+    if (!cause || typeof cause !== "object" || !("cause" in cause)) break;
+    cause = (cause as { cause?: unknown }).cause;
+    if (cause && typeof cause === "object" && Array.isArray((cause as { issues?: unknown }).issues) ) {
+      issues = (cause as { issues: unknown }).issues;
+      break;
+    }
+  }
+  if (!cause || typeof cause !== "object") return {};
+  if (Array.isArray(issues)) {
+    return { cause_issues: flattenIssues(issues).slice(0, 20) };
+  }
+  return { cause: String(cause).slice(0, 500) };
+}
+
+/**
+ * A union failure's real reason hides in its sub-errors — zod v4 nests them
+ * under `errors`, v3 under `unionErrors` — and the top-level issue alone reads
+ * "Invalid input" with a path and nothing else.
+ */
+export function flattenIssues(issues: unknown, depth = 0): unknown[] {
+  if (!Array.isArray(issues) || depth > 3) return [];
+  return issues.slice(0, 5).flatMap((raw) => {
+    const issue = raw as Record<string, unknown>;
+    const base = { code: issue.code, path: issue.path, message: issue.message };
+    const nested = [
+      ...(Array.isArray(issue.errors) ? (issue.errors as unknown[][]).flat() : []),
+      ...(Array.isArray(issue.unionErrors)
+        ? (issue.unionErrors as Array<{ issues?: unknown[] }>).flatMap((e) => e.issues ?? [])
+        : []),
+    ];
+    return [base, ...flattenIssues(nested, depth + 1)];
+  });
 }
 
 /**

@@ -36,6 +36,8 @@ export interface ContextSnapshot {
   phase: string;
   deadline_at: string | null;
   next_waiver_run_et: string;
+  /** Present before and during the draft: when the draft is set to start. */
+  draft_scheduled_et?: string;
   next_locks: Array<{ nfl_team: string; kickoff_et: string }>;
   trade_deadline_week: number;
   my_team?: MyTeam;
@@ -127,6 +129,17 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
     trade_deadline_week: settings.tradeDeadlineWeek,
     board: [],
   };
+
+  // §10.1: before the draft, every session sees when the draft is set to
+  // start — onboarding plans around it, and pre-draft check-ins are only
+  // useful before it. The commissioner sets it on /admin/settings.
+  if (settings.phase === "pre_draft" || settings.phase === "drafting") {
+    const scheduledAt = (settings.extra as Record<string, unknown>).draftScheduledAt;
+    snapshot.draft_scheduled_et =
+      typeof scheduledAt === "string" && !Number.isNaN(Date.parse(scheduledAt))
+        ? formatEt(new Date(scheduledAt))
+        : "not scheduled yet — the commissioner starts the draft manually";
+  }
 
   // Last 10 board posts (§8.5); for board_reply the thread is added as kind data.
   const posts = await db
