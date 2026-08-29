@@ -50,6 +50,24 @@ run-their-validator lesson this log already recorded once. The tick's
 automatic retry of 869 (session 870) was cancelled before it could fail
 against the un-fixed deploy; a fresh probe runs after this deploys.
 
+**Probe rerun after the fix (session 881): the loop is closed.** Sonnet 5 on
+the same deliberative objective: succeeded, 5 model steps, 8 tool calls
+(player_research included — through the exact path that killed 869), 874
+reasoning tokens, thinking persisted on 3 of 5 steps (1,449 chars), zero
+dropped options, and `/sessions/881` renders each step's "Thought — N
+reasoning tokens" block in the redesigned step view (which another session
+shipped mid-stream; its `sessionTranscript.ts` reads the same first-class
+`reasoning` field with the same raw fallback, so the two changes composed
+cleanly). Full per-model results are in VERIFIED.md — the visibility-option
+verify item is resolved.
+
+Noticed in passing, filed as its own task rather than widened into this one:
+sessions on the Anthropic/OpenAI/xAI models record `cost_usd = 0` despite
+real token usage (881: five ~9k-token steps, $0.000000), while the other
+seven providers record plausible costs. §8.7's spend page undercounts those
+teams until that is root-caused (`gatewayCostFrom` trusting a zero instead
+of falling back to the price table is the leading suspect).
+
 ## Questions for Jake
 
 
