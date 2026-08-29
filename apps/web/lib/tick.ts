@@ -7,7 +7,7 @@ import "server-only";
  *  4. injury changes (handled inside the players ingest)
  *  5. expire stale offers and resolve trades whose review window ended
  */
-import { and, asc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, eq, lte, ne, sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import {
@@ -221,10 +221,15 @@ export async function startQueuedSessions(
   const now = clock.now();
   const reclaimed = await reclaimStuckSessions(database, clock);
 
+  // Draft picks are excluded: the draft workflow creates each one and runs it
+  // inline against the 180-second clock (§10.2). It commits the row `queued`
+  // and only then starts it, so a tick landing in that window would otherwise
+  // claim it and run a second copy — two model calls racing `make_pick`, and
+  // whichever loses ends without a pick and gets auto-picked.
   const queued = await database
     .select({ id: sessions.id, teamId: sessions.teamId, context: sessions.context })
     .from(sessions)
-    .where(eq(sessions.status, "queued"))
+    .where(and(eq(sessions.status, "queued"), ne(sessions.kind, "draft_pick")))
     .orderBy(asc(sessions.createdAt))
     .limit(MAX_QUEUED_SESSIONS_PER_TICK);
 
@@ -261,10 +266,10 @@ export async function startQueuedSessions(
       await startRun(session.id);
       started++;
     } catch {
-      await database
-        .update(sessions)
-        .set({ status: "queued", startedAt: null, updatedAt: clock.now() })
-        .where(and(eq(sessions.id, session.id), eq(sessions.status, "running")));
+      // The row stays `running`. `start` can throw *after* the workflow was
+      // accepted — a timeout reading the response — and putting the row back
+      // in the queue would then give it a second runner alongside the live
+      // one. `reclaimStuckSessions` releases it if nothing ever ran.
       break;
     }
   }
@@ -279,32 +284,26 @@ async function startAgentSessionWorkflow(sessionId: number): Promise<void> {
 
 /**
  * Fail sessions left `running` by an invocation that died — a function kill
- * between the slot claim and the workflow start, or a crash while building the
- * context snapshot. A session is stuck once it is past its deadline and has
- * not been touched for a while; `requeueFailedSessions` decides whether to
- * retry it (§8.8).
+ * between the slot claim and the workflow start, a `start` that threw after
+ * the workflow was accepted, or a crash while building the context snapshot.
+ *
+ * Idleness alone is the test, not the deadline. Every transcript row bumps
+ * `sessions.updated_at`, so a live session — even one spending ten minutes on
+ * free tool calls, which write no ledger row — is writing constantly; one that
+ * has written nothing for fifteen minutes is not coming back. Keeping the
+ * deadline out of it also means `requeueFailedSessions` can still retry the
+ * session inside its window (§8.8), which is the point of failing it rather
+ * than skipping it.
  */
 async function reclaimStuckSessions(database: EngineDb, clock: Clock): Promise<number> {
   const now = clock.now();
   const idleCutoff = new Date(now.getTime() - STUCK_SESSION_IDLE_MS);
-  const running = await database
-    .select({ id: sessions.id, context: sessions.context, updatedAt: sessions.updatedAt })
-    .from(sessions)
-    .where(eq(sessions.status, "running"));
-
-  let reclaimed = 0;
-  for (const session of running) {
-    if (session.updatedAt > idleCutoff) continue; // still writing transcript rows
-    const deadlineAt = parseDate(session.context.deadline_at);
-    if (deadlineAt && now < deadlineAt) continue; // still inside its window
-    const rows = await database
-      .update(sessions)
-      .set({ status: "failed", error: "abandoned: no progress past its deadline", endedAt: now, updatedAt: now })
-      .where(and(eq(sessions.id, session.id), eq(sessions.status, "running")))
-      .returning({ id: sessions.id });
-    reclaimed += rows.length;
-  }
-  return reclaimed;
+  const rows = await database
+    .update(sessions)
+    .set({ status: "failed", error: "abandoned: no progress for 15 minutes", endedAt: now, updatedAt: now })
+    .where(and(eq(sessions.status, "running"), lte(sessions.updatedAt, idleCutoff)))
+    .returning({ id: sessions.id });
+  return rows.length;
 }
 
 /** A timestamp out of a session's JSON context, or null if it is not one. */

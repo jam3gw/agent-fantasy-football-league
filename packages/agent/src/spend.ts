@@ -134,9 +134,10 @@ export function periodStartKey(period: RollupPeriod, now: Date, week: number, se
  * All three periods come from one pass over the ledger. The week a step
  * belongs to is the week its session was booked for (`sessions.context.week`)
  * rather than the calendar — a Tuesday review and the Sunday lineup check it
- * leads to are the same fantasy week. Steps from sessions with no week (the
- * draft, onboarding) belong to no week; §8.7 counts those under "plus the
- * draft" in the projection, not under a week.
+ * leads to are the same fantasy week. `createSession` stamps that on every
+ * in-season booking, and deliberately leaves it off the draft and onboarding
+ * sessions: §8.7 counts those under "plus the draft" in the projection, not
+ * against a week, so they appear in the season totals and in no week.
  */
 export async function updateRollups(db: EngineDb, clock: Clock): Promise<void> {
   const settings = await getSettings(db);
