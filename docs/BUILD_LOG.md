@@ -77,6 +77,88 @@ of falling back to the price table is the leading suspect).
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are in Vercel. `COMMISSIONER_PASSWORD` and `SESSION_SECRET` were confirmed live on 2026-08-29 (both were in fact missing until then, so this list is worth probing rather than assuming); `CRON_SECRET` is confirmed by the tick answering 200. The three third-party keys remain unverified from here. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Prompt: tell agents they can scout rivals and how to reach them
+
+Jake asked to make sure agents can look at other teams' rosters and standings
+all season, and know the channels for messaging one team or the whole league.
+Audit first: every capability already exists and is in the READ set that
+every broad team session kind gets (the narrow kinds — trade_vote,
+board_reply, draft_pick, smoke — keep their deliberately trimmed §8.6
+lists) — `get_team_roster` (any roster), `get_league_state` (standings,
+records, waiver order), `get_matchup`, `get_team_week_results`,
+`get_transactions`, `read_board`, plus `post_message` with `@Team Name`
+mentions (mentioned team usually gets a `board_reply` session) and the
+message on a trade offer. The gap was awareness: the shared system prompt never mentioned
+any of it beyond "you may post on the message board."
+
+Changes, on `claude/agent-visibility-communication-xzgd50`:
+- `prompt.ts` + SPEC Appendix C (kept in sync): a scouting bullet naming the
+  five league-visibility tools (get_league_state, get_team_roster,
+  get_matchup, get_team_week_results, get_transactions — Jake also asked
+  that agents see what other teams have done), and the board bullet
+  rewritten to spell out
+  all three channels — board post to the league, @mention to reach one team
+  (and that mentions trigger a reply session), trade-offer message to the
+  counterparty. No settings literals introduced; identical text for all 12.
+- Briefs: `weekly_review` step 1 adds "check the standings";
+  `trade_window` step 4 says @mention a team to pitch it directly.
+  Regenerated `briefs.generated.ts`.
+- New prompt test asserting the scouting tools and all three channels are
+  named. Lint, typecheck, and all 527 tests green.
+
+Reviewer round one (fresh context) found two over-claims in the new text,
+both fixed: a mention does not always create a reply session (depth ≤ 2 and
+3-per-day cap, §9.3), so the prompt and trade_window brief now say "usually";
+and the trade-offer message is not private "while pending" — every voter
+reads it during review once the offer is accepted.
+
+Reviewer round two (fresh context) found one real bug and two wording
+issues, all fixed:
+- **get_trade privacy gate widened**: it blocked non-parties only while a
+  trade was `proposed`, so the moment an offer died as rejected, countered,
+  cancelled or expired, any team (ids are sequential) or the reporter could
+  read the full offer and its message — including a live renegotiation via
+  the `countered` parent. The site's own /trades page states dead offers
+  stay between the two teams (§3.5's lifecycle: only the accepted branch
+  enters review). The gate now hides all five never-in-review statuses from
+  non-parties; parties still see their own dead offers; review-path statuses
+  (accepted, executed, vetoed, failed) stay league-visible. Regression test
+  walks every status for a third team, the reporter, and both parties.
+- The trade_window brief's "they see the post in their next session either
+  way" was a delivery guarantee the snapshot (last 10 board posts, §8.5)
+  cannot back on a busy board; dropped. Prompt parenthetical now names the
+  exceptions (deep threads, daily reply allowance, paused teams) instead of
+  promising next-session delivery.
+- This log's claim that the read tools are "in the READ set for all team
+  session kinds" corrected to "all broad kinds" (narrow kinds keep trimmed
+  lists).
+
+Reviewer round three (fresh context) caught that round two's gate was still
+one status short: `failed` has two producers, and the accept-time re-check
+failure (§3.5: accept re-runs every proposal check) goes `proposed → failed`
+directly — never in review, not on /trades, yet the status-list gate showed
+it to everyone. The engine sets `reviewEndsAt` exactly once, on a successful
+accept, so the gate now keys on `reviewEndsAt === null` instead of a status
+list; a new test drives the accept-time failure through the real
+`proposeTrade`/`respondToTrade` path and checks both directions. Also from
+round three: the mention-exception list now includes eliminated teams
+(events.ts skips them from week 15 on), and the trade-message sentence
+states the exact boundary — review entry, not acceptance.
+
+Reviewer round four (fresh context) traced every write to `reviewEndsAt`
+and every status transition, commissioner reversal included, and found the
+gate sound in both directions (a reversed trade keeps its timestamp and
+stays public — proof the timestamp, not the status list, is the right
+marker). Three text alignments applied: the reporter prompt's privacy rule
+(and §11) moved from "pending offer" to the never-entered-review boundary
+and now names transcripts alongside scratchpads (transcripts carry
+propose_trade args verbatim); the post_message tool description now says
+"usually gets a session to reply" to match the prompt; the /trades footer
+now draws the line at review entry instead of a status list (which was
+wrong for accept-time failures and commissioner-reversed trades). Round
+five (fresh context, delta only) verified the three alignments against the
+engine and reported no findings — review loop closed.
+
 ## 2026-08-29 — Vercel/Neon audit: the alarms that could not fire
 
 Jake asked for an audit of the Vercel and Neon setup and what monitoring to
