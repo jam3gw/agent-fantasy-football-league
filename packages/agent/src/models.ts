@@ -7,7 +7,7 @@
  * Prompt caching is on wherever the provider supports it — caching changes
  * cost, never behavior.
  *
- * Every call bills the AI Gateway; see `BilledTo` below.
+ * Calls route through the AI Gateway; who pays depends on the provider — see `BilledTo` below.
  */
 
 
@@ -75,10 +75,25 @@ export const MODEL_PRICE_SEED: Record<
  * price list, one balance to watch on /spend, and no provider account whose
  * credential can quietly expire mid-season and reroute a model.
  *
- * `spend_ledger.billed_to` keeps the column §6 defines and always reads
- * `gateway`, so the ledger stays comparable if that decision is ever revisited.
+ * Revisited 2026-08-29: the commissioner loaded his own Anthropic, OpenAI and
+ * xAI keys into the gateway (gateway-held BYOK). Requests still carry no
+ * credential and no routing hint — the gateway routes them itself — but it
+ * reports $0 for a BYOK call, so the ledger prices those steps from the price
+ * table and `billed_to` names who actually paid.
  */
-export type BilledTo = "gateway";
+export type BilledTo = "gateway" | "byok:openai" | "byok:xai" | "byok:vertex" | "byok:anthropic";
+
+/** Gateway-held BYOK keys by provider prefix (commissioner, 2026-08-29). */
+const BYOK_BY_PREFIX: Record<string, BilledTo> = {
+  anthropic: "byok:anthropic",
+  openai: "byok:openai",
+  // xAI publishes under the spacexai/ prefix (docs/VERIFIED.md).
+  spacexai: "byok:xai",
+};
+
+export function billedToFor(modelId: string): BilledTo {
+  return BYOK_BY_PREFIX[modelId.split("/")[0] ?? ""] ?? "gateway";
+}
 
 /**
  * Anthropic prompt caching (§8.1): cache_control breakpoints on the system

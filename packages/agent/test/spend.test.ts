@@ -18,11 +18,13 @@ import {
   spendRollups,
   teams,
   updateSettings,
+  modelPrices,
 } from "@league/engine";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { createModelStep } from "../src/modelStep.ts";
 import {
   applyOptionalPause,
+  computeStepCost,
   evaluateAlarms,
   recordSpend,
   seedAlarmRules,
@@ -317,8 +319,10 @@ describe("every step bills the AI Gateway", () => {
       { role: "assistant" as const, content: "later turn" },
     ];
     const result = await step({ modelId: "openai/gpt-5.6-sol", messages, tools: [] }, 0);
-    expect(result.billedTo).toBe("gateway");
-    // No BYOK credential and no `only` pinning can reach the gateway any more,
+    // The commissioner's OpenAI key is held INSIDE the gateway (2026-08-29),
+    // so the ledger says byok:openai...
+    expect(result.billedTo).toBe("byok:openai");
+    // ...while the request still carries no credential and no `only` pinning,
     // at the top level or hidden on a message.
     expect(seen).not.toBeNull();
     expect(Object.keys(seen!)).not.toContain("providerOptions");
@@ -413,9 +417,18 @@ describe("every step bills the AI Gateway", () => {
     }
   });
 
-  it("a model routed to a provider before now bills the gateway like every other", async () => {
-    // spacexai/grok-4.6 and the two OpenAI models used to carry BYOK routes.
-    for (const modelId of ["spacexai/grok-4.6", "openai/gpt-5.6-terra", "google/gemini-3.1-pro-preview"]) {
+  it("billed_to names the payer: gateway-held BYOK providers vs the gateway", async () => {
+    // The commissioner's own Anthropic, OpenAI and xAI keys live in the
+    // gateway (2026-08-29); the other providers bill the gateway itself.
+    const expected: Array<[string, string]> = [
+      ["anthropic/claude-fable-5", "byok:anthropic"],
+      ["openai/gpt-5.6-terra", "byok:openai"],
+      ["spacexai/grok-4.6", "byok:xai"],
+      ["google/gemini-3.1-pro-preview", "gateway"],
+      ["zai/glm-5.3", "gateway"],
+      ["moonshotai/kimi-k3", "gateway"],
+    ];
+    for (const [modelId, billedTo] of expected) {
       const step = createModelStep({} as never, {
         generate: (async () => ({
           text: "",
@@ -425,8 +438,48 @@ describe("every step bills the AI Gateway", () => {
         })) as never,
       });
       const result = await step({ modelId, messages: [], tools: [] }, 0);
-      expect(result.billedTo, modelId).toBe("gateway");
+      expect(result.billedTo, modelId).toBe(billedTo);
     }
+  });
+
+  it("a $0 gateway cost against real tokens is priced from the table, not recorded as free", async () => {
+    // The gateway reports cost 0 for a BYOK call. Trusting that 0 recorded
+    // six teams' entire spend as $0.00 in the mock draft (2026-08-29).
+    await db.insert(modelPrices).values({
+      modelId: "test/model",
+      inputUsdPerM: 1,
+      outputUsdPerM: 10,
+      cachedInputUsdPerM: 0.1,
+      source: "test",
+    });
+    const priced = await computeStepCost(
+      db,
+      "test/model",
+      { inputTokens: 1000, outputTokens: 100, reasoningTokens: 0, cachedInputTokens: 0 },
+      0,
+    );
+    expect(priced.source).toBe("price_table");
+    expect(priced.costUsd).toBeGreaterThan(0);
+
+    // A 0 with no tokens at all is genuinely free — a skipped call, not BYOK.
+    const free = await computeStepCost(
+      db,
+      "test/model",
+      { inputTokens: 0, outputTokens: 0, reasoningTokens: 0, cachedInputTokens: 0 },
+      0,
+    );
+    expect(free.source).toBe("gateway");
+    expect(free.costUsd).toBe(0);
+
+    // A positive gateway cost is still authoritative.
+    const billed = await computeStepCost(
+      db,
+      "test/model",
+      { inputTokens: 1000, outputTokens: 100, reasoningTokens: 0, cachedInputTokens: 0 },
+      0.123456,
+    );
+    expect(billed.source).toBe("gateway");
+    expect(billed.costUsd).toBe(0.123456);
   });
 
   it("and the ledger row actually persists it", async () => {
