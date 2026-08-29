@@ -1254,12 +1254,13 @@ export const getTradeTool = readTool(
     // are sequential, so without this any agent could walk every negotiation
     // in the league — including a live one, since a countered offer's message
     // still describes a renegotiation happening right now. A trade becomes
-    // league business the moment it enters review (§3.5's accepted branch,
-    // through executed/vetoed/failed) — that is what the site shows, and what
-    // §11 forbids the reporter to pre-empt. Same rule for the reporter, which
-    // has no team of its own.
-    const neverInReview = ["proposed", "rejected", "countered", "cancelled", "expired"];
-    if (neverInReview.includes(trade.status) && (ctx.teamId === null || !parties.includes(ctx.teamId))) {
+    // league business the moment it enters review — that is what the site
+    // shows, and what §11 forbids the reporter to pre-empt. Same rule for the
+    // reporter, which has no team of its own. Status alone cannot draw this
+    // line: `failed` has two producers (§3.5) — a review-path failure and an
+    // accept-time re-check failure that never entered review. The engine sets
+    // `reviewEndsAt` exactly once, on a successful accept, so it is the marker.
+    if (trade.reviewEndsAt === null && (ctx.teamId === null || !parties.includes(ctx.teamId))) {
       return toolFailure(
         "not_visible",
         trade.status === "proposed"
