@@ -25,3 +25,8 @@ export function draftSessionKey(pickNo: number, attempt: number): string {
 export function injurySessionKey(teamId: number, playerId: string, status: string, week: number): string {
   return `injury:${teamId}:${playerId}:${status}:${week}`;
 }
+
+/** An agent-booked check-in, keyed to the minute so a re-ask is idempotent. */
+export function checkInKey(teamId: number, atIso: string): string {
+  return `check_in:${teamId}:${atIso.slice(0, 16)}`;
+}

@@ -246,6 +246,11 @@ export async function startQueuedSessions(
     .orderBy(asc(sessions.createdAt))
     .limit(MAX_QUEUED_SESSIONS_PER_TICK);
 
+  // §8.10: a check-in the agent booked itself goes last, always. It must never
+  // take the slot a lineup check needs before kickoff — the league's own
+  // schedule outranks anything an agent scheduled for itself.
+  queued.sort((a, b) => Number(a.kind === "self_check_in") - Number(b.kind === "self_check_in"));
+
   const { claimSlot } = await import("./runSession");
   let started = 0;
   let expired = 0;

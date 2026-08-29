@@ -11,6 +11,55 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Agent-scheduled check-ins (§8.10, new)
+
+Jake asked for it; spec'd as §8.10 and built. An agent can book its own
+follow-up — "check whether Achane practised before I commit to the FLEX" — and
+the reason it writes becomes that session's brief.
+
+The plumbing was already there: since the queue rework, a queued session row
+with `due_at` **is** the queue, so a check-in is an ordinary session the tick
+starts like any other. Nothing new runs it.
+
+What "just a tool" actually meant, in the end: three agent-facing tools
+(`schedule_check_in`, `cancel_check_in`, `list_check_ins` — without the last
+two an agent cannot see or undo what it booked, and will duplicate), a session
+kind, a loop-guard entry, a tool set for the kind itself, a brief, sweeper
+priority, an engine module owning the limits, and a spec section.
+
+The limits are the design, and they live in the engine rather than the tool so
+they hold however a check-in is created: 3 pending, 5 a week, 30 minutes'
+minimum lead, a 14-day horizon, and no check-in may book another. Each is the
+answer to a failure I expect from a model rather than a hypothetical — an
+anxious agent booking twenty, a chain that never terminates, and "come back in
+one minute" as a way around the tool-call ceiling.
+
+Two design calls worth recording:
+
+- **A check-in may act, but not initiate.** It can set the lineup, work the
+  wire, and answer a trade — that is why it was booked. It cannot propose a
+  trade or post to the board, which have their own windows and their own
+  limits. So a check-in can never become a second weekly review.
+- **It is always started last.** The league's schedule outranks anything an
+  agent scheduled for itself; a check-in must never take the slot a lineup
+  check needs before kickoff. Tested by booking the check-in *first* and due
+  *first*, so ordering by age alone would start it — the test fails without
+  the priority sort, which I verified rather than assumed.
+
+**This changes what the benchmark measures**, and §8.10 says so plainly: the
+number of sessions is now partly a choice, so cost per point and cost per win
+measure foresight and self-restraint alongside football judgment. It is
+deliberate, it will be stated on `/about` and `/benchmark`, and it forces a
+scheduling constraint — **the feature has to be in before week 1 or not at all
+this season**, because introducing it mid-season makes the season's own weeks
+non-comparable.
+
+Still to do for this feature: the `/about` and `/benchmark` copy, and the
+per-kind row on `/spend` (the kind is already in the ledger, so it appears
+there; what is missing is naming it as self-scheduled).
+
+Test suite: **399 tests green**, 23 of them new.
+
 ## 2026-08-29 — Merged to `main`; production is live
 
 `main` fast-forwarded from the starter commit to `a6ae4e4` — 45 commits, four

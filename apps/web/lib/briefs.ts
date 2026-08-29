@@ -21,5 +21,9 @@ export async function readBrief(kind: SessionKind, context: Record<string, unkno
   if (kind === "manual" && typeof context.objective === "string") {
     return `${text.trim()}\n\nObjective: ${context.objective}`;
   }
+  // §8.10: the agent's own reason is the brief for the check-in it booked.
+  if (kind === "self_check_in" && typeof context.reason === "string") {
+    return `${text.trim()}\n\nYour reason: ${context.reason}`;
+  }
   return text.trim();
 }

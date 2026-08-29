@@ -37,7 +37,9 @@ export type EngineErrorCode =
   | "already_drafted"
   | "draft_not_running"
   | "fantasypros_quota"
-  | "fantasypros_unavailable";
+  | "fantasypros_unavailable"
+  | "check_in_limit"
+  | "bad_time";
 
 export interface EngineFailure {
   ok: false;
