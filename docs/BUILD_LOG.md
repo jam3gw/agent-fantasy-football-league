@@ -11,6 +11,58 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Which providers are worth BYOK for free credits (commissioner's question)
+
+Jake asked which services to set up BYOK for to use free credits, noting he
+already has Anthropic and OpenAI. Programs and per-model season costs are in
+`docs/VERIFIED.md` (2026-08-29 entry); the recommendation:
+
+**Set up two more: xAI, and Google Cloud (Vertex).** xAI first — $150/month for
+a data-sharing opt-in covers Grok 4.6's whole season (~$121 at list) with room
+for spikes, and it is one API key. Google second — $300 over 90 days on Vertex
+covers Gemini 3.1 Pro (~$142), but it needs a service account, the clock starts
+at signup, and the surplus is unusable.
+
+**Skip the rest.** Alibaba (~$3), Zhipu (~$4), DeepSeek (off-peak only, already
+in the estimate), Moonshot and Meta (no programs). Each is a credential that can
+expire mid-season for less than a rounding error on a $2,200 bill.
+
+**The Anthropic key already set up earns nothing.** No standing credit program,
+and gateway BYOK has no markup, so it changes who bills and not what it costs.
+The one exception: leftover Anthropic console credits, which BYOK is the only
+way to spend — and they should go to Fable 5 or Opus 5, which are 45% of the
+bill.
+
+**The OpenAI key's value is unconfirmed.** It rests on complimentary daily
+tokens for shared traffic, and the program's "tool use" exclusion is unverified.
+Every league session is a tool-calling loop, so it is worth either ~$277 or $0,
+with nothing in between. A smoke session with sharing on, then the usage
+dashboard, decides it. Also note the ~1M/day flagship-group budget resets at
+00:00 UTC while league traffic is bursty — draft day alone would blow past a
+day's allotment and spill to paid.
+
+**Correction to §8.9.** Its conditional route `anthropic/claude-sonnet-5` →
+`vertex` is dead: Google's $300 credit explicitly excludes generative AI partner
+models sold as managed APIs, which is what Claude in Model Garden is. That
+resolves the §8.9 verify item to "no". Spec updated.
+
+Total realistic capture is ~$250–400 against a ~$2,200 list-price season, or
+~10–20%, because the credit programs do not touch the Anthropic half of the
+bill. Prompt caching (already specified) is worth ~$1,000 on its own and trade
+windows at two per week ~20% — both bigger levers than every credit program
+combined.
+
+**No code written.** BYOK routing was removed on 2026-08-28 by Jake's own
+gateway-only decision, so acting on this reverses that decision and is his call,
+not a non-blocking choice to make unilaterally. If he wants it, the work is:
+restore `byok_routes` in settings and the `BYOK_*` variables, pass
+`providerOptions.gateway.byok` plus `only: [provider]` in `modelStep` (so a
+failed credential errors instead of silently rerouting at another price — the
+failure mode that killed BYOK the first time), set `billed_to` from the response
+instead of the constant `gateway`, and add a health check that alarms when a
+byok-routed model starts billing the gateway and a recorded expiry date per
+credential (xAI signup +30 days, GCP +90).
+
 ## 2026-08-29 — Vercel Speed Insights on the public site
 
 `@vercel/speed-insights` added to `apps/web`, with `<SpeedInsights />` mounted at

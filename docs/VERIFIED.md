@@ -26,6 +26,75 @@ No code change can get past this; it is the plan. Recorded as a `fp.rankings`
 health row with the measured numbers, so `/admin/rankings` explains the shortfall
 rather than showing "68 ranked (need 200)" beside a working key and no errors.
 
+## 2026-08-29 — Provider free-credit programs vs. the model roster (Appendix F, §8.9)
+
+Verified against provider **documentation**, not the provider consoles (this
+session has no provider accounts). Anything below still needs a console check
+before a credential is created.
+
+**The finding that changes a spec route: Google's $300 trial credit cannot pay
+for Claude on Vertex.** Google's free-program doc is explicit — "You can't
+access or use the $300 credit for a generative AI partner model that is offered
+as a managed API, which is also known as model as a service." Anthropic models
+in Model Garden are exactly that. §8.9's conditional route
+(`anthropic/claude-sonnet-5` → `vertex` "only if the build confirms the Google
+Cloud trial credit applies to Anthropic models on Vertex") therefore resolves
+to **no**: it must not be created. The same doc excludes Gemini API in AI
+Studio; first-party Gemini on Vertex is covered, and the credit is valid 90
+days from signup.
+
+Season cost per model at catalog list prices, from Appendix F's volume
+assumptions (49.5M input + 3.6M output tokens per agent-season) — this is what
+a credit program on that provider could offset:
+
+| Model | $/1M in / out | Season (list) | Credit program | Realistic capture |
+|---|---|---|---|---|
+| Claude Fable 5 | 10 / 50 | $675 | none | $0 |
+| Claude Opus 5 | 5 / 25 | $338 | none | $0 |
+| Claude Sonnet 5 (+ reporter) | 2 / 10 | $135 + ~$90 | none (Vertex route excluded, above) | $0 |
+| GPT-5.6 Sol | 2 / 10 | $135 | complimentary daily tokens (data sharing) | up to full, if tool use qualifies |
+| GPT-5.6 Terra | 2 / 12 | $142 | same | same |
+| Gemini 3.1 Pro | 2 / 12 | $142 | GCP $300 / 90 days, Vertex only | ~$100–140 (window-limited) |
+| Grok 4.6 | 2 / 6 | $121 | xAI $150/month data sharing + $25 signup | full |
+| DeepSeek V4-Pro | 0.66 / 1.98 | $40 | off-peak pricing only | ~$20, already assumed |
+| Kimi K3 | 3 / 15 | $203 | none found | $0 |
+| Qwen 3.8-Max | 2 / 6 | $121 | 1M free tokens / 90 days | ~$3 |
+| Muse Spark 1.2 | 1.25 / 4.25 | $77 | none found | $0 |
+| GLM-5.3 | 1.4 / 4.4 | $85 | 5M new-user tokens (5.x eligibility unknown) | ~$4 |
+
+Sum of the per-model column is ~$2,210, consistent with Appendix F's ~$2,400
+base (which also carries draft, onboarding and mock-draft overhead).
+
+Program terms confirmed in docs on 2026-08-29:
+
+- **xAI**: $150/month for opting into data sharing, refreshes monthly and does
+  not accumulate, requires $5 of prior spend, **the opt-in is permanent** (a
+  team cannot opt back out), and it is region-dependent. Plus $25 at signup,
+  expiring 30 days later. Grok's heaviest month is well under $150, so this
+  covers the slot outright.
+- **OpenAI**: complimentary daily tokens for shared traffic, ~1M/day on the
+  flagship group at usage tiers 3–5 (250K at tiers 1–2), resetting 00:00 UTC.
+  **The tool-use exclusion is still unverified** — the help-center article
+  returns 403 to unauthenticated fetches. Every league session is a tool-calling
+  loop, so if function calling does not qualify the program is worth $0 here.
+  One smoke session with sharing enabled, then a look at the usage dashboard,
+  settles it.
+- **Google Cloud**: $300, 90 days from signup, Vertex yes / AI Studio no,
+  service-account credential. Two open items: whether the credit reaches the
+  *preview* model the roster uses (`google/gemini-3.1-pro-preview` — confirm it
+  is served on Vertex at all), and that the 90-day clock is started deliberately
+  (signing up on 2026-09-08 covers through Week 13; signing up today wastes ten
+  days of it).
+- **Anthropic**: no standing free API credit program, and gateway BYOK carries
+  no markup, so an Anthropic credential is cost-neutral — it changes who bills,
+  not what it costs. The 45% of the bill that is Fable 5 + Opus 5 has no credit
+  path at all.
+
+Gateway BYOK mechanics (Vercel docs, unchanged): request-scoped credentials go
+in `providerOptions.gateway.byok`, `vertex` takes
+`{ project, location, googleCredentials }` rather than an API key, and multiple
+credentials per provider are tried in order.
+
 ## 2026-08-28 — §12.1 cache windows on the real CDN (Next 16 + Vercel)
 
 Established by probing the deployed preview, not by reading docs.
