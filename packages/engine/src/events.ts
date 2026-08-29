@@ -89,8 +89,14 @@ export async function createSession(
   // under "plus the draft". The delete is load-bearing rather than an omission:
   // `runOnboardingAction` passes `week` explicitly, so a caller's context can
   // put the week back on exactly the kinds this excludes.
-  if (PRE_SEASON_KINDS.has(input.kind)) delete context.week;
-  else context.week = input.context?.week ?? settings.currentWeek;
+  // A session belongs to a fantasy week only when the league is playing one.
+  // Before the draft there is no week — `current_week` is still its default of
+  // 1 — so stamping it puts the whole of setup into week 1's spend rollup and
+  // against week 1's alarm. The kinds in PRE_SEASON_KINDS never belong to a
+  // week even in season.
+  const inAWeek = ["regular", "playoffs"].includes(settings.phase) && !PRE_SEASON_KINDS.has(input.kind);
+  if (inAWeek) context.week = input.context?.week ?? settings.currentWeek;
+  else delete context.week;
 
   const rows = await db
     .insert(sessions)

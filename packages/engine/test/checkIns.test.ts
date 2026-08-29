@@ -11,7 +11,10 @@ import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { seedLeague, seedTeams } from "./helpers/factories.ts";
+import { createSession } from "../src/events.ts";
+import { getSettings } from "../src/settings.ts";
 import {
+  MAX_CHECK_INS_PRE_DRAFT,
   MAX_CHECK_INS_PER_WEEK,
   MAX_PENDING_CHECK_INS,
   MIN_LEAD_MINUTES,
@@ -239,5 +242,81 @@ describe("times land on the five-minute grid the sweeper runs on", () => {
       reason: "right now",
     });
     expect(!soon.ok && soon.error).toBe("bad_time");
+  });
+});
+
+describe("preparation before the draft is its own allowance", () => {
+  beforeEach(async () => {
+    await updateSettings(db, { phase: "pre_draft", currentWeek: 1 });
+  });
+
+  it("does not spend week 1's allowance, or land in week 1's spend", async () => {
+    // `current_week` is still its default of 1 before the draft, so a check-in
+    // booked on draft eve used to eat one of the five an agent gets in the
+    // real week 1 and count against week 1's $40 alarm on draft day.
+    for (let i = 1; i <= MAX_CHECK_INS_PRE_DRAFT; i++) {
+      const r = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(i), reason: `prep ${i}` });
+      expect(r.ok, `pre-draft booking ${i}`).toBe(true);
+      if (r.ok) {
+        const row = (await db.select().from(sessions).where(eq(sessions.id, r.value.sessionId)))[0]!;
+        // No week: §8.7 counts this under the draft, not against a week.
+        expect(row.context.week).toBeUndefined();
+        await db.update(sessions).set({ status: "succeeded" }).where(eq(sessions.id, r.value.sessionId));
+      }
+    }
+
+    const over = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(9), reason: "one more" });
+    expect(!over.ok && over.error).toBe("check_in_limit");
+    expect(!over.ok && over.message).toContain("before the draft");
+
+    // The season starts with the weekly allowance untouched.
+    await updateSettings(db, { phase: "regular", currentWeek: 1 });
+    for (let i = 1; i <= MAX_CHECK_INS_PER_WEEK; i++) {
+      const r = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(10 + i), reason: `week one ${i}` });
+      expect(r.ok, `week-1 booking ${i}`).toBe(true);
+      if (r.ok) await db.update(sessions).set({ status: "succeeded" }).where(eq(sessions.id, r.value.sessionId));
+    }
+    const overWeek = await scheduleCheckIn(db, clock, teamIds[0]!, { at: in2h(20), reason: "past the week" });
+    expect(!overWeek.ok && overWeek.message).toContain("this week");
+  });
+});
+
+describe("setup sessions belong to no fantasy week", () => {
+  it("a smoke or manual session run before the draft is not stamped week 1", async () => {
+    // The same defect from the other side: before the draft there is no week,
+    // so nothing run in setup should land in week 1's rollup or alarm.
+    await updateSettings(db, { phase: "pre_draft", currentWeek: 1 });
+    const settings = await getSettings(db);
+    for (const kind of ["smoke", "manual", "onboarding"] as const) {
+      const id = await createSession(db, settings, {
+        teamId: teamIds[0]!,
+        kind,
+        trigger: "commissioner",
+        idempotencyKey: `setup-${kind}`,
+        modelId: "m/1",
+        dueAt: clock.now(),
+        now: clock.now(),
+        context: { week: settings.currentWeek },
+      });
+      const row = (await db.select().from(sessions).where(eq(sessions.id, id!)))[0]!;
+      expect(row.context.week, kind).toBeUndefined();
+    }
+  });
+
+  it("the same kinds do carry a week once the season is under way", async () => {
+    await updateSettings(db, { phase: "regular", currentWeek: 6 });
+    const settings = await getSettings(db);
+    const id = await createSession(db, settings, {
+      teamId: teamIds[0]!,
+      kind: "manual",
+      trigger: "commissioner",
+      idempotencyKey: "in-season-manual",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: {},
+    });
+    const row = (await db.select().from(sessions).where(eq(sessions.id, id!)))[0]!;
+    expect(row.context.week).toBe(6);
   });
 });
