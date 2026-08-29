@@ -59,9 +59,10 @@ recorded successful sends — the alert path has now worked for real.
   throwing check retries hourly, not per minute. `notifyOnce` moved from
   `tick.ts` to `alarms.ts` so capacity → alarms keeps imports one-directional.
 - **Neon settings applied over MCP** (Launch unlocked them): history
-  retention 6h → **7 days**; **daily snapshot** of `main` 09:00 UTC kept 14
-  days; **`main` protected**. Autoscaling had already moved to 0.25–8 CU with
-  the plan.
+  retention 6h → **7 days**; **daily snapshot** of `main` 10:00 UTC kept 14
+  days (10:00, not 09:00 — 09:00 UTC is 4:00 AM ET once DST ends, colliding
+  with Tuesday finalization; the reviewer caught it); **`main` protected**.
+  Autoscaling had already moved to 0.25–8 CU with the plan.
 - Docs: RUNBOOK (tick stage 9, external-monitor section, gateway-balance
   paragraph), SETUP (§3 check, §6 rewritten as done, §6a external monitor +
   four Vercel dashboard switches, fails-silently table), this entry.
@@ -82,6 +83,23 @@ in production `health` within the hour.
   code constants, not settings — they encode the plan and Appendix F, and a
   commissioner who changes plans edits one line next to the comment that
   explains it.
+
+### Review round one (fresh context): no blockers, six findings
+
+Fixed: a route-level test now pins the public 503's exact body (`{ok,
+lastTickAt}` — the §15.5 property lived in a four-line catch nothing
+defended); recovery clears the capacity rows' error text so a stale "$42.10"
+never sits beside an ok badge; the hourly gate's pre-stamp property has a
+test; the size-is-a-floor caveat (history window and other branches are not
+in `pg_database_size`) is in the comment; the snapshot moved 09:00 → 10:00
+UTC because 09:00 becomes 4:00 AM ET when DST ends and would collide with
+Tuesday finalization.
+
+Accepted, recorded: `dueForCapacityCheck`'s select-then-upsert can double-run
+under two overlapping ticks (the tick can legally run 800 s against a 60 s
+cadence) and at worst duplicates one daily email — the same shape
+`sessions.sweep` has run all season; making it conditional buys nothing the
+pre-stamp has not already narrowed.
 
 ## 2026-08-29 — thinking confirmed per model; thinking logs made durable and visible (commissioner request)
 

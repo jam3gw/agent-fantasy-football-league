@@ -508,7 +508,7 @@ async function dueForQueueSweep(database: EngineDb, now: Date): Promise<boolean>
  * the stamp is written *before* the checks run, so a check that throws is
  * retried on the next hourly turn rather than every minute.
  */
-async function dueForCapacityCheck(database: EngineDb, now: Date): Promise<boolean> {
+export async function dueForCapacityCheck(database: EngineDb, now: Date): Promise<boolean> {
   const last = await database.select().from(health).where(eq(health.key, "tick.capacity"));
   const lastAt = last[0]?.lastSuccessAt?.getTime() ?? 0;
   if (now.getTime() - lastAt < CAPACITY_CHECK_INTERVAL_MS) return false;

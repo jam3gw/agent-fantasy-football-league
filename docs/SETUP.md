@@ -148,8 +148,9 @@ that keeps the database awake around the clock, 6-hour PITR). The same day the
 project was configured to use what the plan allows:
 
 - **History retention: 7 days** — the point-in-time-recovery window.
-- **Daily snapshot of `main`** at 5:00 AM ET (after Tuesday finalization),
-  kept 14 days.
+- **Daily snapshot of `main`** at 10:00 UTC — 6:00 AM EDT, 5:00 AM EST, so it
+  sits after the Tuesday 4:00 AM ET finalization on both sides of the DST
+  change — kept 14 days.
 - **`main` is a protected branch** — it cannot be deleted or reset from the
   console without lifting the flag first.
 - Compute now autoscales 0.25–8 CU; storage is elastic with **10 GiB included**

@@ -40,14 +40,20 @@ function gib(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(2)} GiB`;
 }
 
+/**
+ * Unlike the tick stages, recovery here *clears* the old error text. A feed
+ * row's stale error is harmless context; a stale dollar figure ("balance is
+ * $42.10") beside an "ok" badge reads as a live emergency to anyone glancing
+ * at /admin/health after the top-up already happened.
+ */
 async function record(database: EngineDb, key: string, at: Date, error?: string): Promise<void> {
+  const set = error
+    ? { lastError: error.slice(0, 500), lastErrorAt: at }
+    : { lastSuccessAt: at, lastError: null, lastErrorAt: null };
   await database
     .insert(health)
-    .values({ key, ...(error ? { lastError: error.slice(0, 500), lastErrorAt: at } : { lastSuccessAt: at }) })
-    .onConflictDoUpdate({
-      target: health.key,
-      set: error ? { lastError: error.slice(0, 500), lastErrorAt: at } : { lastSuccessAt: at },
-    });
+    .values({ key, ...set })
+    .onConflictDoUpdate({ target: health.key, set });
 }
 
 /**
@@ -55,6 +61,11 @@ async function record(database: EngineDb, key: string, at: Date, error?: string)
  * line; over it, a `db.size` error row (which /admin/health badges) and one
  * email per ET day. `session_events` stores every model message and tool
  * result, so it is nearly always the answer to "what grew".
+ *
+ * The reading is a floor, not the bill: `pg_database_size` measures this one
+ * database's logical size, while Neon's storage metering also counts the
+ * 7-day history window and every other branch. The alarm can therefore lag
+ * the invoice — acceptable for a growth alarm, wrong for accounting.
  */
 export async function checkDbSize(
   database: EngineDb,
