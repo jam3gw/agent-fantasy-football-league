@@ -59,6 +59,16 @@ Two real defects the work turned up, both fixed:
   the anchor itself. The label carries its own colour on a `<span>` now. Worth
   remembering: it will bite any future filled-accent link.
 
+Merged as PR #1 (`133023b`) and deployed: production
+`dpl_Bkt9k2mnytHLehwb5aF6oqmEAPdT` is READY on league.jake-moses.com.
+Probed `/sessions/857` (a real smoke session) on production: the header reads
+"Smoke test — team-1 · Claude Fable 5 · triggered by commissioner" with
+succeeded / 12s / $0.00 / 3 steps / 2 tool calls / 7.7k tokens; the banner
+says "Looked, and changed nothing." over the agent's own decision log; the
+rail lists "Read the brief", "Checked the league" (`get_league_state`) and
+"Wrote the decision log". A read-only session was the useful first case — it
+is the one the outcome banner has to say something honest about.
+
 Rebased onto main after the durable-thinking work landed below. That entry
 made `content.reasoning` first-class on assistant events and added
 `assistantReasoning` as its reader; the step card's "Thought" disclosure now
