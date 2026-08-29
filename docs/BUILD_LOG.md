@@ -11,6 +11,27 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Vercel Speed Insights on the public site
+
+`@vercel/speed-insights` added to `apps/web`, with `<SpeedInsights />` mounted at
+the end of `<body>` in `app/layout.tsx` — the App Router placement from Vercel's
+quickstart. The `/next` entry is the one used: it reads the router's route, so
+vitals are attributed to `/matchups/[week]` rather than to twelve separate URLs.
+The component is `"use client"` and wraps itself in `Suspense`, so the root
+layout stays a server component and no page loses static rendering.
+
+- It collects nothing in development and nothing in the test suite — the package
+  no-ops unless `NODE_ENV` is `production` — so no test or local run reports.
+- No new environment variable, no CSP to widen: the script and its beacon are
+  same-origin under `/_vercel/speed-insights/*`, which Vercel adds at the edge.
+- `apps/web/test/speedInsights.test.ts` guards the import path and the
+  render-once-inside-`<body>` placement; mounted deeper or twice it would
+  under- or double-report, and both are silent failures.
+- **Still needed from Jake**: Speed Insights has to be switched on once in the
+  Vercel dashboard (Project → Speed Insights → Enable) before data flows. The
+  MCP connector cannot toggle it. The code is inert until then and costs
+  nothing, so this is not blocking.
+
 ## 2026-08-29 — Full audit: three findings that would each have stopped the season
 
 Jake asked what is missing. Rather than answer from the build log I checked
