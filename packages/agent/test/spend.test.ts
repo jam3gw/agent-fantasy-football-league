@@ -358,15 +358,59 @@ describe("every step bills the AI Gateway", () => {
     );
 
     const sent = seen!.messages as Array<Record<string, unknown>>;
+    const instructions = seen!.instructions as Array<Record<string, unknown>>;
     const breakpoint = { anthropic: { cacheControl: { type: "ephemeral" } } };
-    // The system prompt and the brief are the stable prefix worth caching.
+    // The system prompt and the brief are the stable prefix worth caching. The
+    // system prompt now travels in `instructions`, and the breakpoint has to go
+    // with it — passing its text alone would silently drop the caching.
+    expect(instructions[0]!.providerOptions).toEqual(breakpoint);
     expect(sent[0]!.providerOptions).toEqual(breakpoint);
-    expect(sent[1]!.providerOptions).toEqual(breakpoint);
     // Everything after it changes every step, so caching it would only cost.
+    expect(sent[1]!.providerOptions).toBeUndefined();
     expect(sent[2]!.providerOptions).toBeUndefined();
-    expect(sent[3]!.providerOptions).toBeUndefined();
     // Caching changes cost, never routing.
     expect(JSON.stringify(seen)).not.toContain("byok");
+  });
+
+  it("sends the system prompt as instructions, never inside messages", async () => {
+    // Caught on production by the pre-draft smoke test, after every one of the
+    // first six models answered:
+    //
+    //   AI_InvalidPromptError: Invalid prompt: System messages are not allowed
+    //   in the prompt or messages fields. Use the instructions option instead.
+    //
+    // AI SDK v7 rejects a system-role message in `messages` outright, so this
+    // was not a provider quirk or a bad model id — no session of any kind could
+    // have run, and the draft would have failed on the day.
+    for (const modelId of ["anthropic/claude-opus-5", "openai/gpt-5.6-sol", "google/gemini-3.1-pro-preview"]) {
+      let seen: Record<string, unknown> | null = null;
+      const step = createModelStep({} as never, {
+        generate: (async (params: Record<string, unknown>) => {
+          seen = params;
+          return { text: "", toolCalls: [], usage: { inputTokens: 1, outputTokens: 1 }, content: "" };
+        }) as never,
+      });
+
+      await step(
+        {
+          modelId,
+          messages: [
+            { role: "system", content: "the league rules" },
+            { role: "user", content: "brief" },
+            { role: "assistant", content: "a turn" },
+          ],
+          tools: [],
+        },
+        0,
+      );
+
+      const sent = seen!.messages as Array<Record<string, unknown>>;
+      expect(sent.some((m) => m.role === "system"), modelId).toBe(false);
+      // And it is actually carried, not dropped on the floor: losing it would
+      // leave every agent with no rules and no team identity at all.
+      expect(JSON.stringify(seen!.instructions), modelId).toContain("the league rules");
+      expect(sent.map((m) => m.role), modelId).toEqual(["user", "assistant"]);
+    }
   });
 
   it("a model routed to a provider before now bills the gateway like every other", async () => {

@@ -9,6 +9,13 @@
  * Absolutely no limits are set: no maxOutputTokens, no temperature, no
  * reasoning or thinking budget or effort flag. Provider defaults throughout.
  * Prompt caching is enabled where the provider needs an explicit breakpoint.
+ *
+ * The system prompt goes in `instructions`, not in `messages`. AI SDK v7
+ * rejects a system-role message inside `messages` outright — every provider
+ * answered `AI_InvalidPromptError: System messages are not allowed in the
+ * prompt or messages fields` — so this is not a preference. `instructions`
+ * accepts the message object rather than only a string, which is what keeps
+ * the Anthropic cache breakpoint on the system prompt.
  */
 import { generateText, dynamicTool, jsonSchema } from "ai";
 import { z } from "zod";
@@ -89,6 +96,27 @@ function withCaching(messages: ModelMessage[], modelId: string): ModelMessage[] 
 }
 
 /**
+ * Split the system messages out of the list. The session loop keeps the system
+ * prompt as message 0 — that is how the transcript records it, and how
+ * `withCaching` finds the breakpoint — but the SDK will not accept it there.
+ *
+ * Whole message objects are carried across rather than their text, so the
+ * `providerOptions` holding Anthropic's `cacheControl` goes with them.
+ */
+export function splitInstructions(all: ModelMessage[]): {
+  instructions: ModelMessage[];
+  messages: ModelMessage[];
+} {
+  const instructions: ModelMessage[] = [];
+  const messages: ModelMessage[] = [];
+  for (const m of all) {
+    if (m.role === "system") instructions.push(m);
+    else messages.push(m);
+  }
+  return { instructions, messages };
+}
+
+/**
  * Build the `modelStep` the session loop calls. Each invocation is one durable
  * workflow step in production.
  */
@@ -102,9 +130,14 @@ export function createModelStep(
     // The session loop keeps its own message and tool types so it can be unit
     // tested without the SDK; this is the one boundary where they meet, so the
     // call options are assembled here and handed over with a single cast.
+    // Cache first, then split: withCaching keys off position in the full list,
+    // so splitting first would move the breakpoints.
+    const { instructions, messages } = splitInstructions(withCaching(req.messages, req.modelId));
+
     const params = {
       model: req.modelId,
-      messages: withCaching(req.messages, req.modelId),
+      ...(instructions.length > 0 ? { instructions } : {}),
+      messages,
       tools: declareTools(req),
       // No maxOutputTokens, temperature, reasoning budget, or effort flag (§8.1).
     } as unknown as Parameters<typeof generateText>[0];
