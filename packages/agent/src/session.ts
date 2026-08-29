@@ -665,7 +665,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       ...(closing.error ? { error: closing.error } : {}),
     };
   } catch (err) {
-    await recordEvent(db, clock, sessionId, seq++, "error", { error: String(err) });
+    await recordEvent(db, clock, sessionId, seq++, "error", { error: String(err), ...errorDetail(err) });
     await db
       .update(sessions)
       .set({
@@ -679,6 +679,43 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       .where(and(eq(sessions.id, sessionId), eq(sessions.status, "running")));
     return { status: "failed", endedBy, toolCalls, invalidToolCalls, steps, error: String(err) };
   }
+}
+
+/**
+ * The one string `AI_InvalidPromptError` shows names the schema but not the
+ * field: the zod error rides in `cause`, and its issue paths say exactly which
+ * message and part failed. Losing that cost a day of guessing once (mock
+ * draft, 2026-08-29), so the transcript keeps the first few issues.
+ */
+function errorDetail(err: unknown): Record<string, unknown> {
+  // The zod error may sit one or two causes deep (InvalidPromptError wraps
+  // TypeValidationError wraps ZodError), so follow the chain to the issues.
+  let cause: unknown = err;
+  let issues: unknown;
+  for (let depth = 0; depth < 3; depth++) {
+    if (!cause || typeof cause !== "object" || !("cause" in cause)) break;
+    cause = (cause as { cause?: unknown }).cause;
+    if (cause && typeof cause === "object" && Array.isArray((cause as { issues?: unknown }).issues) ) {
+      issues = (cause as { issues: unknown }).issues;
+      break;
+    }
+  }
+  if (!cause || typeof cause !== "object") return {};
+  if (Array.isArray(issues)) {
+    return {
+      cause_issues: issues.slice(0, 5).map((i) => {
+        const issue = i as { code?: unknown; path?: unknown; message?: unknown; expected?: unknown; received?: unknown };
+        return {
+          code: issue.code,
+          path: issue.path,
+          message: issue.message,
+          ...(issue.expected !== undefined ? { expected: issue.expected } : {}),
+          ...(issue.received !== undefined ? { received: issue.received } : {}),
+        };
+      }),
+    };
+  }
+  return { cause: String(cause).slice(0, 500) };
 }
 
 /**
