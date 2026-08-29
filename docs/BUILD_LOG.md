@@ -11,6 +11,49 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Five-minute grid for check-ins; the queue sweep matches it
+
+Jake's call, and the two halves belong together.
+
+**The queue is swept every five minutes, not every tick.** The tick itself stays
+per-minute — live scoring (§13.2), game-start waivers (§7.3) and trade-review
+resolution all need that cadence, and §9.1 fixes the cron at `* * * * *`. What
+did not need it is the session queue: a session's own booking decides when it
+runs, and five minutes of latency is nothing against a lineup check booked
+ninety minutes before kickoff. That is five times fewer scans of `sessions`,
+which was the one query the tick repeated forever against a growing table.
+
+The gate is recorded in `health` under `sessions.sweep` rather than derived from
+the clock (`minute % 5`). That matters: deriving it would skip a whole cycle
+every time a tick was missed, where recording it means a missed tick delays the
+sweep by a minute. It also puts the last sweep on `/admin/health` beside every
+other feed. Tested both ways, including the eleven-minute gap.
+
+**Check-in times round up to the same grid.** A check-in booked for 10:02 would
+sit until the 10:05 sweep regardless, so it is booked at 10:05 and the agent is
+told 10:05. Rounding *up* rather than to the nearest is what keeps the minimum
+lead a real minimum.
+
+One thing that surfaced while testing and is worth stating, because my first
+test asserted the opposite: a request 26 minutes out rounds to 30 and is
+**accepted**. The 30-minute minimum is a guarantee about when the check-in
+actually runs, and rounding only ever pushes a time later, so the guarantee
+holds. Nothing rounding can do rescues "come back in a minute", which is what
+the minimum exists to refuse. The test now asserts that invariant rather than
+the stricter thing I assumed.
+
+Also checked, since sweeping less often could have cost it: §15.4's criterion
+still holds — twelve lineup checks at a cap of six still drain in two waves
+inside 45 minutes, because the sweep interval costs at most one interval per
+wave.
+
+**Still outstanding, and now slightly more worth doing**: the `sessions(status,
+updated_at)` index. Sweeping five times less often cuts the scan rate by 5×, but
+each scan is still sequential, and check-in rows sit in that table for days.
+Queued for the same migration as §8.10.
+
+Test suite: **412 tests green**.
+
 ## 2026-08-29 — Mobile layout: measured, not eyeballed
 
 Jake asked whether the UI is mobile friendly. I measured it rather than reading

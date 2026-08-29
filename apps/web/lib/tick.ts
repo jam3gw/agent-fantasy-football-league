@@ -42,6 +42,8 @@ export interface TickSummary {
   sessionsStarted: number;
   sessionsExpired: number;
   sessionsReclaimed: number;
+  /** Whether this tick swept the session queue (§9.1: every five minutes). */
+  queueSwept: boolean;
   outages: number;
 }
 
@@ -89,6 +91,19 @@ const NEVER_STARTED_MS = 5 * 60_000;
 /** Queued sessions examined per tick. More than the cap, so expiries are seen too. */
 const MAX_QUEUED_SESSIONS_PER_TICK = 40;
 const LIVE_POLL_MIN_INTERVAL_MS = 55_000;
+/**
+ * How often the session queue is swept. The tick itself stays per-minute —
+ * live scoring (§13.2), game-start waivers (§7.3) and trade-review resolution
+ * all need that cadence — but the queue does not: a session's own booking is
+ * what decides when it runs, and five minutes of latency is nothing against a
+ * lineup check booked ninety minutes before kickoff.
+ *
+ * Sweeping five times less often also means five times fewer scans of
+ * `sessions`, which is the one query the tick repeats forever. Check-in times
+ * are rounded to the same five-minute grid (§8.10), so an agent asking for
+ * 10:05 is started at 10:05, not up to five minutes later.
+ */
+const QUEUE_SWEEP_INTERVAL_MS = 5 * 60_000;
 const GAME_LENGTH_MS = 4.5 * 3600_000;
 
 export async function runTick(): Promise<TickSummary> {
@@ -110,6 +125,7 @@ export async function runTick(): Promise<TickSummary> {
     sessionsStarted: 0,
     sessionsExpired: 0,
     sessionsReclaimed: 0,
+    queueSwept: false,
     outages: 0,
   };
 
@@ -175,11 +191,16 @@ export async function runTick(): Promise<TickSummary> {
   summary.jobsReleased = await releaseStaleClaims(database, clock);
 
   // 1b. Start the sessions whose turn has come (§9.2's wait-for-slot). This is
-  // the only place a session is started.
-  const swept = await startQueuedSessions(database, clock);
-  summary.sessionsStarted = swept.started;
-  summary.sessionsExpired = swept.expired;
-  summary.sessionsReclaimed = swept.reclaimed;
+  // the only place a session is started. Gated to every five minutes: the
+  // interval is kept in `health` rather than derived from the clock, so a
+  // missed tick delays the sweep by a minute instead of skipping a whole cycle.
+  if (await dueForQueueSweep(database, now)) {
+    const swept = await startQueuedSessions(database, clock);
+    summary.sessionsStarted = swept.started;
+    summary.sessionsExpired = swept.expired;
+    summary.sessionsReclaimed = swept.reclaimed;
+    summary.queueSwept = true;
+  }
 
   // 2. Games that kicked off since the last tick.
   summary.gamesStarted = await startKickedOffGames(database, clock);
@@ -204,6 +225,22 @@ export async function runTick(): Promise<TickSummary> {
     .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: clock.now() } });
 
   return summary;
+}
+
+/**
+ * Is this the tick that sweeps the queue? Records the sweep in `health` under
+ * `sessions.sweep`, which also puts the last sweep on /admin/health next to
+ * every other feed.
+ */
+async function dueForQueueSweep(database: EngineDb, now: Date): Promise<boolean> {
+  const last = await database.select().from(health).where(eq(health.key, "sessions.sweep"));
+  const lastAt = last[0]?.lastSuccessAt?.getTime() ?? 0;
+  if (now.getTime() - lastAt < QUEUE_SWEEP_INTERVAL_MS) return false;
+  await database
+    .insert(health)
+    .values({ key: "sessions.sweep", lastSuccessAt: now })
+    .onConflictDoUpdate({ target: health.key, set: { lastSuccessAt: now } });
+  return true;
 }
 
 /** Return jobs whose claiming tick died before their workflow started. */

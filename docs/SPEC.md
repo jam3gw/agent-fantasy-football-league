@@ -848,9 +848,16 @@ Limits (engine-enforced, so they hold however a check-in is created):
 |---|---|---|
 | Pending at once | 3 | An anxious model books twenty. |
 | Per fantasy week | 5 | Bounds the cost a self-scheduling agent can add. |
-| Minimum lead | 30 minutes | Sooner is "keep going", which the ceiling governs. |
+| Minimum lead | 30 minutes | Sooner is "keep going", which the ceiling governs. Measured *after* rounding, so an accepted check-in is always at least this far out. |
 | Maximum horizon | 14 days | Nothing booked past a season that may end. |
 | Reason | 500 characters | It is a brief, not an essay. |
+
+Times are rounded **up** to the next five minutes, which is the interval the
+scheduler sweeps the session queue on (§9.1). Rounding up rather than to the
+nearest keeps the minimum lead a real minimum, and it means the time the agent
+is told in the tool result is the time the check-in actually runs rather than
+up to five minutes before it. The rounded time is returned to the agent, and two
+requests that round to the same slot are one booking.
 
 Priority: a `self_check_in` is always started **last**. The league's own schedule
 outranks anything an agent scheduled for itself, so a check-in can never take the
@@ -875,6 +882,14 @@ the season's own weeks non-comparable.
 ### 9.1 Scheduler
 
 - One Vercel Cron: `* * * * *` → `POST /api/cron/tick` (protected by `CRON_SECRET`).
+- The tick stays per-minute: live scoring (§13.2), game-start waivers (§7.3) and
+  trade-review resolution all need that cadence. The **session queue is swept
+  every five minutes**, not every tick — a session's own booking decides when it
+  runs, and five minutes of latency is nothing against a lineup check booked
+  ninety minutes before kickoff. It is also the one query the tick would
+  otherwise repeat forever against a growing table. The interval is recorded in
+  `health` under `sessions.sweep` rather than derived from the clock, so a
+  missed tick delays the sweep by a minute instead of skipping a whole cycle.
 - Each tick, in order:
   1. Claim due `scheduled_jobs` (`SELECT ... FOR UPDATE SKIP LOCKED`, `status = 'due' AND due_at <= now`), mark `claimed`, and start the matching workflow. Mark `done` when started (the workflow tracks its own success).
   2. Check for games that kicked off since the last tick → apply Section 7.3 and mark them `live`.

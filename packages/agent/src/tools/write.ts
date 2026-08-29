@@ -509,7 +509,9 @@ export const scheduleCheckInTool = defineTool({
   description:
     "Leave yourself a note to come back at a time you choose — a practice report on Thursday, a starter's " +
     "status an hour before kickoff. `at` is an ISO 8601 instant, at least " +
-    `${MIN_LEAD_MINUTES} minutes out and within ${MAX_HORIZON_DAYS} days. The reason becomes that ` +
+    `${MIN_LEAD_MINUTES} minutes out and within ${MAX_HORIZON_DAYS} days. It is rounded up to the next ` +
+    "five minutes, which is how often the league starts queued sessions, and the rounded time comes back " +
+    "in the result. The reason becomes that " +
     `session's brief, so write what you want to know. You may hold ${MAX_PENDING_CHECK_INS} check-ins at ` +
     `once and book ${MAX_CHECK_INS_PER_WEEK} a week. They cost you the same as any other session, and a ` +
     "check-in cannot book another one.",

@@ -1,12 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  etDay,
-  nextEtTime,
-  nextEtWeekdayTime,
-  tzOffsetMs,
-  wallClockParts,
-  zonedTimeToUtc,
-} from "../src/time.ts";
+import { ceilToFiveMinutes, etDay, nextEtTime, nextEtWeekdayTime, tzOffsetMs, wallClockParts, zonedTimeToUtc } from "../src/time.ts";
 
 describe("tzOffsetMs", () => {
   it("is -5h in winter (EST) and -4h in summer (EDT)", () => {
@@ -86,5 +79,31 @@ describe("etDay / wallClockParts", () => {
     const p = wallClockParts(new Date("2026-09-09T03:30:00Z")); // Tue Sep 8 ET evening
     expect(p.dow).toBe(2);
     expect(p.d).toBe(8);
+  });
+});
+
+describe("ceilToFiveMinutes", () => {
+  it("rounds up to the grid the queue sweep runs on, and leaves the grid alone", () => {
+    const cases: Array<[string, string]> = [
+      ["2026-10-20T17:32:41.500Z", "2026-10-20T17:35:00.000Z"],
+      ["2026-10-20T17:35:00.000Z", "2026-10-20T17:35:00.000Z"],
+      ["2026-10-20T17:35:00.001Z", "2026-10-20T17:40:00.000Z"],
+      ["2026-10-20T17:59:59.999Z", "2026-10-20T18:00:00.000Z"],
+      // Across a day boundary, and across the ET fall-back hour: the grid is
+      // absolute time, so neither is a special case.
+      ["2026-10-20T23:58:00.000Z", "2026-10-21T00:00:00.000Z"],
+      ["2026-11-01T05:57:00.000Z", "2026-11-01T06:00:00.000Z"],
+    ];
+    for (const [input, expected] of cases) {
+      expect(ceilToFiveMinutes(new Date(input)).toISOString(), input).toBe(expected);
+    }
+  });
+
+  it("never moves a time earlier", () => {
+    for (let i = 0; i < 300; i++) {
+      const at = new Date(Date.UTC(2026, 9, 20, 12, i % 60, (i * 7) % 60, (i * 13) % 1000));
+      expect(ceilToFiveMinutes(at).getTime()).toBeGreaterThanOrEqual(at.getTime());
+      expect(ceilToFiveMinutes(at).getTime() - at.getTime()).toBeLessThan(5 * 60_000);
+    }
   });
 });
