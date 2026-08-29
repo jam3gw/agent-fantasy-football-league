@@ -24,7 +24,8 @@ async function seedSession(pickNo: number, attempt: number) {
     .insert(teams)
     .values({
       slug: `t-${pickNo}-${attempt}`,
-      name: "T",
+      // Distinct: team names are unique case-insensitively (teams_name_lower_uq).
+      name: `T ${pickNo}-${attempt}`,
       modelId: "m",
       modelLabel: "M",
       provider: "p",

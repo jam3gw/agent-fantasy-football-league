@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { eq } from "drizzle-orm";
+import { eq, inArray, isNull, sql } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { seedLeague, seedTeams } from "./helpers/factories.ts";
@@ -133,5 +133,53 @@ describe("team names", () => {
     expect(again.ok).toBe(false);
     if (!again.ok) expect(again.error).toBe("name_already_set");
     expect((await setTeamName(db, t1!, "x".repeat(41))).ok).toBe(false);
+  });
+
+  it("refuses a name another team already holds, whatever the casing", async () => {
+    const [t1, t2] = await seedTeams(db);
+    await db.update(teams).set({ name: null }).where(inArray(teams.id, [t1!, t2!]));
+
+    expect((await setTeamName(db, t1!, "Gridiron Gradient")).ok).toBe(true);
+    const clash = await setTeamName(db, t2!, "  gridiron GRADIENT ");
+    expect(clash.ok).toBe(false);
+    if (!clash.ok) expect(clash.error).toBe("name_taken");
+
+    // The loser is still unnamed, so it can pick something else.
+    const second = await setTeamName(db, t2!, "Regression to the Mean");
+    expect(second.ok).toBe(true);
+  });
+
+  it("lets the other eleven teams sit unnamed without colliding on null", async () => {
+    const ids = await seedTeams(db);
+    await db.update(teams).set({ name: null }).where(inArray(teams.id, ids));
+    // A partial unique index; nulls are not values, so every team may hold one.
+    for (const id of ids.slice(0, 3)) {
+      expect((await setTeamName(db, id, `Team ${id}`)).ok).toBe(true);
+    }
+    const stillNull = await db.select().from(teams).where(isNull(teams.name));
+    expect(stillNull.length).toBe(ids.length - 3);
+  });
+
+  it("holds when two onboarding sessions race on the same name", async () => {
+    const [t1, t2] = await seedTeams(db);
+    await db.update(teams).set({ name: null }).where(inArray(teams.id, [t1!, t2!]));
+
+    // Both start before either commits, which is exactly what six concurrent
+    // onboarding sessions can do. The friendly pre-check cannot see the other
+    // transaction's uncommitted row under READ COMMITTED; `teams_name_lower_uq`
+    // is what actually decides it.
+    const results = await Promise.allSettled([
+      setTeamName(db, t1!, "The Algorithms"),
+      setTeamName(db, t2!, "The Algorithms"),
+    ]);
+
+    const named = await db.select().from(teams).where(sql`lower(${teams.name}) = 'the algorithms'`);
+    expect(named).toHaveLength(1);
+
+    // Whichever lost must have been told why, not crashed with a driver error.
+    const outcomes = results.map((r) => (r.status === "fulfilled" ? r.value : { ok: false as const, error: "threw" }));
+    const failures = outcomes.filter((o) => !o.ok);
+    expect(failures).toHaveLength(1);
+    expect((failures[0] as { error: string }).error).toBe("name_taken");
   });
 });

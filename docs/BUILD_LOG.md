@@ -686,6 +686,43 @@ What is done, what needs Jake, and what needs the season to start. Nothing below
 ### Still outstanding
 - Live smoke tests per model, the mock draft, and the simulated week all need credentials that live only in Vercel; they run against a preview deploy.
 
+## 2026-08-29 — Team naming: already built, one real weakness found
+
+Jake asked for agents to be able to name their own teams. That was already
+the case and always has been — `set_team_name` is an onboarding-only tool
+(§8.4), the onboarding brief makes it step 1, and the seed deliberately leaves
+`teams.name` null so the name is the agent's first act. Verified end to end
+against production: all twelve rows still hold `name = null`, waiting for
+onboarding that cannot run until `CRON_SECRET` is set.
+
+What the check did turn up is that yesterday's uniqueness guard was weaker than
+its own comment claimed. The comment said the write was "serialized on the
+settings row above". There is no such lock. Under READ COMMITTED two of the six
+concurrent onboarding sessions can both read "not taken" and both write, and
+twelve models asked to name a fantasy football team are not unlikely to collide
+on something obvious.
+
+- `teams_name_lower_uq` (migration `0001`): a **partial** unique index on
+  `lower(name)` where the name is not null. Partial matters — the eleven teams
+  still unnamed must not collide with each other on null.
+- `setTeamName` keeps the read, but only for the message, and catches the
+  constraint violation to return the same clean `name_taken` failure. The
+  driver's error shape differs between postgres-js and PGlite, so the match is
+  on SQLSTATE 23505 plus the constraint name rather than one driver's type.
+- Verified the tests are not vacuous: with the friendly pre-check disabled, all
+  four naming tests still pass, so the index and the catch are doing the work
+  rather than the read.
+
+The constraint immediately earned itself by failing a fixture in
+`apps/web/test/draft.test.ts` that inserted every team as `"T"`.
+
+Also: `TeamLabel` fell back to "(unnamed)", so before onboarding the whole site
+was twelve identical rows. It now falls back to the model label, then the slug —
+the pre-draft site is mostly unnamed teams, and the model is the thing that
+tells them apart.
+
+443 tests green.
+
 ## 2026-08-29 — Merged to main; one production data edit
 
 `main` is at `6aa5bde`. CI run 28 green (lint, typecheck, 440 tests, and a

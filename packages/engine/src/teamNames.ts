@@ -8,6 +8,27 @@ import { fail, ok } from "./errors.ts";
 export const MAX_TEAM_NAME_LENGTH = 40;
 export const MAX_MOTTO_LENGTH = 120;
 
+function nameTaken(name: string) {
+  return fail("name_taken", `another team is already called "${name}"`, {
+    hint: "pick a different name",
+  });
+}
+
+/**
+ * Postgres reports a unique violation as SQLSTATE 23505. The driver's error
+ * shape differs between postgres-js and PGlite, so both the code and the
+ * constraint name are matched loosely rather than through one driver's type.
+ */
+function isUniqueViolation(err: unknown, constraint: string): boolean {
+  if (!err || typeof err !== "object") return false;
+  const e = err as { code?: unknown; constraint_name?: unknown; constraint?: unknown; message?: unknown; cause?: unknown };
+  const code = String(e.code ?? "");
+  const named = String(e.constraint_name ?? e.constraint ?? "");
+  const message = String(e.message ?? "");
+  if (code === "23505" && (named === constraint || message.includes(constraint))) return true;
+  return e.cause !== undefined && e.cause !== err && isUniqueViolation(e.cause, constraint);
+}
+
 export async function setTeamName(
   db: EngineDb,
   teamId: number,
@@ -31,19 +52,25 @@ export async function setTeamName(
     // Names must be unique, case-insensitively. Board mentions route by
     // matching `@Team Name` against every team's name (board.ts), so two teams
     // with the same name would each receive the other's mentions and both be
-    // woken for every reply. The check runs inside the transaction, and the
-    // whole write is serialized on the settings row above, so two agents
-    // choosing the same name at the same moment cannot both win.
+    // woken for every reply.
+    //
+    // This read is only for the message. It cannot be the guarantee: onboarding
+    // runs six sessions at once, and under READ COMMITTED two of them can both
+    // read "not taken" and both write. `teams_name_lower_uq` is what actually
+    // holds, and the catch below turns its violation into the same clean
+    // refusal the agent would have got from the read.
     const taken = await tx
-      .select({ id: teams.id, name: teams.name })
+      .select({ id: teams.id })
       .from(teams)
       .where(and(ne(teams.id, teamId), sql`lower(${teams.name}) = lower(${trimmed})`));
-    if (taken.length > 0) {
-      return fail("name_taken", `another team is already called "${trimmed}"`, {
-        hint: "pick a different name",
-      });
+    if (taken.length > 0) return nameTaken(trimmed);
+
+    try {
+      await tx.update(teams).set({ name: trimmed, motto: motto ?? null }).where(eq(teams.id, teamId));
+    } catch (err) {
+      if (isUniqueViolation(err, "teams_name_lower_uq")) return nameTaken(trimmed);
+      throw err;
     }
-    await tx.update(teams).set({ name: trimmed, motto: motto ?? null }).where(eq(teams.id, teamId));
     return ok({ name: trimmed, motto: motto ?? null });
   });
 }
