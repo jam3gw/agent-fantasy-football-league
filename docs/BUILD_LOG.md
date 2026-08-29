@@ -11,6 +11,49 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 - **Credentials in the build environment**: this remote session has no `.env.local`; `AI_GATEWAY_API_KEY`, `FANTASYPROS_API_KEY`, `WEB_SEARCH_API_KEY`, `RESEND_API_KEY`, `COMMISSIONER_PASSWORD`, `SESSION_SECRET` and `CRON_SECRET` are only in Vercel. Build/tests that need them run against preview deployments (M3 smoke tests, M4 mock draft, M7 alarm email). If you want them runnable locally in this session, add them to the session environment; otherwise no action needed until M3.
 - **FantasyPros free-tier measurement** (§5.7/5.8 verify) requires the key — will run the counted probe suite at M4 and record in VERIFIED.md.
 
+## 2026-08-29 — Mobile layout: measured, not eyeballed
+
+Jake asked whether the UI is mobile friendly. I measured it rather than reading
+the classes: a 375px and 414px Chromium against the deployed pages, checking the
+three things that actually break a page on a phone. `apps/web/scripts/mobile-audit.mjs`
+is that measurement, kept in the repo so it is repeatable.
+
+Three real defects, all in the shared components, so all of them affected every
+page that has a table — including the ones that are empty pre-season and could
+not be measured yet:
+
+1. **`/benchmark` scrolled the whole page sideways** — 63px at 375px. A `Card`
+   is a grid child, and a grid child defaults to `min-width: auto`, meaning its
+   content's minimum width. So a card holding a seven-column table refused to
+   shrink and pushed the page wide instead of letting the table scroll inside
+   it. `min-w-0` on the card, and `min-width: 0` on `.table-scroll` for the same
+   reason.
+2. **Wide tables squashed instead of scrolling.** `.table-scroll` had
+   `overflow-x: auto`, but the table inside carried `w-full min-w-full` — which
+   pins it to the container, so more columns just meant narrower columns. Seven
+   of them in 375px, every cell wrapped to three lines. The table now takes a
+   minimum width proportional to its column count (6.5rem each, above four
+   columns), so it overflows the scroller it was always meant to overflow. Wide
+   enough to be a no-op on a desktop.
+3. **Rows three and four lines tall** on `/standings` (77px) and `/spend` (77px),
+   the same symptom from the other side. Gone once the tables scroll; headers
+   also stopped wrapping.
+
+Also: three admin forms forced two columns at any width; they are behind `sm:`
+now. And the four `grid-cols-2` grids that remain unprefixed are deliberate — a
+pair of short stats reads fine on a phone — so the regression test forbids three
+or more columns at the base breakpoint, not two.
+
+Measured after the fix, at both widths, across every public page plus
+`/teams/team-1` and `/spend/team-1`: **no page overflow, no squashed table, no
+tall rows.**
+
+`apps/web/test/mobile.test.ts` keeps the fixes: it asserts the table is not
+pinned to its container, the scroller can shrink, `Card` carries `min-w-0`, and
+no layout forces three columns onto a phone.
+
+Test suite: **404 tests green**.
+
 ## 2026-08-29 — Agent-scheduled check-ins (§8.10, new)
 
 Jake asked for it; spec'd as §8.10 and built. An agent can book its own
