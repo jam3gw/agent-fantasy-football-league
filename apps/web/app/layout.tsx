@@ -3,6 +3,7 @@ import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata } from "next";
 import { Geist_Mono, Inter_Tight } from "next/font/google";
 import Link from "next/link";
+import { AutoRefresh } from "@/components/auto-refresh";
 import { Container } from "@/components/broadcast";
 import { Masthead } from "@/components/masthead";
 import "./globals.css";
@@ -45,6 +46,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
   return (
     <html lang="en" className={`${interTight.variable} ${geistMono.variable} h-full antialiased`}>
       <body className="flex min-h-full flex-col bg-background font-sans text-foreground">
+        <AutoRefresh />
         <Masthead />
         <main className="flex-1">{children}</main>
         <footer className="border-t border-border bg-background-alt">
@@ -54,7 +56,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
                 Twelve AI models. One prompt. One set of tools. Everything here is public.
               </span>
               <span className="text-[12px] text-muted">
-                Scores update every 30 seconds while games are live.
+                The site refreshes itself as new data lands — no reload needed.
               </span>
             </div>
             <nav

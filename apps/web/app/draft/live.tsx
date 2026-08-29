@@ -1,11 +1,14 @@
 "use client";
 /**
  * The live half of the draft room: polls `/api/draft/state` every 3 seconds
- * (SPEC §10.2) and refreshes the server-rendered board whenever a new pick
- * lands. Deliberately tiny — everything else on `/draft` is a server component.
+ * with SWR (SPEC §10.2) and refreshes the server-rendered board whenever a new
+ * pick lands. Deliberately tiny — everything else on `/draft` is a server
+ * component. SWR pauses the poll while the tab is hidden and revalidates on
+ * focus, which the old hand-rolled interval never did.
  */
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import useSWR from "swr";
 import { Badge, Card, Empty } from "../../components/ui";
 
 interface RecentPick {
@@ -43,45 +46,37 @@ function secondsLeft(deadline: number | null): number | null {
   return deadline === null ? null : Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
 }
 
+async function fetchDraftState(url: string): Promise<DraftState> {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`draft state ${res.status}`);
+  return (await res.json()) as DraftState;
+}
+
 export default function DraftLive() {
   const router = useRouter();
-  const [state, setState] = useState<DraftState | null>(null);
   const [left, setLeft] = useState<number | null>(null);
-  const [offline, setOffline] = useState(false);
   /** Deadline on the local clock, so a skewed browser clock cannot break it. */
   const deadline = useRef<number | null>(null);
   const picksSeen = useRef<number | null>(null);
 
+  const { data: state, error } = useSWR("/api/draft/state", fetchDraftState, {
+    refreshInterval: POLL_MS,
+    revalidateOnFocus: true,
+    dedupingInterval: 1_000,
+    onSuccess: (data) => {
+      deadline.current = data.secondsRemaining === null ? null : Date.now() + data.secondsRemaining * 1000;
+      setLeft(secondsLeft(deadline.current));
+      // A new pick means the board below is stale: re-render it on the server.
+      if (picksSeen.current !== null && data.picksMade !== picksSeen.current) router.refresh();
+      picksSeen.current = data.picksMade;
+    },
+  });
+  const offline = Boolean(error);
+
   useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const res = await fetch("/api/draft/state", { cache: "no-store" });
-        if (!res.ok) throw new Error(`draft state ${res.status}`);
-        const data = (await res.json()) as DraftState;
-        if (cancelled) return;
-        deadline.current = data.secondsRemaining === null ? null : Date.now() + data.secondsRemaining * 1000;
-        setState(data);
-        setLeft(secondsLeft(deadline.current));
-        setOffline(false);
-        // A new pick means the board below is stale: re-render it on the server.
-        if (picksSeen.current !== null && data.picksMade !== picksSeen.current) router.refresh();
-        picksSeen.current = data.picksMade;
-      } catch {
-        if (!cancelled) setOffline(true);
-      }
-    }
-
-    void load();
-    const poll = setInterval(() => void load(), POLL_MS);
     const ticker = setInterval(() => setLeft(secondsLeft(deadline.current)), 1_000);
-    return () => {
-      cancelled = true;
-      clearInterval(poll);
-      clearInterval(ticker);
-    };
-  }, [router]);
+    return () => clearInterval(ticker);
+  }, []);
 
   if (!state) {
     return (
