@@ -49,6 +49,18 @@ done: `draft_pick` chunks carry counters but no `pickNo`/`teamId`
 error swallowing covers rejection, not a write that never settles, accepted
 as a platform concern.
 
+Review round 2: two contract defects inside round 1's own fix, both applied —
+`emitRunChunk` now reports success and the sink advances `prev` only past
+chunks the reader actually received (partials are cumulative, so the next
+flush's delta covers a dropped write's hole instead of concatenating around
+it), and `partialDelta` no longer swallows a contentless restart (only an
+empty *extension* is silent — a step's first flush can be empty, and dropping
+its `reset` would make a reader keep a failed attempt's chunks). Recorded,
+not done: a wiring test for the two-sink `onPartial` pairing in
+runSession.ts/draft.ts — the pairing is two awaited calls whose halves are
+each tested (DB sink in `packages/agent/test/streaming.test.ts`, stream sink
+here), and pinning it needs a full session harness for marginal value.
+
 ## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
 
 Jake sent screenshots of a team page's "What this agent is thinking" panel and

@@ -39,24 +39,28 @@ export type RunStreamChunk =
   | { kind: "draft_pick"; picksMade: number; autoPicks: number; completed: boolean; pausedAt: number | null };
 
 /**
- * Write one chunk to the current run's default stream. `getWritable()` throws
- * outside a workflow or step function, `getWriter()` throws on a locked
- * stream, and a stream hiccup is not a session failure, so every path is
- * swallowed. The writer lock is scoped to this call — the SDK flushes on
- * release, and locks do not span steps — so acquire-write-release per chunk
- * is the supported pattern. `writableSource` is injectable for tests.
+ * Write one chunk to the current run's default stream; `true` only when the
+ * write succeeded. `getWritable()` throws outside a workflow or step
+ * function, `getWriter()` throws on a locked stream, and a stream hiccup is
+ * not a session failure, so every path is swallowed — but the outcome is
+ * reported, because the delta sink must not advance past a chunk the reader
+ * never received. The writer lock is scoped to this call — the SDK flushes
+ * on release, and locks do not span steps — so acquire-write-release per
+ * chunk is the supported pattern. `writableSource` is injectable for tests.
  */
 export async function emitRunChunk(
   chunk: RunStreamChunk,
   writableSource: () => WritableStream<RunStreamChunk> = () => getWritable<RunStreamChunk>(),
-): Promise<void> {
+): Promise<boolean> {
   let writer: WritableStreamDefaultWriter<RunStreamChunk> | undefined;
   try {
     writer = writableSource().getWriter();
     await writer.write(chunk);
+    return true;
   } catch {
     // Observability only — dropped on any error, including "no workflow
     // context" (tests, scripts): nowhere to stream.
+    return false;
   } finally {
     writer?.releaseLock();
   }
@@ -81,7 +85,10 @@ export function partialDelta(
     next.text.startsWith(prev.text);
   const reasoning = extendsPrev ? next.reasoning.slice(prev.reasoning.length) : next.reasoning;
   const text = extendsPrev ? next.text.slice(prev.text.length) : next.text;
-  if (reasoning === "" && text === "") return null;
+  // Only an *extension* with nothing new is silent: a contentless restart
+  // still carries the reset the reader needs (a step's first flush can be
+  // empty — the model-step throttle flushes on the very first delta part).
+  if (extendsPrev && reasoning === "" && text === "") return null;
   return { reasoning, text, reset: !extendsPrev };
 }
 
@@ -92,14 +99,22 @@ export function partialDelta(
  */
 export function createRunStreamPartialSink(
   sessionId: number,
-  emit: (chunk: RunStreamChunk) => Promise<void> = emitRunChunk,
+  emit: (chunk: RunStreamChunk) => Promise<boolean> = emitRunChunk,
 ): PartialSink {
   // stepNo starts at 0 and the closing step uses -1, so -2 never collides.
   let prev: StreamPartial = { stepNo: -2, reasoning: "", text: "" };
   return async (partial) => {
     const delta = partialDelta(prev, partial);
-    prev = partial;
-    if (delta === null) return;
-    await emit({ kind: "model_delta", sessionId, stepNo: partial.stepNo, ...delta });
+    // `prev` advances only past chunks the reader actually received:
+    // partials are cumulative, so after a dropped write the next flush's
+    // delta covers the hole instead of concatenating around it. (A null
+    // delta means `partial` equals `prev`, so advancing is a no-op kept for
+    // clarity.)
+    if (delta === null) {
+      prev = partial;
+      return;
+    }
+    const delivered = await emit({ kind: "model_delta", sessionId, stepNo: partial.stepNo, ...delta });
+    if (delivered) prev = partial;
   };
 }
