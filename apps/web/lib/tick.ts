@@ -557,10 +557,23 @@ export async function startQueuedSessions(
   // rows than this page — and ordering by `created_at` put that far-future
   // pile ahead of everything booked after it, so a board reply due *now* was
   // never even examined until the pile drained weeks later. Due time also
-  // serves the two retirement branches below: a session past its deadline is
-  // past its due time too, and a stale one with no deadline coalesces to its
-  // old `created_at`, so both sort to the front rather than falling off the
-  // page.
+  // serves the retirement branches below: a session past its deadline is past
+  // its due time too, so it sorts to the front rather than falling off the
+  // page, and a session with neither field coalesces to `created_at`. (A
+  // deadline-less session with a future `due_at` waits for its due time
+  // before the stale check sees it, which only ever retires it later, never
+  // runs it earlier.)
+  //
+  // The shape guard mirrors `parseDate`'s leniency: `due_at` is only ever
+  // written by `createSession` via `toISOString()`, but a cast that throws on
+  // one malformed row would fail this query — and with it every sweep, for
+  // every team, forever, with no way for the sweep to retire the poisoned
+  // row. A value that fails the guard sorts by `created_at` instead, exactly
+  // as `parseDate` returning null treats it on the JS side.
+  const dueAtOrder = sql`coalesce(
+    case when ${sessions.context} ->> 'due_at' ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}'
+         then (${sessions.context} ->> 'due_at')::timestamptz end,
+    ${sessions.createdAt})`;
   const queued = await database
     .select({
       id: sessions.id,
@@ -571,7 +584,7 @@ export async function startQueuedSessions(
     })
     .from(sessions)
     .where(eq(sessions.status, "queued"))
-    .orderBy(sql`coalesce((${sessions.context} ->> 'due_at')::timestamptz, ${sessions.createdAt})`, asc(sessions.createdAt))
+    .orderBy(dueAtOrder, asc(sessions.createdAt))
     .limit(MAX_QUEUED_SESSIONS_PER_TICK);
 
   // §4.3: a paused team runs nothing. Pausing was enforced only where sessions
