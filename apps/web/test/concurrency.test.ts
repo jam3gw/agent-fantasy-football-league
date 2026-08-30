@@ -573,6 +573,42 @@ describe("the tick's sweeper is the only thing that starts a session", () => {
     expect(result.expired).toBe(0);
   });
 
+  it("a malformed due_at cannot poison the sweep's ordering query", async () => {
+    // `due_at` is only ever written by `createSession` via `toISOString()`,
+    // but the ordering expression casts it in SQL — and an unguarded cast
+    // that throws on one bad row would fail every sweep for every team, with
+    // no way for the sweep to retire the row that did it. The shape guard
+    // makes a bad value sort by `created_at` instead, and `parseDate`'s null
+    // on the JS side then treats the session as due — same as before.
+    const teamIds = await twelveTeams();
+    await db.insert(sessions).values({
+      teamId: teamIds[0]!,
+      kind: "weekly_review",
+      trigger: "t",
+      idempotencyKey: "garbage-due",
+      modelId: "m/1",
+      status: "queued",
+      createdAt: new Date(clock.now().getTime() - 300_000),
+      context: { due_at: "soon-ish", deadline_at: new Date(clock.now().getTime() + 3600_000).toISOString() },
+    });
+    await db.insert(sessions).values({
+      teamId: teamIds[1]!,
+      kind: "board_reply",
+      trigger: "board",
+      idempotencyKey: "well-formed",
+      modelId: "m/1",
+      status: "queued",
+      createdAt: new Date(clock.now().getTime() - 300_000),
+      context: { due_at: new Date(clock.now().getTime() - 60_000).toISOString() },
+    });
+
+    const started: number[] = [];
+    const result = await startQueuedSessions(db, clock, async (id) => {
+      started.push(id);
+    });
+    expect(result.started).toBe(2);
+  });
+
   it("leaves a running session alone while it is still working", async () => {
     const [teamId] = await twelveTeams();
     await db.insert(sessions).values({
