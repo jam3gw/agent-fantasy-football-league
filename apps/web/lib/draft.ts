@@ -40,6 +40,7 @@ import { ensureFreshPlayerFeed, ensureFreshProjections } from "@league/data";
 import { db, leagueClock } from "./db";
 import { env } from "./env";
 import { readBrief } from "./briefs";
+import { createRunStreamPartialSink } from "./runStream";
 import { notifyAlarms } from "./alarms";
 
 /** Snake order: odd rounds go forward, even rounds backward (§3.8). */
@@ -200,8 +201,15 @@ async function runDraftPick(
     const sessionId = await claimPickSession(database, settings, clock, pick, team);
 
     if (sessionId !== null) {
+      // Same pairing as runSession.ts: stage partials for the live transcript
+      // (§12.1) and mirror the deltas onto the draft workflow's run stream.
+      const stagePartial = createPartialSink(database, clock, sessionId);
+      const streamPartial = createRunStreamPartialSink(sessionId);
       const modelStep = createModelStep(database, {
-        onPartial: createPartialSink(database, clock, sessionId),
+        onPartial: async (partial) => {
+          await stagePartial(partial);
+          await streamPartial(partial);
+        },
       });
       await runSession(sessionId, {
         db: database,

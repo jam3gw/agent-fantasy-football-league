@@ -2,6 +2,70 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Workflow run streams (commissioner request)
+
+Jake sent a screenshot of an `agentSessionWorkflow` run's Streams tab in the
+Vercel Workflows dashboard reading "No Streams Yet — call `getWritable()` in a
+step" and asked to add streams.
+
+- New `apps/web/lib/runStream.ts`: `emitRunChunk` writes one JSON chunk to the
+  current run's default stream (per-write acquire/release, the SDK's supported
+  pattern); `createRunStreamPartialSink` turns the model step's cumulative
+  partials into append-only deltas so the stream carries each character once,
+  not the whole partial re-sent every flush.
+- Wired where the long runs live: `agentSessionWorkflow` steps emit a
+  `session_step` outcome chunk plus live `model_delta` chunks while a model
+  streams (runSession.ts pairs the new sink with the existing §12.1 DB sink);
+  `draftWorkflow` emits a `draft_pick` chunk per pick plus the same deltas
+  (draft.ts pairing).
+- Everything is observability-only by design: `getWritable()` throws outside a
+  workflow/step context (unit tests, scripts), so the helper swallows that and
+  all write errors — a stream hiccup can never fail a session, mirroring the
+  partial-sink philosophy. The durable record stays `session_events`.
+- Single-step workflows (waivers, ingest, finalize, week plan, reporter) got no
+  stream: they finish in seconds and their return value already shows in the
+  dashboard. Streams are auto-closed when a run completes, so no explicit
+  close step was added.
+- Tests: `apps/web/test/runStream.test.ts` — delta math (first flush, suffix,
+  step change, non-extension restart, closing step `-1`), sink emit/skip
+  behavior, reconstruction by concatenation, workflow-step-retry re-emission,
+  and the failure paths (no context, rejected write, locked stream). Full
+  `pnpm check` green: lint, typecheck, 679 tests (682 after review fixes).
+
+Review round 1 (fresh-context reviewer over the diff): no spec violations, no
+security findings; three fixes applied — `getWriter()` moved inside the try
+(it throws synchronously on a locked stream, and outside the try it would
+have propagated into the model step, the exact failure the module promises
+away), `reset: boolean` added to `model_delta` (a retried workflow step
+re-streams a `stepNo` the stream already carries, since stream writes bypass
+the event log; readers had no discard signal), and the "readers reconstruct
+the partial" claim corrected to "as of the last throttled flush" (the tail
+past the final flush reaches only `session_events`). `writableSource` made
+injectable so the write-failure paths are actually tested. Recorded, not
+done: `draft_pick` chunks carry counters but no `pickNo`/`teamId`
+(`DraftRunResult` doesn't expose them; enrichment when someone needs it);
+`session_step` chunks are emitted for `queued` no-slot outcomes on purpose
+(a run visibly waiting beats a silent one); stream writes have no timeout —
+error swallowing covers rejection, not a write that never settles, accepted
+as a platform concern.
+
+Review round 2: two contract defects inside round 1's own fix, both applied —
+`emitRunChunk` now reports success and the sink advances `prev` only past
+chunks the reader actually received (partials are cumulative, so the next
+flush's delta covers a dropped write's hole instead of concatenating around
+it), and `partialDelta` no longer swallows a contentless restart (only an
+empty *extension* is silent — a step's first flush can be empty, and dropping
+its `reset` would make a reader keep a failed attempt's chunks). Recorded,
+not done: a wiring test for the two-sink `onPartial` pairing in
+runSession.ts/draft.ts — the pairing is two awaited calls whose halves are
+each tested (DB sink in `packages/agent/test/streaming.test.ts`, stream sink
+here), and pinning it needs a full session harness for marginal value.
+
+Review round 3: nothing new — both round-2 fixes verified (the cursor
+invariant holds across any interleaving of drops, resets, and extensions;
+the contentless-reset path is reachable and pinned), lock handling matches
+the DevKit's documented pattern, and no spec or security findings. Merged.
+
 ## 2026-08-30 — get_free_agents SQL error: drizzle drops the correlation qualifier
 
 Every `get_free_agents` call in production failed with a `tool_error` (reported

@@ -9,6 +9,7 @@
  * `session_events`, so nothing is repeated and nothing is lost.
  */
 import { runAgentSession, type SessionRunOutcome } from "../lib/runSession";
+import { emitRunChunk } from "../lib/runStream";
 
 /** Well inside the 800-second cap, leaving room for one long model call. */
 const STEP_BUDGET_MS = 9 * 60_000;
@@ -23,5 +24,20 @@ export async function agentSessionWorkflow(sessionId: number) {
 
 async function runSessionStep(sessionId: number): Promise<SessionRunOutcome> {
   "use step";
-  return runAgentSession(sessionId, { stepBudgetMs: STEP_BUDGET_MS });
+  // While the step runs, model-output deltas flow to the run stream via the
+  // partial sink pairing in runSession.ts; the outcome chunk below closes out
+  // each step so the run's Streams tab shows progress even when a provider
+  // streams nothing. Stream writes must happen inside a step, hence here and
+  // not in the workflow loop.
+  const result = await runAgentSession(sessionId, { stepBudgetMs: STEP_BUDGET_MS });
+  await emitRunChunk({
+    kind: "session_step",
+    sessionId,
+    status: result.status,
+    endedBy: result.endedBy,
+    steps: result.steps,
+    toolCalls: result.toolCalls,
+    invalidToolCalls: result.invalidToolCalls,
+  });
+  return result;
 }
