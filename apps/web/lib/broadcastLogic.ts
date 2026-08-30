@@ -343,8 +343,12 @@ export function flattenMarkdown(text: string): string {
       .replace(/^[ \t]*(`{3,})[^\n]*\n[\s\S]*?^[ \t]*\1`*[ \t]*$/gm, " ")
       .replace(/^[ \t]*(~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1~*[ \t]*$/gm, " ")
       // An unpaired fence-marker line drops alone; the lines under it flatten
-      // as prose, mirroring the renderer's unclosed-fence behavior.
-      .replace(/^[ \t]*(?:`{3,}|~{3,}).*$/gm, " ")
+      // as prose, mirroring the renderer's unclosed-fence behavior. As there,
+      // a bare language tag after the marker is an info string and drops with
+      // it, while anything else on the line is content and is kept.
+      .replace(/^[ \t]*(?:`{3,}|~{3,})(.*)$/gm, (_, rest: string) =>
+        /^[\w+#.-]*$/.test(rest.trim()) ? " " : ` ${rest} `,
+      )
       .replace(/^\s*([-*_])(?:\s*\1){2,}\s*$/gm, " ")
       .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d{1,3}[.)]\s+|>\s?)+/gm, "")
       .replace(/\s+/g, " ")

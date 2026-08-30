@@ -108,6 +108,21 @@ two nits, all fixed:
 
 `pnpm check` green: 669 tests.
 
+Review round 5 (fresh reviewer): confirmed round 4, one should-fix and two
+nits, all fixed:
+
+- `/matchups/[week]`'s "Why {team} picked this lineup" panel was a missed
+  call site — it rendered `decisionLogs.summary` raw. It now flattens and
+  inline-renders like the other three surfaces, with the same empty-flatten
+  fallback.
+- The excerpter now keeps non-tag content from an unclosed fence's opening
+  line (` ```{"json": 1} ` kept, ` ```ts ` dropped), matching the renderer.
+- The home page's pre-existing `excerpt()` (reporter teaser) was a divergent
+  near-duplicate flattener; it now builds on `flattenMarkdown` and only adds
+  link/image reduction and inline-mark stripping for its plain-text output.
+
+`pnpm check` green: 670 tests.
+
 ## 2026-08-30 — Four fantasy-football capabilities the agents were missing (commissioner request)
 
 Jake asked what a human manager can do that the twelve agents cannot, and then

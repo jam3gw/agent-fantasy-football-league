@@ -433,6 +433,11 @@ describe("body summaries", () => {
     expect(summarizeBody("A note.\n```\nstill worth reading", 160)).toBe("A note. still worth reading");
   });
 
+  it("keeps non-tag content from an unclosed fence's opening line, like the renderer", () => {
+    expect(summarizeBody('```{"json": 1}\nstill here', 160)).toBe('{"json": 1} still here');
+    expect(summarizeBody("```ts\nstill here", 160)).toBe("still here");
+  });
+
   it("drops a one-line fence's code but keeps the prose after it", () => {
     expect(summarizeBody("```quick``` more\nrest.", 160)).toBe("more rest.");
   });
