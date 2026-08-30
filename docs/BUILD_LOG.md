@@ -50,6 +50,16 @@ Reviewer concerns checked and found unfounded: duplicate injury.changed
 across concurrent refreshes (deduped by `injurySessionKey` +
 onConflictDoNothing), information parity, secrets, engine-write rule.
 
+**Round 2 (fresh context): nothing new, nothing blocking.** Five nits, all
+accepted as-is: the inflight dedupe ignores per-call opts (production only
+uses defaults); the scheduled projections job still stamps wall time
+(deliberate — noted in the upsert's comment); on a roster-cut day a warm
+process re-downloads the feed every 5 minutes until the hourly job lands
+the >500-row delta (bounded, operational note); the draft pre-warm spends
+up to one feed fetch of the first pick's clock (the design chosen in round
+1); the `tx as EngineDb` cast in the applied-stamp matches the file's
+existing style. Loop closed; merging.
+
 ## 2026-08-30 — Player feed (injuries) refreshes on demand too (§5.1)
 
 ## 2026-08-30 — Player feed (injuries) refreshes on demand too (§5.1)
