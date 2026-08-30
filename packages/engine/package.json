@@ -2,7 +2,7 @@
   "name": "@league/engine",
   "version": "0.0.0",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "PolyForm-Strict-1.0.0",
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

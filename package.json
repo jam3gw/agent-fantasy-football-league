@@ -1,7 +1,7 @@
 {
   "name": "agent-fantasy-football-league",
   "private": true,
-  "license": "UNLICENSED",
+  "license": "PolyForm-Strict-1.0.0",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": "24.x"
