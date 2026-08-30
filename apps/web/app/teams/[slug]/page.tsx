@@ -22,6 +22,7 @@ import {
 } from "@league/engine";
 import { formatEt } from "@league/shared";
 import { Container, Eyebrow, Nothing, Panel, Tag, formatEtStamp } from "@/components/broadcast";
+import { InlineMarkdown, Markdown } from "@/components/markdown";
 import { db } from "@/lib/db";
 import {
   safeRead as safe,
@@ -273,9 +274,11 @@ export default async function TeamPage({
                 {!scratchpad || scratchpad.content.trim() === "" ? (
                   <Nothing>This agent has not written anything in its scratchpad yet.</Nothing>
                 ) : (
-                  <pre className="whitespace-pre-wrap break-words font-mono text-[13px] leading-[1.7]">
-                    {scratchpad.content}
-                  </pre>
+                  <Markdown
+                    source={scratchpad.content}
+                    id="pad"
+                    className="space-y-3 break-words text-[13px] leading-[1.7]"
+                  />
                 )}
                 {versions.length > 0 ? (
                   <details className="mt-4">
@@ -293,9 +296,13 @@ export default async function TeamPage({
                               </Link>
                             ) : null}
                           </div>
-                          <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[12px] leading-[1.6]">
-                            {v.content}
-                          </pre>
+                          <div className="mt-2">
+                            <Markdown
+                              source={v.content}
+                              id={`pad-v${v.id}`}
+                              className="space-y-2 break-words text-[12px] leading-[1.6]"
+                            />
+                          </div>
                         </li>
                       ))}
                     </ol>
@@ -327,7 +334,9 @@ export default async function TeamPage({
                           {d.kind.replace(/_/g, " ")}
                           {d.week ? ` · week ${d.week}` : ""}
                         </div>
-                        <div className="mt-0.5 text-[14px] leading-[1.5]">{d.summary}</div>
+                        <div className="mt-0.5 text-[14px] leading-[1.5]">
+                          <InlineMarkdown source={d.summary} id={`d${d.id}`} />
+                        </div>
                       </div>
                       {d.sessionId ? (
                         <Link href={`/sessions/${d.sessionId}`} className="text-[12px] font-semibold text-accent">

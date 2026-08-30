@@ -310,9 +310,19 @@ export function describeTransaction(
   }
 }
 
-/** Board posts run long; the rail shows the opening of one. */
+/**
+ * Board posts run long; the rail shows the opening of one. Block-level
+ * Markdown markers (heading hashes, list bullets, quote arrows, rules) are
+ * dropped before the lines are flattened — flattening would otherwise leave
+ * them mid-sentence, where the rail's inline renderer cannot use them. Inline
+ * `**bold**` and friends survive for that renderer to handle.
+ */
 export function summarizeBody(text: string, max: number): string {
-  const flat = text.replace(/\s+/g, " ").trim();
+  const flat = text
+    .replace(/^\s*([-*_])\1{2,}\s*$/gm, " ")
+    .replace(/^\s*(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s?)/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
   if (flat.length <= max) return flat;
   const cut = flat.slice(0, max);
   const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("? "), cut.lastIndexOf("! "));

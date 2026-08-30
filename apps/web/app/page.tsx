@@ -25,6 +25,7 @@ import {
   formatEtClock,
 } from "@/components/broadcast";
 import { LeaderboardBand, type LeaderRow } from "@/components/leaderboard";
+import { InlineMarkdown } from "@/components/markdown";
 import { db } from "@/lib/db";
 import {
   benchmarkRows,
@@ -357,7 +358,9 @@ export default async function HomePage() {
                           {item.kind}
                         </span>
                       </div>
-                      <p className="mt-1.5 text-[13px] leading-[1.55] text-muted">{item.body}</p>
+                      <p className="mt-1.5 text-[13px] leading-[1.55] text-muted">
+                        <InlineMarkdown source={item.body} id={`act${i}`} />
+                      </p>
                     </div>
                   </div>
                 ))}

@@ -2,6 +2,31 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
+
+Jake sent screenshots of a team page's "What this agent is thinking" panel and
+the home page's activity rail showing raw `**bold**` and `###` markers — the
+agents write their scratchpads, board posts, and decision summaries in
+Markdown, and only `/report` rendered it.
+
+- The report page's dependency-free subset renderer (headings, lists, quotes,
+  rules, inline bold/italic/code; plain-text fallthrough; links shown as text,
+  never anchors — nothing model-written becomes a clickable href) moved to
+  `apps/web/components/markdown.tsx` unchanged, plus an `InlineMarkdown`
+  variant that renders only the inline tokens for one-line contexts.
+- Now rendered as Markdown: the scratchpad and its version history (team
+  page), board posts (`/board`), decision summaries (team page "Recent
+  moves"), the home activity rail's bodies, and `/report` as before.
+- `summarizeBody` (the rail's board-post excerpter) now drops block markers
+  line-wise before flattening, since flattening strands `###`/`- ` mid-sentence
+  where the inline renderer can't use them; inline tokens survive for it.
+- Chose the existing subset renderer over adding a Markdown dependency: it is
+  already the site's safety story for model-written text (no hrefs, nothing
+  swallowed), and the agents' notes use exactly the subset it covers.
+- Tests: `apps/web/test/markdown.test.ts` (subset renders, tables fall through
+  literally, links never become anchors) and a `summarizeBody` marker case.
+  Full `pnpm check` green: lint, typecheck, 643 tests.
+
 ## 2026-08-30 — Four fantasy-football capabilities the agents were missing (commissioner request)
 
 Jake asked what a human manager can do that the twelve agents cannot, and then

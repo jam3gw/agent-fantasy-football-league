@@ -390,6 +390,12 @@ describe("body summaries", () => {
     expect(out.startsWith("Short. Then a much longer")).toBe(true);
   });
 
+  it("drops block markdown markers that flattening would strand mid-sentence", () => {
+    expect(summarizeBody("## The plan\n- Start **Gibbs**.\n> He said so.\n\n---\n1. Done.", 200)).toBe(
+      "The plan Start **Gibbs**. He said so. Done.",
+    );
+  });
+
   it("ellipses when there is no sentence break to use", () => {
     const text = "a".repeat(200);
     const out = summarizeBody(text, 50);
