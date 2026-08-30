@@ -403,6 +403,34 @@ describe("get_player_stats", () => {
     expect((f.ownership as { status: string }).status).toBe("free_agent");
   });
 
+  it("drops a finalized game from the lookahead, so Sunday night still shows 'next', not 'played'", async () => {
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    await makeGame(db, { week: 1, home: "KC", away: "BUF", kickoffAt: new Date("2026-09-13T17:00:00.000Z"), status: "final" });
+    await makeGame(db, { week: 2, home: "KC", away: "SF", kickoffAt: new Date("2026-09-20T17:00:00.000Z") });
+    const rb = await makePlayer(db, { nflTeam: "KC", position: "RB", fullName: "Sunday Back" });
+    await rosterPlayer(db, a, rb);
+
+    const res = ok(await getPlayerStatsTool.execute({ player_ids: [rb] }, ctxFor({ teamId: a })));
+    const item = (res.items as Array<Record<string, unknown>>)[0]!;
+    expect((item.next_opponent as { opponent: string }).opponent).toBe("vs SF");
+    expect((item.upcoming_opponents as Array<{ opponent: string }>).map((u) => u.opponent)).toEqual(["vs SF"]);
+  });
+
+  it("pages with offset in the caller's id order, so a cap-split page can be continued", async () => {
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    const first = await makePlayer(db, { nflTeam: "KC", position: "RB", fullName: "Page One" });
+    const second = await makePlayer(db, { nflTeam: "SF", position: "WR", fullName: "Page Two" });
+
+    const page1 = ok(await getPlayerStatsTool.execute({ player_ids: [first, second] }, ctxFor({ teamId: a })));
+    expect((page1.items as Array<{ player_id: string }>).map((i) => i.player_id)).toEqual([first, second]);
+    const page2 = ok(await getPlayerStatsTool.execute({ player_ids: [first, second], offset: 1 }, ctxFor({ teamId: a })));
+    expect((page2.items as Array<{ player_id: string }>).map((i) => i.player_id)).toEqual([second]);
+    expect(page2.offset).toBe(1);
+    expect(page2.has_more).toBe(false);
+  });
+
   it("prefers the week-0 season-total row, never double-counts it, and reads games as null", async () => {
     // ingest.season_stats writes one aggregate row at week 0; production takes
     // this branch for essentially every player. A weekly row beside it must

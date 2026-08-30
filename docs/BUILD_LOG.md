@@ -60,6 +60,19 @@ seven items; all fixed:
   null-week-skip. Plus: a vacuous lineup assertion fixed, reporter
   (team-less) future-week shape and week-arg-ignored assertions added.
 
+**Review round two** confirmed every round-one fix against the finalize
+ladder and the Sleeper client, and found four more; all fixed:
+- `get_player_stats` paged an unordered SELECT — Postgres guarantees no row
+  order without ORDER BY, so a split page re-read between two hourly ingests
+  could repeat one player and silently drop another. Items now sort by the
+  caller's `player_ids` order.
+- The final-game exclusion and the `offset` continuation were themselves
+  untested; both now have tests (Sunday-night lookahead, two-page split).
+- `through_week: currentWeek` overstated coverage by one week (the current
+  week's rows are never final until finalization advances the week in the
+  same stroke); renamed `finalized_through_week` and computed as the data's
+  own max week.
+
 SPEC updated: §5.3 (stored team/opponent), §5.4 (three-week window), §6
 (`player_week_stats` columns), §8.4 (`get_matchup`, `get_player_stats`,
 `player_research` rows). Tests: future-pairings and unscheduled-week shapes,

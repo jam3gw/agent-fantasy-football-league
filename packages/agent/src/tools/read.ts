@@ -879,6 +879,11 @@ export const getPlayerStatsTool = readTool(
     const missing = ids.filter((id) => !rows.some((r) => r.playerId === id));
     // Items are long (a season of by_week rows each); when the §8.2 page cap
     // cuts the list, has_more/next_offset point at the rest via `offset`.
+    // Order by the caller's id list: Postgres guarantees no order without one,
+    // and an unstable order across the two calls of a split page would repeat
+    // one player and silently drop another.
+    const order = new Map(ids.map((id, i) => [id, i]));
+    items.sort((x, y) => (order.get(x.player_id) ?? 0) - (order.get(y.player_id) ?? 0));
     return pageRows(items, args.offset ?? 0, items.length, { missing_player_ids: missing });
   },
 );
@@ -1841,6 +1846,7 @@ export const playerResearchTool = readTool(
           defense: playerWeekStats.opponent,
           position: players.position,
           weeks: sql<number>`count(distinct ${playerWeekStats.week})::int`,
+          maxWeek: sql<number>`max(${playerWeekStats.week})::int`,
           totalPts: sql<number>`coalesce(sum(${playerWeekStats.ptsPpr}), 0)::float8`,
         })
         .from(playerWeekStats)
@@ -1905,7 +1911,10 @@ export const playerResearchTool = readTool(
         kind: args.kind,
         position,
         season,
-        through_week: settings.currentWeek,
+        // The latest week actually in the table, not the current week: the
+        // current week's rows are never final until its finalization run,
+        // which advances the week in the same stroke.
+        finalized_through_week: Math.max(...rows.map((r) => Number(r.maxWeek))),
         note: "rank 1 allows the most fantasy points to that position (the softest matchup)",
       });
     }
