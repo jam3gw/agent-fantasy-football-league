@@ -73,6 +73,12 @@ ladder and the Sleeper client, and found four more; all fixed:
   same stroke); renamed `finalized_through_week` and computed as the data's
   own max week.
 
+**Review round three** (focused on the round-two fixes) confirmed the sort
+and the max-week guard, and caught that the new paging test was vacuous —
+it requested ids in insertion order, which PGlite's heap order satisfies
+without the sort. The test now requests ids in reverse insertion order, so
+deleting the sort fails it. Nothing else new; loop closed.
+
 SPEC updated: §5.3 (stored team/opponent), §5.4 (three-week window), §6
 (`player_week_stats` columns), §8.4 (`get_matchup`, `get_player_stats`,
 `player_research` rows). Tests: future-pairings and unscheduled-week shapes,

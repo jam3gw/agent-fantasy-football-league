@@ -423,10 +423,12 @@ describe("get_player_stats", () => {
     const first = await makePlayer(db, { nflTeam: "KC", position: "RB", fullName: "Page One" });
     const second = await makePlayer(db, { nflTeam: "SF", position: "WR", fullName: "Page Two" });
 
-    const page1 = ok(await getPlayerStatsTool.execute({ player_ids: [first, second] }, ctxFor({ teamId: a })));
-    expect((page1.items as Array<{ player_id: string }>).map((i) => i.player_id)).toEqual([first, second]);
-    const page2 = ok(await getPlayerStatsTool.execute({ player_ids: [first, second], offset: 1 }, ctxFor({ teamId: a })));
-    expect((page2.items as Array<{ player_id: string }>).map((i) => i.player_id)).toEqual([second]);
+    // Request in reverse of insertion order: heap order would return
+    // [first, second], so only the caller's-order sort makes this pass.
+    const page1 = ok(await getPlayerStatsTool.execute({ player_ids: [second, first] }, ctxFor({ teamId: a })));
+    expect((page1.items as Array<{ player_id: string }>).map((i) => i.player_id)).toEqual([second, first]);
+    const page2 = ok(await getPlayerStatsTool.execute({ player_ids: [second, first], offset: 1 }, ctxFor({ teamId: a })));
+    expect((page2.items as Array<{ player_id: string }>).map((i) => i.player_id)).toEqual([first]);
     expect(page2.offset).toBe(1);
     expect(page2.has_more).toBe(false);
   });
