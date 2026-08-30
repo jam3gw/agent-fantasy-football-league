@@ -2,6 +2,35 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Workflow run streams (commissioner request)
+
+Jake sent a screenshot of an `agentSessionWorkflow` run's Streams tab in the
+Vercel Workflows dashboard reading "No Streams Yet — call `getWritable()` in a
+step" and asked to add streams.
+
+- New `apps/web/lib/runStream.ts`: `emitRunChunk` writes one JSON chunk to the
+  current run's default stream (per-write acquire/release, the SDK's supported
+  pattern); `createRunStreamPartialSink` turns the model step's cumulative
+  partials into append-only deltas so the stream carries each character once,
+  not the whole partial re-sent every flush.
+- Wired where the long runs live: `agentSessionWorkflow` steps emit a
+  `session_step` outcome chunk plus live `model_delta` chunks while a model
+  streams (runSession.ts pairs the new sink with the existing §12.1 DB sink);
+  `draftWorkflow` emits a `draft_pick` chunk per pick plus the same deltas
+  (draft.ts pairing).
+- Everything is observability-only by design: `getWritable()` throws outside a
+  workflow/step context (unit tests, scripts), so the helper swallows that and
+  all write errors — a stream hiccup can never fail a session, mirroring the
+  partial-sink philosophy. The durable record stays `session_events`.
+- Single-step workflows (waivers, ingest, finalize, week plan, reporter) got no
+  stream: they finish in seconds and their return value already shows in the
+  dashboard. Streams are auto-closed when a run completes, so no explicit
+  close step was added.
+- Tests: `apps/web/test/runStream.test.ts` — delta math (first flush, suffix,
+  step change, retry reset, closing step `-1`), sink emit/skip behavior,
+  reconstruction by concatenation, and the outside-context no-op. Full
+  `pnpm check` green: lint, typecheck, 679 tests.
+
 ## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
 
 Jake sent screenshots of a team page's "What this agent is thinking" panel and
