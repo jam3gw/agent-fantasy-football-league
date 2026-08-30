@@ -2,6 +2,45 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Player feed (injuries) refreshes on demand too (§5.1)
+
+Jake's follow-up to the projections change: agents also need pre-kickoff
+injury news, not the hourly ingest's last snapshot. Same pattern, second
+feed: `ensureFreshPlayerFeed(db, clock)` in `@league/data`
+(`ingest/players.ts`), wired as `ToolContext.refreshPlayerFeed`.
+
+The feed is one ~5MB document of ~11k players, so this differs from the
+projections refresher in three ways:
+
+- Freshness reads the `sleeper.players` health row (which every successful
+  fetch of that feed already records), so the hourly job and the on-demand
+  path share one clock; TTL 15 minutes. Within TTL a read costs one SELECT.
+- It diffs against the stored table and writes only players whose
+  lineup-relevant fields moved (injury status/body part, roster status,
+  NFL team, active, depth-chart order) plus never-seen players — a full
+  upsert from inside a tool call would take minutes. The write goes through
+  `upsertPlayers`, so a starter going Out emits `injury.changed` and books
+  the injury_response session exactly as the hourly job would, just sooner.
+- An empty players table is a bootstrap and stays the job's: the refresher
+  reports unavailable rather than writing 11k rows mid-session.
+
+Call sites: roster tools and matchup (current/future week, alongside the
+projections refresh), free agents, `player_research kind:injuries`
+(trending stays hourly — it is a 24-hour window by definition), the draft
+board, and the session-start snapshot (moved before the roster read so the
+snapshot itself is fresh). Same choice as before on parity: the refresh
+updates the shared table; all twelve agents read the same rows.
+
+Considered and rejected: having agents call the Sleeper API directly per
+tool call with no store. It breaks information parity (two agents in the
+same minute could read different answers), loses the injury.changed event
+stream (which is driven by observing *changes* against stored state), and
+makes transcripts unreproducible for the benchmark. The TTL store gives the
+same freshness with one shared view of the world.
+
+Suites green: shared 13, engine 171, data 36 (6 new), agent 165 (1 new,
+1 extended), web 234. Lint and typecheck clean.
+
 ## 2026-08-30 — Projections refresh on demand when agents read them (§5.4), week 0 feeds the draft board
 
 Found while answering "can agents see projected stats": `player_week_proj`

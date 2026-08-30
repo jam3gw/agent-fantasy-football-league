@@ -82,6 +82,8 @@ export interface RunSessionDeps {
   toolConfig: ToolContext["config"];
   /** See ToolContext.refreshProjections; omit in tests to stay offline. */
   refreshProjections?: ToolContext["refreshProjections"];
+  /** See ToolContext.refreshPlayerFeed; omit in tests to stay offline. */
+  refreshPlayerFeed?: ToolContext["refreshPlayerFeed"];
   /** Optional hook so the draft workflow can stop the loop when the pick is gone. */
   shouldContinue?: () => Promise<boolean>;
   /**
@@ -439,6 +441,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
     config: deps.toolConfig,
     sessionContext: session.context,
     ...(deps.refreshProjections ? { refreshProjections: deps.refreshProjections } : {}),
+    ...(deps.refreshPlayerFeed ? { refreshPlayerFeed: deps.refreshPlayerFeed } : {}),
   };
 
   const toolsByName = new Map(deps.tools.map((t) => [t.name, t]));

@@ -39,6 +39,14 @@ export interface ToolContext {
    * stored after it settles.
    */
   refreshProjections?: (season: number, week: number) => Promise<void>;
+  /**
+   * Refresh the stored player feed (injury status and designation, roster
+   * status, NFL team, depth chart) before a read, so pre-kickoff injury news
+   * reaches agents without waiting for the hourly ingest. Wired in apps/web
+   * to `ensureFreshPlayerFeed` (@league/data); absent in unit tests so tools
+   * never touch the network. Must never throw.
+   */
+  refreshPlayerFeed?: () => Promise<void>;
 }
 
 export interface ToolFailure {

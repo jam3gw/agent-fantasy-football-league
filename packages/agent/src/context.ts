@@ -170,6 +170,10 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
   const standings = await computeStandings(db);
   const myStanding = standings.find((s) => s.teamId === teamId);
 
+  // Every session opens on live projections and injury statuses, not the
+  // last scheduled ingest — refresh before the roster and projection reads.
+  await Promise.all([ctx.refreshProjections?.(settings.season, week), ctx.refreshPlayerFeed?.()]);
+
   // Roster with slot, lock, bye, points, projection.
   const roster = await db
     .select({
@@ -206,8 +210,6 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
         )
     : [];
   const ptsOf = new Map(stats.map((s) => [s.playerId, s.ptsPpr]));
-  // Every session opens on live projections, not the last daily ingest.
-  if (rosterIds.length) await ctx.refreshProjections?.(settings.season, week);
   const projRows = rosterIds.length
     ? await db
         .select({ playerId: playerWeekProj.playerId, proj: playerWeekProj.projPtsPpr })

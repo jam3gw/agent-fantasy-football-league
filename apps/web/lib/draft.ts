@@ -36,7 +36,7 @@ import {
   toolsForKind,
 } from "@league/agent";
 import { formatEt } from "@league/shared";
-import { ensureFreshProjections } from "@league/data";
+import { ensureFreshPlayerFeed, ensureFreshProjections } from "@league/data";
 import { db, leagueClock } from "./db";
 import { env } from "./env";
 import { readBrief } from "./briefs";
@@ -200,9 +200,13 @@ async function runDraftPick(
         clock,
         tools: toolsForKind("draft_pick"),
         toolConfig: env.toolConfig,
-        // §5.4 on-demand: week 0 keeps `proj_points` on the board current.
+        // §5.4 / §5.1 on-demand: week 0 keeps `proj_points` on the board
+        // current; the player feed keeps draft-day injury news current.
         refreshProjections: async (season, week) => {
           await ensureFreshProjections(database, clock, { season, week });
+        },
+        refreshPlayerFeed: async () => {
+          await ensureFreshPlayerFeed(database, clock);
         },
         modelStep,
         buildSystemPrompt: async () =>
