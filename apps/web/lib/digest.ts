@@ -216,7 +216,7 @@ export async function buildWeeklyDigest(
   const draftCost = isDraft
     ? (
         await db
-          .select({ total: sql<number>`coalesce(sum(${spendLedger.costUsd}), 0)` })
+          .select({ total: sql<number>`coalesce(sum(${spendLedger.costUsd}), 0)::float8` })
           .from(spendLedger)
           .where(inArray(spendLedger.kind, ["draft_pick", "onboarding"]))
       )[0]?.total ?? 0
