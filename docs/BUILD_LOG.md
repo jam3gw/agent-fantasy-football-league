@@ -2,6 +2,52 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Log/health monitoring pass: two production bugs found and fixed
+
+Routine monitoring sweep (Jake asked for it as a one-off plus a recurring
+task; the recurring run is a scheduled session, every 4 hours). Production
+state at the time: tick alive, `/api/healthz` 200, all feeds green.
+
+**Bug 1 — the queue sweep could starve every newly booked session for weeks.**
+`startQueuedSessions` paged the queue by `created_at` with a 40-row page, and
+`week.plan` had just booked ~56 week-1 lineup checks (due Sept 9–13) in one
+instant. Those far-future rows filled the whole page, so every session created
+after that instant — five `board_reply` rows due immediately, and anything
+`requeueFailedSessions` would re-queue — was never even examined; five slots
+sat free while they aged. Observed live: board replies queued 20+ minutes past
+due with one session running. Fix: the page is ordered by
+`coalesce(context->>'due_at', created_at)`, so sessions sort by when their turn
+comes; past-deadline and stale rows sort first, which the two retirement
+branches need. Regression test proves a 45-row future pile cannot starve a
+due-now session (fails on the old ordering).
+
+**Bug 2 — the draft digest died on a numeric string and was never sent.**
+`digest.weekly` (the post-draft digest, 22:37 UTC) failed with
+`TypeError: K.toFixed is not a function`: `digest.ts`'s draft-cost query was
+the one raw `sum(cost_usd)` in the app without a `::float8` cast, so the
+driver returned a string. Cast added; `apps/web/test/digest.test.ts` builds
+the draft digest against real driver types (fails without the cast). Re-booked
+`digest.weekly` with `{reason: "draft"}` on production after the deploy so
+Jake gets the missed draft digest.
+
+**Production data edits, recorded per the standing rules:** marked the two
+still-open `ingest.fp_injuries`/`ingest.fp_rankings` jobs (ids 166, 167, due
+2026-08-31 09:30/09:35 UTC) `failed` with an explanatory error. They were
+booked 2026-08-29 14:07, before the FantasyPros removal, and would only have
+failed tomorrow as `unknown job type` like their three siblings did today.
+Nothing re-books them. And the `digest.weekly` re-book above.
+
+**Noted, no action available to me:**
+- `gateway.credits` alarm live: balance $91.67, under the $100 line. The
+  daily email to Jake is already going out; topping up is his side.
+- 2026-08-29 16:23 UTC: every tick stage failed once with a truncated
+  `Failed query: select … from league` — a one-minute database blip during
+  the pre-draft window; outage notices for all twelve models followed at
+  17:06–17:17 as their sessions failed together. Everything recovered on its
+  own; the per-stage isolation and requeue behaved as designed.
+
+Full `pnpm check` green: lint, typecheck, 673 tests.
+
 ## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
 
 Jake sent screenshots of a team page's "What this agent is thinking" panel and
