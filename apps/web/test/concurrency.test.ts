@@ -526,6 +526,102 @@ describe("the tick's sweeper is the only thing that starts a session", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("a page of far-future bookings cannot starve a session that is due now", async () => {
+    // `week.plan` books the whole week's lineup checks in one instant — more
+    // rows than the sweep's page. Ordering the page by `created_at` put that
+    // far-future pile first, so anything booked after it (a board reply due
+    // immediately, a re-queued failure) was never even examined until the pile
+    // drained weeks later. The page must be ordered by when each session's
+    // turn comes.
+    const teamIds = await twelveTeams();
+    const booked = clock.now();
+    const farDue = new Date(booked.getTime() + 10 * 24 * 3600_000);
+    const farDeadline = new Date(farDue.getTime() + 90 * 60_000);
+    await db.insert(sessions).values(
+      Array.from({ length: 45 }, (_, i) => ({
+        teamId: teamIds[i % teamIds.length]!,
+        kind: "lineup_check" as const,
+        trigger: "week.plan",
+        idempotencyKey: `future-${i}`,
+        modelId: "m/1",
+        status: "queued" as const,
+        createdAt: booked,
+        context: { due_at: farDue.toISOString(), deadline_at: farDeadline.toISOString() },
+      })),
+    );
+    const [reply] = await db
+      .insert(sessions)
+      .values({
+        teamId: teamIds[0]!,
+        kind: "board_reply",
+        trigger: "board",
+        idempotencyKey: "due-now",
+        modelId: "m/1",
+        status: "queued",
+        createdAt: new Date(booked.getTime() + 60_000),
+        context: { due_at: new Date(booked.getTime() + 60_000).toISOString() },
+      })
+      .returning({ id: sessions.id });
+
+    clock.set(new Date(booked.getTime() + 5 * 60_000));
+    const started: number[] = [];
+    const result = await startQueuedSessions(db, clock, async (id) => {
+      started.push(id);
+    });
+    expect(started).toEqual([reply!.id]);
+    expect(result.started).toBe(1);
+    expect(result.expired).toBe(0);
+  });
+
+  it("a malformed due_at cannot poison the sweep's ordering query", async () => {
+    // `due_at` is only ever written by `createSession` via `toISOString()`,
+    // but the ordering expression casts it in SQL — and an unguarded cast
+    // that throws on one bad row would fail every sweep for every team, with
+    // no way for the sweep to retire the row that did it. The shape guard
+    // makes a bad value sort by `created_at` instead, and `parseDate`'s null
+    // on the JS side then treats the session as due — same as before.
+    const teamIds = await twelveTeams();
+    await db.insert(sessions).values({
+      teamId: teamIds[0]!,
+      kind: "weekly_review",
+      trigger: "t",
+      idempotencyKey: "garbage-due",
+      modelId: "m/1",
+      status: "queued",
+      createdAt: new Date(clock.now().getTime() - 300_000),
+      context: { due_at: "soon-ish", deadline_at: new Date(clock.now().getTime() + 3600_000).toISOString() },
+    });
+    await db.insert(sessions).values({
+      teamId: teamIds[2]!,
+      kind: "weekly_review",
+      trigger: "t",
+      // Shape-valid but out of range: a bare shape regex would let this one
+      // through to the cast, which still throws. `pg_input_is_valid` is the
+      // airtight predicate.
+      idempotencyKey: "out-of-range-due",
+      modelId: "m/1",
+      status: "queued",
+      createdAt: new Date(clock.now().getTime() - 300_000),
+      context: { due_at: "2026-99-99T99:99:99.000Z", deadline_at: new Date(clock.now().getTime() + 3600_000).toISOString() },
+    });
+    await db.insert(sessions).values({
+      teamId: teamIds[1]!,
+      kind: "board_reply",
+      trigger: "board",
+      idempotencyKey: "well-formed",
+      modelId: "m/1",
+      status: "queued",
+      createdAt: new Date(clock.now().getTime() - 300_000),
+      context: { due_at: new Date(clock.now().getTime() - 60_000).toISOString() },
+    });
+
+    const started: number[] = [];
+    const result = await startQueuedSessions(db, clock, async (id) => {
+      started.push(id);
+    });
+    expect(result.started).toBe(3);
+  });
+
   it("leaves a running session alone while it is still working", async () => {
     const [teamId] = await twelveTeams();
     await db.insert(sessions).values({
