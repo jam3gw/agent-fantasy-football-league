@@ -17,7 +17,7 @@ export interface FakeStreamInput {
   toolCalls?: Array<{ toolCallId: string; toolName: string; input?: unknown }>;
   usage?: Record<string, unknown>;
   providerMetadata?: unknown;
-  content?: unknown;
+  responseMessages?: unknown[];
   finishReason?: string;
 }
 
@@ -31,7 +31,9 @@ export function fakeStreamResult(input: FakeStreamInput = {}): ReturnType<typeof
     toolCalls: Promise.resolve(input.toolCalls ?? []),
     usage: Promise.resolve(input.usage ?? { inputTokens: 1, outputTokens: 1 }),
     providerMetadata: Promise.resolve(input.providerMetadata),
-    content: Promise.resolve(input.content ?? input.text ?? ""),
+    responseMessages: Promise.resolve(
+      input.responseMessages ?? [{ role: "assistant", content: input.text ?? "" }],
+    ),
     finishReason: Promise.resolve(input.finishReason ?? "stop"),
   } as unknown as ReturnType<typeof streamText>;
 }
