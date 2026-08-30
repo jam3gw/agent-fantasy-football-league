@@ -224,6 +224,15 @@ describe("transaction descriptions", () => {
     expect(describeTransaction("waiver_add", { playerId: "gone" }, () => null)).toBe("Won a waiver claim.");
   });
 
+  it("flattens the agent prose it embeds — a reason is one line by convention only", () => {
+    expect(describeTransaction("commissioner", { reason: "## Ruling\n- The pick stands." })).toBe(
+      "Ruling The pick stands.",
+    );
+    expect(
+      describeTransaction("draft_pick", { name: "Jahmyr Gibbs", reason: "### Why\n**Zero RB** is dead." }),
+    ).toBe("Drafted Jahmyr Gibbs. “Why **Zero RB** is dead.”");
+  });
+
   it("describes a draft pick from the snake_case payload the draft paths write", () => {
     // make_pick (packages/agent/src/tools/draft.ts) records `player_id`,
     // `name`, `position`, `nfl_team`, `pick_no`, `round`, `reason` — reading
@@ -414,6 +423,16 @@ describe("body summaries", () => {
 
   it("drops an unclosed fence's marker line and keeps its text as prose", () => {
     expect(summarizeBody("A note.\n```\nstill worth reading", 160)).toBe("A note. still worth reading");
+  });
+
+  it("drops a one-line fence's code but keeps the prose after it", () => {
+    expect(summarizeBody("```quick``` more\nrest.", 160)).toBe("more rest.");
+  });
+
+  it("does not pair a one-line fence's marker with a later block's fence", () => {
+    expect(summarizeBody("Intro\n```quick``` aside\nMiddle.\n```\ncode\n```\nEnd.", 200)).toBe(
+      "Intro aside Middle. End.",
+    );
   });
 
   it("ellipses when the only sentence end sits inside a token the cut retreats from", () => {

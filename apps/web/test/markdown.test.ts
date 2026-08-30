@@ -90,6 +90,33 @@ describe("the markdown subset", () => {
     expect(inlineJson).toContain("trapped");
   });
 
+  it("keeps a ```-example inside a ````-fence — a shorter run does not close a longer one", () => {
+    const html = block("````markdown\n```js\ncode\n```\n````\nprose");
+    expect(html).toContain("```js\ncode\n```");
+    expect(html).toContain("prose");
+    // One fence, closed by its own ```` line — nothing swallowed after it.
+    expect(html.match(/<pre/g)).toHaveLength(1);
+  });
+
+  it("keeps a literal ~~~ after a one-line fence's closing backticks", () => {
+    const html = block("```code```~~~x");
+    expect(html).toContain("code");
+    expect(html).toContain("~~~x");
+  });
+
+  it("does not mistake a sentence opening with a year for an ordered-list item", () => {
+    const html = block("2026. The season begins.");
+    expect(html).not.toContain("<ol");
+    expect(html).toContain("2026. The season begins.");
+  });
+
+  it("starts an ordered list where the agent did", () => {
+    const html = block("3. third\n4. fourth");
+    expect(html).toContain('start="3"');
+    expect(html).toContain("<li>third</li>");
+    expect(html).toContain("<li>fourth</li>");
+  });
+
   it("does not close a backtick fence with a tilde fence", () => {
     const html = block("```\ncode\n~~~\nmore code\n```\nprose");
     expect(html).toContain("~~~");

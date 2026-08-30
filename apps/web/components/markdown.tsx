@@ -69,7 +69,10 @@ export function InlineMarkdown({ source, id }: { source: string; id: string }) {
 
 const HEADING = /^(#{1,6})\s+(.*)$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
-const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
+// A number is only a list marker at up to three digits: a sentence opening
+// with a year (`2026. The season…`) is prose, not item 2026 of a list. Same
+// rule as `flattenMarkdown` in `lib/broadcastLogic.ts`.
+const NUMBERED = /^\s*(\d{1,3})[.)]\s+(.*)$/;
 const QUOTE = /^>\s?(.*)$/;
 // CommonMark allows spaces inside a thematic break (`- - -`), so the marker
 // may repeat with or without them.
@@ -94,9 +97,11 @@ export function Markdown({
   let paragraph: string[] = [];
   let bullets: string[] = [];
   let numbered: string[] = [];
+  let numberedStart = 1;
   let quote: string[] = [];
   let fence: string[] | null = null;
   let fenceChar = "";
+  let fenceLen = 0;
   let k = 0;
 
   // A fenced block renders verbatim in monospace: its lines are code (or an
@@ -140,7 +145,11 @@ export function Markdown({
     if (numbered.length > 0) {
       const items = numbered;
       blocks.push(
-        <ol key={`${id}-o${k++}`} className="list-decimal space-y-1 pl-5 leading-relaxed">
+        <ol
+          key={`${id}-o${k++}`}
+          start={numberedStart}
+          className="list-decimal space-y-1 pl-5 leading-relaxed"
+        >
           {items.map((item, i) => (
             <li key={i}>{inline(item, `${id}-o${k}-${i}`)}</li>
           ))}
@@ -164,12 +173,15 @@ export function Markdown({
 
   for (const line of lines) {
     if (fence !== null) {
-      // A closing fence uses the opening's character and carries nothing
-      // after the marker (CommonMark: no closing info string). Anything else
-      // on such a line is content.
+      // A closing fence uses the opening's character, is at least as long
+      // (CommonMark — so a ````-fence can show a ```-example), and carries
+      // nothing after the marker. Anything else on such a line is content.
       const close = FENCE.exec(line);
-      if (close && close[1][0] === fenceChar && close[2].trim() === "") flushFence();
-      else fence.push(line);
+      if (close && close[1][0] === fenceChar && close[1].length >= fenceLen && close[2].trim() === "") {
+        flushFence();
+      } else {
+        fence.push(line);
+      }
       continue;
     }
     const open = FENCE.exec(line);
@@ -184,10 +196,13 @@ export function Markdown({
         const content = rest.slice(0, closeAt).trim();
         fence = content === "" ? [] : [content];
         flushFence();
-        const after = rest.slice(closeAt).replace(/^[`~]+/, "").trim();
+        let end = closeAt;
+        while (end < rest.length && rest[end] === markerChar) end += 1;
+        const after = rest.slice(end).trim();
         if (after !== "") paragraph.push(after);
       } else {
         fenceChar = markerChar;
+        fenceLen = open[1].length;
         // A bare language tag after the marker is an info string and drops;
         // anything else is content and is kept as the fence's first line.
         fence = INFO_STRING.test(rest.trim()) ? [] : [rest];
@@ -225,7 +240,8 @@ export function Markdown({
     const number = NUMBERED.exec(line);
     if (number) {
       if (paragraph.length || bullets.length || quote.length) flush();
-      numbered.push(number[1]);
+      if (numbered.length === 0) numberedStart = Number(number[1]);
+      numbered.push(number[2]);
       continue;
     }
     const quoted = QUOTE.exec(line);

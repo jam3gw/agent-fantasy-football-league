@@ -300,11 +300,15 @@ export function describeTransaction(
                 : "";
         return `Auto-picked ${who}${where}${why}.`;
       }
+      // The reason is agent prose, same as a decision summary: one line by
+      // convention only, so block markers are flattened out before the rail.
       const reason = text("reason");
-      return reason ? `Drafted ${who}${where}. “${reason}”` : `Drafted ${who}${where}.`;
+      return reason ? `Drafted ${who}${where}. “${flattenMarkdown(reason)}”` : `Drafted ${who}${where}.`;
     }
-    case "commissioner":
-      return text("reason") ?? "The commissioner acted.";
+    case "commissioner": {
+      const reason = text("reason");
+      return reason ? flattenMarkdown(reason) : "The commissioner acted.";
+    }
     default:
       return type.replace(/_/g, " ");
   }
@@ -324,9 +328,15 @@ export function describeTransaction(
 export function flattenMarkdown(text: string): string {
   return (
     text
+      // A one-line fence (```code```) drops with its code, keeping the prose
+      // after the closing run. Handled first so its opening marker cannot
+      // pair with a later block's fence line.
+      .replace(/^[ \t]*(?:`{3,}[^\n]+?`{3,}`*|~{3,}[^\n]+?~{3,}~*)/gm, " ")
       // Fenced code drops whole: code is not prose, and half-flattening it
       // strands backtick runs on the rail — the artifact class this removes.
-      .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[`~]*[ \t]*$/gm, " ")
+      // The closer mirrors the renderer: same character, at least as long.
+      .replace(/^[ \t]*(`{3,})[^\n]*\n[\s\S]*?^[ \t]*\1`*[ \t]*$/gm, " ")
+      .replace(/^[ \t]*(~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1~*[ \t]*$/gm, " ")
       // An unpaired fence-marker line drops alone; the lines under it flatten
       // as prose, mirroring the renderer's unclosed-fence behavior.
       .replace(/^[ \t]*(?:`{3,}|~{3,}).*$/gm, " ")

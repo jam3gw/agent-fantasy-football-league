@@ -73,6 +73,26 @@ found three new fence-shaped should-fixes, all fixed:
 
 All fixed cases have tests. `pnpm check` green: 660 tests.
 
+Review round 3 (fresh reviewer): confirmed round 2, found three should-fixes
+(renderer/excerpter divergences on fence edges) and three nits, all fixed:
+
+- A closing fence must now be at least as long as its opener (CommonMark), so
+  a ````-fence can show a ```-example without the example's fence closing the
+  block early and the rest of the document being swallowed into code.
+- `flattenMarkdown` gained the renderer's one-line-fence handling: the code
+  drops, prose after the closing run survives, and the one-liner's marker can
+  no longer pair with a later block's fence. Paired-fence closers now mirror
+  the renderer exactly (same character, at least as long).
+- The renderer got the flattener's ≤3-digit list-marker rule — `2026. The
+  season begins.` was rendering as an ordered list item "1." — and ordered
+  lists now carry `start`, so a list beginning at 3 numbers from 3.
+- Nits: a one-line fence's trailing strip takes only the closing character's
+  run (a literal `~~~` after ```` ```code``` ```` survives); draft-pick and
+  commissioner reasons in `describeTransaction` are flattened like decision
+  summaries before reaching the rail.
+
+All cases have tests. `pnpm check` green: 667 tests.
+
 ## 2026-08-30 — Four fantasy-football capabilities the agents were missing (commissioner request)
 
 Jake asked what a human manager can do that the twelve agents cannot, and then
