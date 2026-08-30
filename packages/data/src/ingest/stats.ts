@@ -37,6 +37,11 @@ export async function upsertWeekStats(
         playerId: e.player_id,
         season: input.season,
         week: input.week,
+        // The feed's own team/opponent for this game (may be absent on
+        // nflverse rows); kept per row so a mid-season trade cannot smear a
+        // player's early games onto his new team.
+        nflTeam: typeof e.team === "string" ? e.team : null,
+        opponent: typeof e.opponent === "string" ? e.opponent : null,
         stats,
         ptsPpr,
         enginePts,
@@ -71,6 +76,17 @@ export async function upsertWeekStats(
     }
     return { count, discrepancies };
   });
+}
+
+/**
+ * §5.4 — the weeks one projections run covers: the current week plus the next
+ * two, capped at the end of the regular season. Lookahead projections feed
+ * trade valuation and bye-week planning (get_player_stats, player_research).
+ */
+export function projectionWeeks(from: number): number[] {
+  const out: number[] = [];
+  for (let week = from; week <= Math.min(from + 2, 18); week++) out.push(week);
+  return out;
 }
 
 /** §5.4 projections — optional; same entry shape with projected pts_ppr. */

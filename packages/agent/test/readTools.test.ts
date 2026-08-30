@@ -323,12 +323,32 @@ describe("get_matchup", () => {
     expect((res.other_matchups as unknown[]).length).toBe(1);
   });
 
-  it("rejects a future week", async () => {
+  it("returns pairings only for a future week, so agents can plan around future opponents", async () => {
+    await seedLeague(db);
+    const teamIds = await seedTeams(db);
+    const [a, b, c, d] = teamIds as [number, number, number, number];
+    await db.insert(matchups).values([
+      { week: 5, homeTeamId: a, awayTeamId: b },
+      { week: 5, homeTeamId: c, awayTeamId: d },
+    ]);
+
+    const res = ok(await getMatchupTool.execute({ week: 5 }, ctxFor({ teamId: b })));
+    const mine = res.my_matchup as Record<string, unknown>;
+    expect((mine.home as { team_id: number }).team_id).toBe(a);
+    expect((mine.away as { team_id: number }).team_id).toBe(b);
+    // No lineups and no points: the week has not been played.
+    expect(mine.lineup).toBeUndefined();
+    expect((mine.home as Record<string, unknown>).points).toBeUndefined();
+    expect((res.other_matchups as unknown[]).length).toBe(1);
+    expect(String(res.note)).toContain("pairings only");
+  });
+
+  it("still reports an unscheduled future week as empty", async () => {
     await seedLeague(db);
     await seedTeams(db);
-    const res = await getMatchupTool.execute({ week: 5 }, ctxFor({ teamId: 1 }));
-    expect(res.ok).toBe(false);
-    expect((res as { error: string }).error).toBe("bad_week");
+    const res = ok(await getMatchupTool.execute({ week: 9 }, ctxFor({ teamId: 1 })));
+    expect(res.my_matchup).toBeNull();
+    expect(res.other_matchups).toEqual([]);
   });
 });
 
@@ -349,6 +369,7 @@ describe("get_player_stats", () => {
       { playerId: owned, season: SEASON - 1, week: 1, stats: { rush_yd: 50 }, ptsPpr: 5 },
       { playerId: owned, season: SEASON - 1, week: 2, stats: { rush_yd: 60 }, ptsPpr: 6 },
     ]);
+    await db.insert(playerWeekProj).values({ playerId: owned, season: SEASON, week: 2, projPtsPpr: 14.5 });
 
     const res = ok(await getPlayerStatsTool.execute({ player_ids: [owned, free, "nope"] }, ctxFor({ teamId: a })));
     const items = res.items as Array<Record<string, unknown>>;
@@ -365,6 +386,12 @@ describe("get_player_stats", () => {
     expect((o.ownership as { status: string; team_id: number }).status).toBe("rostered");
     expect((o.ownership as { team_id: number }).team_id).toBe(a);
     expect((o.next_opponent as { opponent: string }).opponent).toBe("vs BUF");
+    // The lookahead: KC hosts BUF in week 1 and SF in week 2; the week-2
+    // projection ingested ahead of time rides along.
+    const upcoming = o.upcoming_opponents as Array<Record<string, unknown>>;
+    expect(upcoming.map((u) => u.opponent)).toEqual(["vs BUF", "vs SF"]);
+    expect(upcoming[1]!.proj_pts_ppr).toBe(14.5);
+    expect(upcoming[0]!.proj_pts_ppr).toBeNull();
     const f = items.find((i) => i.player_id === free)!;
     expect((f.ownership as { status: string }).status).toBe("free_agent");
   });
@@ -1025,6 +1052,46 @@ describe("player_research", () => {
   it("says so when a set has not been ingested yet", async () => {
     await seedLeague(db);
     const res = (await playerResearchTool.execute({ kind: "ros_rankings" }, ctxFor())) as { error: string };
+    expect(res.error).toBe("not_found");
+  });
+
+  it("aggregates defense_vs_position from the stored per-game opponents, ranked softest first", async () => {
+    await seedLeague(db, { currentWeek: 3 });
+    const rb1 = await makePlayer(db, { position: "RB", fullName: "Back One", nflTeam: "KC" });
+    const rb2 = await makePlayer(db, { position: "RB", fullName: "Back Two", nflTeam: "SF" });
+    const wr = await makePlayer(db, { position: "WR", fullName: "Wideout", nflTeam: "KC" });
+    await db.insert(playerWeekStats).values([
+      // DEN allows 30 then 10 to RBs (20/game); MIA allows 12 once.
+      { playerId: rb1, season: SEASON, week: 1, opponent: "DEN", stats: {}, ptsPpr: 30 },
+      { playerId: rb2, season: SEASON, week: 2, opponent: "DEN", stats: {}, ptsPpr: 10 },
+      { playerId: rb1, season: SEASON, week: 2, opponent: "MIA", stats: {}, ptsPpr: 12 },
+      // A WR row must not leak into the RB table.
+      { playerId: wr, season: SEASON, week: 1, opponent: "DEN", stats: {}, ptsPpr: 25 },
+      // A degraded-source row with no opponent is left out.
+      { playerId: rb2, season: SEASON, week: 3, opponent: null, stats: {}, ptsPpr: 40 },
+      // Last season never counts.
+      { playerId: rb1, season: SEASON - 1, week: 1, opponent: "MIA", stats: {}, ptsPpr: 99 },
+    ]);
+
+    const res = ok(await playerResearchTool.execute({ kind: "defense_vs_position", position: "RB" }, ctxFor()));
+    const items = res.items as Array<Record<string, unknown>>;
+    expect(items).toEqual([
+      { nfl_team: "DEN", position: "RB", games: 2, pts_ppr_allowed_total: 40, pts_ppr_allowed_per_game: 20, rank: 1 },
+      { nfl_team: "MIA", position: "RB", games: 1, pts_ppr_allowed_total: 12, pts_ppr_allowed_per_game: 12, rank: 2 },
+    ]);
+    expect(String(res.note)).toContain("softest");
+
+    // Unfiltered, the WR table shows up beside the RB one, ranked within itself.
+    const all = ok(await playerResearchTool.execute({ kind: "defense_vs_position" }, ctxFor()));
+    const wrRows = (all.items as Array<Record<string, unknown>>).filter((r) => r.position === "WR");
+    expect(wrRows).toEqual([
+      { nfl_team: "DEN", position: "WR", games: 1, pts_ppr_allowed_total: 25, pts_ppr_allowed_per_game: 25, rank: 1 },
+    ]);
+  });
+
+  it("defense_vs_position reports not_found before any game has an opponent on record", async () => {
+    await seedLeague(db);
+    const res = (await playerResearchTool.execute({ kind: "defense_vs_position" }, ctxFor())) as { error: string };
     expect(res.error).toBe("not_found");
   });
 });

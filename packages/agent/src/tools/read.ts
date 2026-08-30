@@ -677,23 +677,36 @@ async function matchupSide(
 
 export const getMatchupTool = readTool(
   "get_matchup",
-  "Your matchup for a past or current week: both starting lineups with points by player (live or final) and projections, plus a summary of the other matchups.",
+  "Your matchup for any week: past and current weeks carry both starting lineups with points by player (live or final) and projections, plus a summary of the other matchups; a future week returns the pairings only, so you can plan around who you play next.",
   weekArg,
   async (args, ctx) => {
     const db = ctx.db;
     const settings = await getSettings(db);
     const week = args.week ?? settings.currentWeek;
-    if (week > settings.currentWeek) {
-      return toolFailure(
-        "bad_week",
-        `week ${week} has not started; get_matchup covers past and current weeks only`,
-        `the current week is ${settings.currentWeek}`,
-      );
-    }
     const idx = await teamIndex(db);
     const rows = await db.select().from(matchups).where(eq(matchups.week, week));
     if (rows.length === 0) {
       return { week, my_matchup: null, other_matchups: [], note: "no matchups are scheduled for this week" };
+    }
+    // A future week has no lineups or points worth showing, but the pairings
+    // themselves are planning information every manager gets: who you play in
+    // two weeks decides trades, streams, and playoff positioning. Playoff-week
+    // pairings appear once seeding creates them.
+    if (week > settings.currentWeek) {
+      const pairing = (m: (typeof rows)[number]) => ({
+        matchup_id: m.id,
+        is_playoff: m.isPlayoff,
+        home: { team_id: m.homeTeamId, name: idx.get(m.homeTeamId)?.name ?? null },
+        away: { team_id: m.awayTeamId, name: idx.get(m.awayTeamId)?.name ?? null },
+      });
+      const futureMine =
+        ctx.teamId === null ? undefined : rows.find((m) => m.homeTeamId === ctx.teamId || m.awayTeamId === ctx.teamId);
+      return {
+        week,
+        note: `week ${week} has not started: pairings only, no lineups or points`,
+        my_matchup: futureMine ? pairing(futureMine) : null,
+        other_matchups: rows.filter((m) => m.id !== futureMine?.id).map(pairing),
+      };
     }
     const mine = ctx.teamId === null ? undefined : rows.find((m) => m.homeTeamId === ctx.teamId || m.awayTeamId === ctx.teamId);
     const summary = (m: typeof rows[number]) => ({
@@ -766,7 +779,7 @@ export const getTeamWeekResultsTool = readTool(
 
 export const getPlayerStatsTool = readTool(
   "get_player_stats",
-  "Up to 20 players: this season's points by week with key stats, last season's totals, injury status, NFL team, next opponent, bye week, and who owns them.",
+  "Up to 20 players: this season's points by week with key stats, last season's totals, injury status, NFL team, the next four opponents with projected points where loaded, bye week, and who owns them.",
   z.object({ player_ids: z.array(z.string()).min(1).max(20) }),
   async (args, ctx) => {
     const db = ctx.db;
@@ -808,14 +821,22 @@ export const getPlayerStatsTool = readTool(
       .from(nflGames)
       .where(and(eq(nflGames.season, season), sql`${nflGames.week} >= ${week}`))
       .orderBy(asc(nflGames.week), asc(nflGames.kickoffAt));
+    const futureProj = await db
+      .select()
+      .from(playerWeekProj)
+      .where(and(eq(playerWeekProj.season, season), inArray(playerWeekProj.playerId, ids), sql`${playerWeekProj.week} >= ${week}`));
+    const projByPlayerWeek = new Map(futureProj.map((r) => [`${r.playerId}:${r.week}`, r.projPtsPpr]));
 
     const items = rows.map((p) => {
       const weekly = stats
         .filter((s) => s.playerId === p.playerId)
         .map((s) => ({ week: s.week, pts_ppr: s.ptsPpr, final: s.final, stats: keyStats(s.stats) }));
-      const next = p.nflTeam
-        ? futureGames.find((g) => g.home === p.nflTeam || g.away === p.nflTeam)
-        : undefined;
+      // The next few games, not just one: bye-week planning and "add him
+      // before the soft stretch" both need the lookahead in one call.
+      const upcoming = p.nflTeam
+        ? futureGames.filter((g) => g.home === p.nflTeam || g.away === p.nflTeam).slice(0, 4)
+        : [];
+      const next = upcoming[0];
       const last = lastById.get(p.playerId);
       return {
         player_id: p.playerId,
@@ -836,6 +857,12 @@ export const getPlayerStatsTool = readTool(
               kickoff_et: et(next.kickoffAt),
             }
           : null,
+        upcoming_opponents: upcoming.map((g) => ({
+          week: g.week,
+          opponent: g.home === p.nflTeam ? `vs ${g.away}` : `@ ${g.home}`,
+          kickoff_et: et(g.kickoffAt),
+          proj_pts_ppr: projByPlayerWeek.get(`${p.playerId}:${g.week}`) ?? null,
+        })),
         this_season: { season, by_week: weekly, total: round2(weekly.reduce((a, w) => a + (w.pts_ppr ?? 0), 0)) },
         last_season: last
           ? {
@@ -1671,6 +1698,7 @@ const RESEARCH_KINDS = [
   "projections",
   "trending",
   "injuries",
+  "defense_vs_position",
 ] as const;
 type ResearchKind = (typeof RESEARCH_KINDS)[number];
 
@@ -1684,7 +1712,7 @@ const RANKING_SET_FOR: Partial<Record<ResearchKind, "draft" | "weekly" | "ros">>
 
 export const playerResearchTool = readTool(
   "player_research",
-  "League rankings and player data: draft/weekly/rest-of-season rankings with ADP and tiers, projected points, trending adds, or current injuries. Filter by position or by player_ids. No daily limit — every agent reads the same rows.",
+  "League rankings and player data: draft/weekly/rest-of-season rankings with ADP and tiers, projected points (this week and the next two), trending adds, current injuries, or fantasy points each NFL defense allows by position (kind: defense_vs_position; rank 1 = softest matchup). Filter by position or by player_ids. No daily limit — every agent reads the same rows.",
   z.object({
     kind: z.enum(RESEARCH_KINDS),
     position: z.enum(RESEARCH_POSITIONS).optional(),
@@ -1792,6 +1820,84 @@ export const playerResearchTool = readTool(
         limit,
         { kind: args.kind, position, season, week },
       );
+    }
+
+    if (args.kind === "defense_vs_position") {
+      // Fantasy points allowed by each NFL defense to each position, from our
+      // own finalized weekly rows. The opponent column is written by the stats
+      // feed per game, so a traded player's early weeks stay attributed to the
+      // team he played them for. Weeks scored through the degraded nflverse
+      // ladder carry no opponent and are left out — for every defense alike.
+      const rows = await db
+        .select({
+          defense: playerWeekStats.opponent,
+          position: players.position,
+          weeks: sql<number>`count(distinct ${playerWeekStats.week})::int`,
+          totalPts: sql<number>`coalesce(sum(${playerWeekStats.ptsPpr}), 0)::float8`,
+        })
+        .from(playerWeekStats)
+        .innerJoin(players, eq(players.playerId, playerWeekStats.playerId))
+        .where(
+          and(
+            eq(playerWeekStats.season, season),
+            gt(playerWeekStats.week, 0),
+            sql`${playerWeekStats.week} <= ${settings.currentWeek}`,
+            sql`${playerWeekStats.opponent} is not null`,
+            inArray(players.position, [...FANTASY_POSITIONS]),
+          ),
+        )
+        .groupBy(playerWeekStats.opponent, players.position);
+
+      if (rows.length === 0) {
+        return toolFailure(
+          "not_found",
+          "no per-game stats with opponents are loaded yet this season",
+          "this builds up from week 1 as games finalize",
+        );
+      }
+      const perGame = rows.map((r) => ({
+        defense: r.defense!,
+        position: r.position!,
+        games: Number(r.weeks),
+        total: round2(Number(r.totalPts)),
+        avg: round2(Number(r.totalPts) / Number(r.weeks)),
+      }));
+      // Rank within each position, 1 = most points allowed = softest matchup.
+      const byPosition = new Map<string, typeof perGame>();
+      for (const r of perGame) {
+        const list = byPosition.get(r.position) ?? [];
+        list.push(r);
+        byPosition.set(r.position, list);
+      }
+      const ranked: Array<{
+        nfl_team: string;
+        position: string;
+        games: number;
+        pts_ppr_allowed_total: number;
+        pts_ppr_allowed_per_game: number;
+        rank: number;
+      }> = [];
+      for (const pos of RESEARCH_POSITIONS) {
+        if (pos === "ALL" || !positionFilter(pos)) continue;
+        const list = (byPosition.get(pos) ?? []).sort((a, b) => b.avg - a.avg);
+        list.forEach((r, i) =>
+          ranked.push({
+            nfl_team: r.defense,
+            position: r.position,
+            games: r.games,
+            pts_ppr_allowed_total: r.total,
+            pts_ppr_allowed_per_game: r.avg,
+            rank: i + 1,
+          }),
+        );
+      }
+      return pageRows(ranked, offset, limit, {
+        kind: args.kind,
+        position,
+        season,
+        through_week: settings.currentWeek,
+        note: "rank 1 allows the most fantasy points to that position (the softest matchup)",
+      });
     }
 
     // trending and injuries both read the hourly player feed.

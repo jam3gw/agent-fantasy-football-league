@@ -25,6 +25,7 @@ import {
   fetchWeekProjections,
   fetchWeekStats,
   parseGames,
+  projectionWeeks,
   upsertGames,
   upsertPlayers,
   upsertProjections,
@@ -96,9 +97,11 @@ export async function runJob(
       return;
     }
     case "ingest.projections": {
-      const week = Number(payload.week ?? settings.currentWeek);
-      const entries = await fetchWeekProjections(season, week, { db });
-      if (entries) await upsertProjections(db, { season, week, entries });
+      // Keyless and quota-free, so the §5.4 lookahead costs two extra requests.
+      for (const week of projectionWeeks(Number(payload.week ?? settings.currentWeek))) {
+        const entries = await fetchWeekProjections(season, week, { db });
+        if (entries) await upsertProjections(db, { season, week, entries });
+      }
       return;
     }
     case "ingest.season_stats": {

@@ -15,7 +15,7 @@ import {
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { upsertPlayers, upsertTrending } from "../src/ingest/players.ts";
 import { upsertGames } from "../src/ingest/schedule.ts";
-import { upsertWeekStats } from "../src/ingest/stats.ts";
+import { projectionWeeks, upsertWeekStats } from "../src/ingest/stats.ts";
 import type { SleeperPlayerRaw } from "../src/sleeper.ts";
 
 let db: TestDb;
@@ -121,10 +121,18 @@ describe("schedule ingest (§5.5)", () => {
   });
 });
 
+describe("projections lookahead (§5.4)", () => {
+  it("covers the current week plus the next two, capped at week 18", () => {
+    expect(projectionWeeks(1)).toEqual([1, 2, 3]);
+    expect(projectionWeeks(17)).toEqual([17, 18]);
+    expect(projectionWeeks(18)).toEqual([18]);
+  });
+});
+
 describe("stats ingest (§5.3, §3.2)", () => {
   it("stores pts_ppr + engine_pts; logs discrepancies only at finalization", async () => {
     const entries = [
-      { player_id: "a", season: 2026, week: 1, stats: { rec: 4, rec_yd: 50, pts_ppr: 9.0 } },
+      { player_id: "a", season: 2026, week: 1, team: "KC", opponent: "BUF", stats: { rec: 4, rec_yd: 50, pts_ppr: 9.0 } },
       { player_id: "b", season: 2026, week: 1, stats: { rec: 2, rec_yd: 10, pts_ppr: 99.0 } }, // discrepancy
     ];
     const live = await upsertWeekStats(db, clock, { season: 2026, week: 1, entries, markFinal: false });
@@ -135,6 +143,11 @@ describe("stats ingest (§5.3, §3.2)", () => {
     const a = rows.find((r) => r.playerId === "a")!;
     expect(a.enginePts).toBe(9);
     expect(a.final).toBe(true);
+    // The feed's game context is kept for defense-vs-position aggregation;
+    // an entry without it (nflverse ladder) stores null.
+    expect(a.nflTeam).toBe("KC");
+    expect(a.opponent).toBe("BUF");
+    expect(rows.find((r) => r.playerId === "b")!.opponent).toBeNull();
     const d = await db.select().from(scoringDiscrepancies);
     expect(d).toHaveLength(1);
     expect(d[0]!.playerId).toBe("b");

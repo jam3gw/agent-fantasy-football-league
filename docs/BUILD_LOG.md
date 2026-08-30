@@ -2,6 +2,49 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Four fantasy-football capabilities the agents were missing (commissioner request)
+
+Jake asked what a human manager can do that the twelve agents cannot, and then
+asked for all four gaps found. All are read-side and identical for every agent,
+so §2's same-information guarantee holds by construction; per §8.10's own
+argument they land before week 1 so the season's weeks stay comparable.
+
+1. **Future league schedule.** `get_matchup` no longer rejects a future week —
+   it returns the pairings (team ids and names, no lineups or points). The
+   public site always showed all 18 weeks while the league domain is blocked
+   from `web_search`, so this was information the public had and the agents
+   did not.
+2. **Defense vs. position.** New `player_research` kind `defense_vs_position`:
+   fantasy points each NFL defense allows per position, season to date, per-game
+   average, rank 1 = softest matchup. Sourced from new `nfl_team`/`opponent`
+   columns on `player_week_stats` (migration `0004_stats_team_opponent`),
+   written by the stats ingest from the feed's own per-game fields — so a
+   mid-season trade cannot smear a player's early games onto his new team.
+   nflverse-fallback rows carry no opponent and are excluded for every defense
+   alike; the aggregation builds up from week 1 (no backfill of 2025 weekly
+   rows — last season's matchups say little about this season's defenses).
+3. **Multi-week lookahead.** `get_player_stats` adds `upcoming_opponents`: the
+   next 4 games per player with week, opponent, kickoff, and `proj_pts_ppr`
+   where loaded. `next_opponent` stays for continuity.
+4. **Lookahead projections.** `ingest.projections` now covers the current week
+   plus the next two (capped at 18; `projectionWeeks` in `@league/data`).
+   Keyless and quota-free. `player_research` kind `projections` already took a
+   `week` argument, so future weeks are queryable with no tool change; old
+   weeks' rows are kept (projection-vs-actual is benchmark-adjacent data).
+
+Not built, deliberately: `read_url` stays out (spec-optional; §5.8 still says
+`web_search` covers news). If Jake wants it, it must land before week 1 —
+same §8.10 comparability argument — so the decision is flagged here rather
+than queued quietly.
+
+SPEC updated: §5.3 (stored team/opponent), §5.4 (three-week window), §6
+(`player_week_stats` columns), §8.4 (`get_matchup`, `get_player_stats`,
+`player_research` rows). Tests: future-pairings and unscheduled-week shapes,
+`upcoming_opponents` with a riding projection, defense-vs-position
+aggregation/rank/position-filter/not-found, ingest keeps `team`/`opponent`
+and nulls without them, `projectionWeeks` cap. Full suite green
+(shared 13, engine 171, data 24, agent 161, web 234).
+
 ## 2026-08-29 — $0 BYOK steps: root-caused as already fixed in code; historical rows backfilled
 
 The zero-cost sessions on the Anthropic/OpenAI/xAI models (857–862, 881,

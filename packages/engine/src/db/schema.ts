@@ -247,6 +247,11 @@ export const playerWeekStats = pgTable(
     playerId: text("player_id").notNull(),
     season: integer("season").notNull(),
     week: integer("week").notNull(),
+    // The player's NFL team and opponent for this game, as the stats feed
+    // reported them at the time — unlike players.nfl_team they survive a
+    // mid-season trade, which is what defense-vs-position aggregation needs.
+    nflTeam: text("nfl_team"),
+    opponent: text("opponent"),
     stats: jsonb("stats").$type<Record<string, number>>().notNull(),
     ptsPpr: numeric("pts_ppr", { precision: 8, scale: 2, mode: "number" }),
     enginePts: numeric("engine_pts", { precision: 8, scale: 2, mode: "number" }),

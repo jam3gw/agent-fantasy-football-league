@@ -242,6 +242,7 @@ All external calls live in `packages/data`. Every client has: timeout, retry wit
 - `GET https://api.sleeper.com/stats/nfl/{season}/{week}?season_type=regular&position[]=QB&position[]=RB&position[]=WR&position[]=TE&position[]=K&position[]=DEF`
 - Returns an array. Each entry has `player_id`, `week`, `season`, `team`, `opponent`, `game_id`, `updated_at`, `last_modified`, and `stats` (an object of Sleeper stat keys such as `pass_yd`, `rec`, `fgm_40_49`, `sack`, `pts_allow_7_13`, and computed `pts_ppr`, `pts_half_ppr`, `pts_std`). Zero-valued keys are omitted.
 - Confirmed working for 2025 Week 1 on 2026-08-28. **Verify** for the 2026 season in Week 1 and record any differences.
+- The entry's `team` and `opponent` are stored on `player_week_stats` per row (Section 6) — the source for `player_research`'s `defense_vs_position` aggregation.
 - Season totals: `GET https://api.sleeper.com/stats/nfl/{season}?season_type=regular&position[]=...` (used for last-season stats on the draft board).
 - Cadence: every minute while any game is live (Section 13); otherwise every 30 minutes on game days and once at Tuesday 4:00 AM ET for finalization.
 
@@ -249,6 +250,7 @@ All external calls live in `packages/data`. Every client has: timeout, retry wit
 
 - `GET https://api.sleeper.com/projections/nfl/{season}/{week}?season_type=regular&position[]=...` — same shape as stats, with projected `pts_ppr`.
 - If available, ingest Tuesday 6:00 AM ET and refresh daily. Expose as `proj_pts_ppr` in player tools. All agents see the same value. If unavailable, omit the field; do not fail.
+- Each run covers the current week plus the next two (capped at 18) — the lookahead feeds trade valuation and bye-week planning through `get_player_stats` and `player_research`. Keyless and quota-free, so the two extra requests cost nothing.
 
 ### 5.5 nflverse schedule (documented, free)
 
@@ -330,8 +332,12 @@ lineup_entries       id, team_id, week, player_id, slot ('QB'|'RB1'|'RB2'|'WR1'|
                      -- team's roster is a "ghost" entry (Section 7.5): immutable, still scores.
                      -- Lock is computed from nfl_games, never stored.
 
-player_week_stats    player_id, season, week, stats jsonb, pts_ppr numeric, engine_pts numeric,
-                     source ('sleeper'|'nflverse'), final bool, updated_at, pk(player_id, season, week)
+player_week_stats    player_id, season, week, nfl_team text null, opponent text null, stats jsonb,
+                     pts_ppr numeric, engine_pts numeric, source ('sleeper'|'nflverse'), final bool,
+                     updated_at, pk(player_id, season, week)
+                     -- nfl_team/opponent come from the stats feed per game (Section 5.3), so a
+                     -- mid-season trade cannot smear a player's early games onto his new team;
+                     -- null on nflverse fallback rows. Feeds player_research defense_vs_position.
 
 player_week_proj     player_id, season, week, proj_pts_ppr numeric, updated_at
 
@@ -654,9 +660,9 @@ Read tools:
 | `get_league_state` | — | season, week, phase, my team (id, name, model), all teams (id, name, model, record), standings, waiver order with my position, next waiver run, next lock times this week, trade deadline, pending items for me (offers, votes, illegal roster flags) |
 | `get_my_team` | `week?` | roster with slot, position, NFL team, opponent this week, kickoff, bye, injury status, locked flag, points this week so far, season points, `proj_pts_ppr` if available |
 | `get_team_roster` | `team_id`, `week?` | same shape for another team (no scratchpad, no notes) |
-| `get_matchup` | `week?` (any past or current week) | my matchup: both lineups with points by player (live or final) and projections; other matchups summary |
+| `get_matchup` | `week?` (any week) | past and current weeks: my matchup, both lineups with points by player (live or final) and projections; other matchups summary. Future weeks: the pairings only (team ids and names, no lineups or points) — who you play next is planning information every manager gets |
 | `get_team_week_results` | `week?`, `team_id?` | per team and week: actual points, optimal points, points left on bench, FA points, empty starting slots (public data) |
-| `get_player_stats` | `player_ids[]` (≤ 20) | per player: this season by week (`pts_ppr`, key stats), last season totals, injury status, NFL team, next opponent, bye, ownership (team or free agent/waivers with `waiver_until`) |
+| `get_player_stats` | `player_ids[]` (≤ 20) | per player: this season by week (`pts_ppr`, key stats), last season totals, injury status, NFL team, next opponent, the next 4 opponents with `proj_pts_ppr` where loaded (`upcoming_opponents`), bye, ownership (team or free agent/waivers with `waiver_until`) |
 | `search_players` | `query`, `position?`, `limit?` | matching players (id, name, position, team, ownership) |
 | `get_free_agents` | `position?`, `sort` (`trending`\|`last_week`\|`season`\|`proj`), `limit?` (≤ 50), `offset?` | free agents and waiver players with `on_waivers`, `waiver_until`, trending adds, last week points, season points, `proj_pts_ppr` |
 | `get_nfl_schedule` | `week?` | games with kickoff (ET and UTC), byes |
@@ -668,7 +674,7 @@ Read tools:
 | `read_scratchpad` | — | my scratchpad content |
 | `web_search` | `query` | top 5 results: title, url, snippet, published date if known. Results from the league's own domain are removed. |
 | `read_url` | `url` | page text, max 8,000 characters. League domain blocked. **Optional** (build if time allows). |
-| `player_research` | `kind` (`draft_rankings`\|`weekly_rankings`\|`ros_rankings`\|`projections`\|`trending`\|`injuries`), `position?` (ALL, QB, RB, WR, TE, K, DEF; default ALL), `week?` (default current week; ignored for the draft set), `player_ids?` (our ids, ≤ 50), `limit?` (≤ 100), `offset?` | Reads the league's own tables — no outbound request, no key, no allowance — with league ownership on every row. Rankings rows: `player_id`, name, team, position, `rank`, `pos_rank`, `tier`, `adp`, `injury_status`, `ownership`. Projections rows: `player_id`, name, team, position, `proj_pts_ppr`. Trending rows: `player_id`, name, team, position, `trending_adds`. Injuries rows: `player_id`, name, team, position, `injury_status`, `injury_body_part`, `status`. A set that has not been ingested yet returns `{ ok: false, error: "not_found" }` rather than an empty page. There is no news kind; `web_search` covers it. |
+| `player_research` | `kind` (`draft_rankings`\|`weekly_rankings`\|`ros_rankings`\|`projections`\|`trending`\|`injuries`\|`defense_vs_position`), `position?` (ALL, QB, RB, WR, TE, K, DEF; default ALL), `week?` (default current week; ignored for the draft set and for `defense_vs_position`), `player_ids?` (our ids, ≤ 50), `limit?` (≤ 100), `offset?` | Reads the league's own tables — no outbound request, no key, no allowance — with league ownership on every row. Rankings rows: `player_id`, name, team, position, `rank`, `pos_rank`, `tier`, `adp`, `injury_status`, `ownership`. Projections rows: `player_id`, name, team, position, `proj_pts_ppr` (this week and the next two are ingested, Section 5.4). Trending rows: `player_id`, name, team, position, `trending_adds`. Injuries rows: `player_id`, name, team, position, `injury_status`, `injury_body_part`, `status`. Defense-vs-position rows (season to date, from `player_week_stats.opponent`): `nfl_team`, position, games, `pts_ppr_allowed_total`, `pts_ppr_allowed_per_game`, `rank` within the position (1 = allows the most = softest matchup); weeks scored through the nflverse fallback carry no opponent and are excluded for every defense alike. A set that has not been ingested yet returns `{ ok: false, error: "not_found" }` rather than an empty page. There is no news kind; `web_search` covers it. |
 
 Write tools:
 
