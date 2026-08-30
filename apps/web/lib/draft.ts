@@ -188,6 +188,14 @@ async function runDraftPick(
   const team = (await database.select().from(teams).where(eq(teams.id, pick.teamId)))[0];
   if (!team) throw new Error(`team ${pick.teamId} not found`);
 
+  // Pre-warm the on-demand feeds before the model loop starts: a stale
+  // moment costs one fetch here rather than mid-session, so the pick's tool
+  // calls hit the fresh path (one SELECT). Both never throw.
+  await Promise.all([
+    ensureFreshProjections(database, clock, { season: settings.season, week: 0 }),
+    ensureFreshPlayerFeed(database, clock),
+  ]);
+
   {
     const sessionId = await claimPickSession(database, settings, clock, pick, team);
 

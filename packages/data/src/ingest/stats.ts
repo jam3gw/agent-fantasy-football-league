@@ -1,4 +1,5 @@
 /** Sleeper weekly stats ingest (SPEC §5.3, §3.2): upsert player_week_stats with engine_pts and discrepancy logging. */
+import { sql } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import { getSettings, playerWeekProj, playerWeekStats, scoringDiscrepancies } from "@league/engine";
@@ -73,25 +74,48 @@ export async function upsertWeekStats(
   });
 }
 
-/** §5.4 projections — optional; same entry shape with projected pts_ppr. */
+/**
+ * §5.4 projections — optional; same entry shape with projected pts_ppr.
+ *
+ * Batched: the season feed carries ~1,700 rows and this also runs on the
+ * on-demand path inside agent tool calls, where 1,700 sequential round trips
+ * would eat a draft clock. Rows are deduped by player (last wins) because a
+ * multi-row INSERT ... ON CONFLICT cannot touch the same key twice. `now`
+ * lets the on-demand refresher stamp rows with Clock time so its TTL reader
+ * and this writer share one clock; the scheduled job uses wall time as before.
+ */
 export async function upsertProjections(
   db: EngineDb,
-  input: { season: number; week: number; entries: SleeperStatsEntry[] },
+  input: { season: number; week: number; entries: SleeperStatsEntry[]; now?: Date },
 ): Promise<number> {
-  return db.transaction(async (tx) => {
-    let n = 0;
-    for (const e of input.entries) {
-      const proj = typeof e.stats?.pts_ppr === "number" ? e.stats.pts_ppr : null;
-      if (proj === null) continue;
+  const at = input.now ?? new Date();
+  const byId = new Map<string, number>();
+  for (const e of input.entries) {
+    if (typeof e.stats?.pts_ppr === "number") byId.set(e.player_id, e.stats.pts_ppr);
+  }
+  const rows = [...byId.entries()].map(([playerId, proj]) => ({
+    playerId,
+    season: input.season,
+    week: input.week,
+    projPtsPpr: proj,
+    updatedAt: at,
+  }));
+  if (rows.length === 0) return 0;
+
+  const CHUNK = 500;
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < rows.length; i += CHUNK) {
       await tx
         .insert(playerWeekProj)
-        .values({ playerId: e.player_id, season: input.season, week: input.week, projPtsPpr: proj, updatedAt: new Date() })
+        .values(rows.slice(i, i + CHUNK))
         .onConflictDoUpdate({
           target: [playerWeekProj.playerId, playerWeekProj.season, playerWeekProj.week],
-          set: { projPtsPpr: proj, updatedAt: new Date() },
+          set: {
+            projPtsPpr: sql`excluded.proj_pts_ppr`,
+            updatedAt: sql`excluded.updated_at`,
+          },
         });
-      n++;
     }
-    return n;
   });
+  return rows.length;
 }

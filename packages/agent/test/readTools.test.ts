@@ -1063,6 +1063,21 @@ describe("refreshProjections wiring", () => {
     expect(rows[0]!.proj_pts_ppr).toBe(17.3);
   });
 
+  it("get_my_team serves post-refresh injury status — the refresh runs before the roster read", async () => {
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    await seedWeek1Games();
+    const kc = await makePlayer(db, { nflTeam: "KC", position: "RB" });
+    await rosterPlayer(db, a, kc);
+    const feed = vi.fn(async () => {
+      await db.update(players).set({ injuryStatus: "Out" }).where(eq(players.playerId, kc));
+    });
+
+    const res = ok(await getMyTeamTool.execute({}, ctxFor({ teamId: a, refreshPlayerFeed: feed })));
+    const rows = res.players as Array<Record<string, unknown>>;
+    expect(rows[0]!.injury_status).toBe("Out");
+  });
+
   it("player_research refreshes the player feed for injuries but not for trending", async () => {
     await seedLeague(db);
     const wr = await makePlayer(db, { nflTeam: "SF", position: "WR" });

@@ -29,6 +29,13 @@
       "when": 1788030499790,
       "tag": "0003_session_stream",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1788058208545,
+      "tag": "0004_proj_season_week_idx",
+      "breakpoints": true
     }
   ]
 }
