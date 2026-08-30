@@ -20,7 +20,9 @@
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { z } from "zod";
-import { modelMessageSchema } from "ai";
+import { modelMessageSchema, streamText } from "ai";
+import { MockLanguageModelV4, simulateReadableStream } from "ai/test";
+import { createModelStep } from "../src/modelStep.ts";
 import { FixedClock } from "@league/shared";
 import { initLeagueSettings, modelPrices, sessions, teams } from "@league/engine";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
@@ -286,6 +288,49 @@ describe("every message handed to the model is a valid ModelMessage", () => {
       content: [{ type: "tool-result", toolCallId: "c", toolName: "t", output: out }],
     });
     expect(parsed.success).toBe(true);
+  });
+
+  it("holds when the model hallucinates a tool name — the real modelStep, through the real SDK", async () => {
+    // Session 1014 (draft night): deepseek called `get_team_roster`, which
+    // does not exist. The SDK surfaces that as a dynamic tool-call part in
+    // `content` carrying `invalid`, `error` and `dynamic` fields — and the
+    // assistant message built from raw `content` failed the ModelMessage
+    // schema on the NEXT step, killing the session. The stubbed-modelStep
+    // tests above cannot see this, so this one drives the real
+    // `createModelStep` through the real `streamText` against a mock model.
+    const mock = new MockLanguageModelV4({
+      doStream: async () => ({
+        stream: simulateReadableStream({
+          chunks: [
+            { type: "tool-call", toolCallId: "c1", toolName: "get_team_roster", input: '{"team_id":"1"}' },
+            {
+              type: "finish",
+              finishReason: { unified: "tool-calls", raw: undefined },
+              usage: {
+                inputTokens: { total: 3, noCache: 3, cacheRead: undefined, cacheWrite: undefined },
+                outputTokens: { total: 10, text: 10, reasoning: undefined },
+              },
+            },
+          ],
+        }),
+      }),
+    });
+    const step = createModelStep({} as never, {
+      stream: ((params: Record<string, unknown>) =>
+        streamText({ ...params, model: mock } as never)) as never,
+      flushIntervalMs: 0,
+    });
+
+    const result = await step({ modelId: "deepseek/deepseek-v4-pro", messages: [{ role: "user", content: "pick" }], tools: [] }, 0);
+
+    // The loop still sees the call, so it can answer with a §8.4 failure…
+    expect(result.toolCalls).toHaveLength(1);
+    expect(result.toolCalls[0]!.toolName).toBe("get_team_roster");
+    // …and the message replayed next step is schema-valid despite it.
+    const parsed = modelMessageSchema.safeParse(result.assistantMessage);
+    expect(parsed.success, JSON.stringify(parsed.success ? [] : parsed.error.issues.slice(0, 3))).toBe(true);
+    const parts = result.assistantMessage.content as Array<Record<string, unknown>>;
+    expect(parts.some((p) => p.type === "tool-call" && p.toolCallId === "c1")).toBe(true);
   });
 
   it("holds after context trimming replaces an old tool result", () => {

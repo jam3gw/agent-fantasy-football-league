@@ -274,12 +274,12 @@ export function createModelStep(
     if (run.streamError !== null) throw run.streamError;
     const { result, partialReasoning } = run;
 
-    const [text, rawToolCalls, usage, providerMetadata, content, finishReason] = await Promise.all([
+    const [text, rawToolCalls, usage, providerMetadata, responseMessages, finishReason] = await Promise.all([
       result.text,
       result.toolCalls,
       result.usage,
       result.providerMetadata,
-      result.content,
+      result.responseMessages,
       result.finishReason,
     ]);
 
@@ -301,7 +301,18 @@ export function createModelStep(
       // Who pays depends on the provider: gateway-held BYOK keys for
       // Anthropic, OpenAI and xAI (2026-08-29); everyone else the gateway.
       billedTo: billedToFor(req.modelId),
-      assistantMessage: { role: "assistant", content: content ?? text ?? "" },
+      // The SDK's own response message, never the raw `content` parts: a
+      // hallucinated or unparsable tool call arrives in `content` as a
+      // dynamic part carrying `invalid`, `error` and `dynamic` fields the
+      // ModelMessage schema rejects, so replaying raw content killed the next
+      // step of any session whose model invented a tool name (session 1014,
+      // draft night). `toResponseMessages` also maps each part's
+      // providerMetadata to providerOptions — what carries Gemini's
+      // thoughtSignature back on replay, whose absence the gateway warned
+      // about on every Gemini step.
+      assistantMessage:
+        [...responseMessages].reverse().find((m) => m.role === "assistant") ??
+        ({ role: "assistant", content: text ?? "" } as ModelMessage),
       finishReason,
     };
   };
