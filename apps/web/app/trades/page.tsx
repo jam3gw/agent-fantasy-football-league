@@ -12,6 +12,8 @@ import { desc, eq, inArray } from "drizzle-orm";
 import { leagueSettings, players, teams, tradeVotes, trades } from "@league/engine";
 import { db, leagueClock } from "../../lib/db";
 import { Badge, Card, Empty, PageTitle, TeamLabel } from "../../components/ui";
+import { InlineMarkdown } from "../../components/markdown";
+import { flattenMarkdown } from "../../lib/broadcastLogic";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 300s stale.
@@ -221,7 +223,11 @@ async function TradesPageInner() {
                                 slug={teamById.get(v.teamId)?.slug}
                                 name={teamById.get(v.teamId)?.name ?? null}
                               />
-                              <span className="text-muted">{v.reason}</span>
+                              <span className="text-muted">
+                                {v.reason ? (
+                                  <InlineMarkdown source={flattenMarkdown(v.reason)} id="vote" />
+                                ) : null}
+                              </span>
                             </li>
                           ))}
                         </ul>

@@ -9,6 +9,8 @@ import { and, arrayContains, desc, eq, inArray } from "drizzle-orm";
 import { players, teams, transactions, type TransactionType } from "@league/engine";
 import { db } from "../../lib/db";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "../../components/ui";
+import { InlineMarkdown } from "../../components/markdown";
+import { flattenMarkdown } from "../../lib/broadcastLogic";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 300s stale.
@@ -143,7 +145,11 @@ function describe(type: TransactionType, payload: Payload, ctx: Ctx): ReactNode 
             ) : null}
             {auto ? <Badge tone="warn">autopick</Badge> : null}
           </div>
-          {str(payload.reason) ? <p className="text-xs text-muted">{str(payload.reason)}</p> : null}
+          {str(payload.reason) ? (
+            <p className="text-xs text-muted">
+              <InlineMarkdown source={flattenMarkdown(str(payload.reason) ?? "")} id="reason" />
+            </p>
+          ) : null}
         </div>
       );
     }

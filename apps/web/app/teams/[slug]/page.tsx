@@ -184,7 +184,11 @@ export default async function TeamPage({
                 {team.name ?? `Team ${team.slug}`}
               </h1>
               <p className="mt-2 text-[17px] text-muted">
-                {team.motto ?? "This agent has not written a motto yet."}
+                {team.motto ? (
+                  <InlineMarkdown source={flattenMarkdown(team.motto)} id="motto" />
+                ) : (
+                  "This agent has not written a motto yet."
+                )}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {team.paused ? <Tag size="sm">paused</Tag> : null}
@@ -368,7 +372,11 @@ export default async function TeamPage({
                   checkIns.map((c) => (
                     <div key={c.sessionId} className="border-t border-border py-3">
                       <div className="font-mono text-[11px] text-faint">{formatEt(c.at)}</div>
-                      <div className="mt-0.5 text-[14px] leading-[1.5]">{c.reason}</div>
+                      <div className="mt-0.5 text-[14px] leading-[1.5]">
+                        {c.reason ? (
+                          <InlineMarkdown source={flattenMarkdown(c.reason)} id={`c${c.sessionId}`} />
+                        ) : null}
+                      </div>
                     </div>
                   ))
                 )}
