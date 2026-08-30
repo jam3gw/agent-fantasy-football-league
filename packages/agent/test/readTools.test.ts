@@ -1030,6 +1030,129 @@ describe("player_research", () => {
 });
 
 /* ========================================================================== */
+/* on-demand projection refresh (§5.4)                                        */
+/* ========================================================================== */
+
+describe("refreshProjections wiring", () => {
+  /** A stand-in for @league/data's ensureFreshProjections: writes rows for the asked week. */
+  function refresherWriting(rows: Array<{ playerId: string; week: number; pts: number }>) {
+    return vi.fn(async (season: number, week: number) => {
+      const mine = rows.filter((r) => r.week === week);
+      if (mine.length === 0) return;
+      await db
+        .insert(playerWeekProj)
+        .values(mine.map((r) => ({ playerId: r.playerId, season, week, projPtsPpr: r.pts })));
+    });
+  }
+
+  it("get_my_team refreshes the current week and serves what the refresh stored", async () => {
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    await seedWeek1Games();
+    const kc = await makePlayer(db, { nflTeam: "KC", position: "RB" });
+    await rosterPlayer(db, a, kc);
+    const refresh = refresherWriting([{ playerId: kc, week: 1, pts: 17.3 }]);
+    const feed = vi.fn(async () => {});
+
+    const res = ok(
+      await getMyTeamTool.execute({}, ctxFor({ teamId: a, refreshProjections: refresh, refreshPlayerFeed: feed })),
+    );
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(SEASON, 1);
+    expect(feed).toHaveBeenCalledOnce();
+    const rows = res.players as Array<Record<string, unknown>>;
+    expect(rows[0]!.proj_pts_ppr).toBe(17.3);
+  });
+
+  it("get_my_team serves post-refresh injury status — the refresh runs before the roster read", async () => {
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    await seedWeek1Games();
+    const kc = await makePlayer(db, { nflTeam: "KC", position: "RB" });
+    await rosterPlayer(db, a, kc);
+    const feed = vi.fn(async () => {
+      await db.update(players).set({ injuryStatus: "Out" }).where(eq(players.playerId, kc));
+    });
+
+    const res = ok(await getMyTeamTool.execute({}, ctxFor({ teamId: a, refreshPlayerFeed: feed })));
+    const rows = res.players as Array<Record<string, unknown>>;
+    expect(rows[0]!.injury_status).toBe("Out");
+  });
+
+  it("player_research refreshes the player feed for injuries but not for trending", async () => {
+    await seedLeague(db);
+    const wr = await makePlayer(db, { nflTeam: "SF", position: "WR" });
+    await db.update(players).set({ trendingAdds: 12 }).where(eq(players.playerId, wr));
+    const feed = vi.fn(async () => {
+      await db
+        .update(players)
+        .set({ injuryStatus: "Questionable", injuryBodyPart: "Ankle" })
+        .where(eq(players.playerId, wr));
+    });
+    const ctx = ctxFor({ refreshPlayerFeed: feed });
+
+    const res = ok(await playerResearchTool.execute({ kind: "injuries" }, ctx));
+    expect(feed).toHaveBeenCalledOnce();
+    const items = res.items as Array<Record<string, unknown>>;
+    expect(items.find((i) => i.player_id === wr)!.injury_status).toBe("Questionable");
+
+    feed.mockClear();
+    ok(await playerResearchTool.execute({ kind: "trending" }, ctx));
+    expect(feed).not.toHaveBeenCalled();
+  });
+
+  it("get_matchup refreshes the current week but never a finished one", async () => {
+    await seedLeague(db, { currentWeek: 2 });
+    await seedTeams(db);
+    const refresh = refresherWriting([]);
+    await getMatchupTool.execute({ week: 1 }, ctxFor({ teamId: 1, refreshProjections: refresh }));
+    expect(refresh).not.toHaveBeenCalled();
+    await getMatchupTool.execute({ week: 2 }, ctxFor({ teamId: 1, refreshProjections: refresh }));
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(SEASON, 2);
+  });
+
+  it("get_free_agents refreshes this week's projections before reading", async () => {
+    await seedLeague(db);
+    await seedTeams(db);
+    const wr = await makePlayer(db, { nflTeam: "SF", position: "WR" });
+    const refresh = refresherWriting([{ playerId: wr, week: 1, pts: 11.8 }]);
+
+    const res = ok(await getFreeAgentsTool.execute({ sort: "proj" }, ctxFor({ teamId: 1, refreshProjections: refresh })));
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(SEASON, 1);
+    const items = res.items as Array<Record<string, unknown>>;
+    expect(items.find((i) => i.player_id === wr)!.proj_pts_ppr).toBe(11.8);
+  });
+
+  it("player_research refreshes the asked week, week 0 included, but not the past", async () => {
+    await seedLeague(db, { currentWeek: 2 });
+    const wr = await makePlayer(db, { nflTeam: "SF", position: "WR" });
+    const refresh = refresherWriting([
+      { playerId: wr, week: 0, pts: 210 },
+      { playerId: wr, week: 3, pts: 12.5 },
+    ]);
+    const ctx = ctxFor({ refreshProjections: refresh });
+
+    ok(await playerResearchTool.execute({ kind: "projections", week: 3 }, ctx));
+    expect(refresh).toHaveBeenLastCalledWith(SEASON, 3);
+    ok(await playerResearchTool.execute({ kind: "projections", week: 0 }, ctx));
+    expect(refresh).toHaveBeenLastCalledWith(SEASON, 0);
+
+    refresh.mockClear();
+    await playerResearchTool.execute({ kind: "projections", week: 1 }, ctx);
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("every tool still works with no refresher wired (unit-test / offline mode)", async () => {
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    await seedWeek1Games();
+    const kc = await makePlayer(db, { nflTeam: "KC", position: "RB" });
+    await rosterPlayer(db, a, kc);
+    const res = ok(await getMyTeamTool.execute({}, ctxFor({ teamId: a })));
+    expect((res.players as Array<Record<string, unknown>>)[0]!.proj_pts_ppr).toBeNull();
+  });
+});
+
+/* ========================================================================== */
 /* team isolation sweep (§15.5)                                               */
 /* ========================================================================== */
 

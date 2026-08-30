@@ -230,7 +230,7 @@ All external calls live in `packages/data`. Every client has: timeout, retry wit
 
 - `GET https://api.sleeper.app/v1/players/nfl` — about 5 MB. All NFL players plus team defenses (`position: "DEF"`, `player_id` = team abbreviation such as `SF`).
 - Fields to store: `player_id`, `full_name`, `first_name`, `last_name`, `position`, `fantasy_positions`, `team`, `status`, `injury_status`, `injury_body_part`, `active`, `depth_chart_order`, `number`, `years_exp`, `gsis_id`, `espn_id`, `yahoo_id`, plus the raw object. Note that Sleeper leaves `espn_id` and `yahoo_id` null for players who entered the league from about 2021 on — 144 of the top 200 carry neither — so neither is usable as a join key to an outside source.
-- Cadence: every 6 hours; hourly from Friday 12:00 PM ET to Monday 11:59 PM ET (game days).
+- Cadence: every 6 hours; hourly from Friday 12:00 PM ET to Monday 11:59 PM ET (game days). **On-demand (added 2026-08-30):** agent tool reads that show injury data also refresh this feed through a 15-minute TTL (`ensureFreshPlayerFeed`, `packages/data`): stale reads re-pull the feed and write only players whose lineup-relevant fields moved, through the same upsert path — so a starter going Out pre-kickoff emits `injury.changed` at read time instead of waiting for the hourly job. The refresh updates the shared table; all agents read the same rows. Never throws; a failed pull serves stored data.
 - After each ingest, compare `injury_status` for rostered players. If a **starter's** status changes to `Doubtful`, `Out`, `IR`, `PUP`, `NFI`, or `Sus`, emit `injury.changed` (Section 9.3).
 
 ### 5.2 Sleeper trending adds (documented)
@@ -249,6 +249,7 @@ All external calls live in `packages/data`. Every client has: timeout, retry wit
 
 - `GET https://api.sleeper.com/projections/nfl/{season}/{week}?season_type=regular&position[]=...` — same shape as stats, with projected `pts_ppr`.
 - If available, ingest Tuesday 6:00 AM ET and refresh daily. Expose as `proj_pts_ppr` in player tools. All agents see the same value. If unavailable, omit the field; do not fail.
+- **On-demand (added 2026-08-30):** agent tool reads that show projections also refresh the stored week through a 1-hour TTL (`ensureFreshProjections`, `packages/data`); week 0 stores the season-long projections (from the Section 5.7 feed) that back `get_available_players.proj_points`. The refresh updates the shared `player_week_proj` table, so every agent still reads the same rows. Never throws; a failed pull serves stored data. Past weeks are never refetched.
 
 ### 5.5 nflverse schedule (documented, free)
 
@@ -668,7 +669,7 @@ Read tools:
 | `read_scratchpad` | — | my scratchpad content |
 | `web_search` | `query` | top 5 results: title, url, snippet, published date if known. Results from the league's own domain are removed. |
 | `read_url` | `url` | page text, max 8,000 characters. League domain blocked. **Optional** (build if time allows). |
-| `player_research` | `kind` (`draft_rankings`\|`weekly_rankings`\|`ros_rankings`\|`projections`\|`trending`\|`injuries`), `position?` (ALL, QB, RB, WR, TE, K, DEF; default ALL), `week?` (default current week; ignored for the draft set), `player_ids?` (our ids, ≤ 50), `limit?` (≤ 100), `offset?` | Reads the league's own tables — no outbound request, no key, no allowance — with league ownership on every row. Rankings rows: `player_id`, name, team, position, `rank`, `pos_rank`, `tier`, `adp`, `injury_status`, `ownership`. Projections rows: `player_id`, name, team, position, `proj_pts_ppr`. Trending rows: `player_id`, name, team, position, `trending_adds`. Injuries rows: `player_id`, name, team, position, `injury_status`, `injury_body_part`, `status`. A set that has not been ingested yet returns `{ ok: false, error: "not_found" }` rather than an empty page. There is no news kind; `web_search` covers it. |
+| `player_research` | `kind` (`draft_rankings`\|`weekly_rankings`\|`ros_rankings`\|`projections`\|`trending`\|`injuries`), `position?` (ALL, QB, RB, WR, TE, K, DEF; default ALL), `week?` (default current week; ignored for the draft set), `player_ids?` (our ids, ≤ 50), `limit?` (≤ 100), `offset?` | Reads the league's own tables — no key, no allowance, never a per-agent request; a stale `projections` or `injuries` read first refreshes the shared tables from the feed (TTL-guarded, Sections 5.1/5.4) so every agent still sees the same rows — with league ownership on every row. Rankings rows: `player_id`, name, team, position, `rank`, `pos_rank`, `tier`, `adp`, `injury_status`, `ownership`. Projections rows: `player_id`, name, team, position, `proj_pts_ppr`. Trending rows: `player_id`, name, team, position, `trending_adds`. Injuries rows: `player_id`, name, team, position, `injury_status`, `injury_body_part`, `status`. A set that has not been ingested yet returns `{ ok: false, error: "not_found" }` rather than an empty page. There is no news kind; `web_search` covers it. |
 
 Write tools:
 
@@ -1119,7 +1120,7 @@ NFL game
   -> site: /matchups/[week], /teams/[slug], /benchmark
 ```
 
-Injury and inactive information reaches agents the same way: the Sleeper players feed (hourly on game days) updates `injury_status` and raises `injury.changed` events; agents also have `player_research` (which reads the same feed) and web search. Agents never scrape the site.
+Injury and inactive information reaches agents the same way: the Sleeper players feed (hourly on game days, plus the on-demand 15-minute TTL refresh of Section 5.1 whenever an agent reads injury data) updates `injury_status` and raises `injury.changed` events; agents also have `player_research` (which reads the same feed) and web search. Agents never scrape the site.
 
 ### 13.1 Source
 
@@ -1196,7 +1197,7 @@ Model configuration lives in the database (`teams.model_id`) so a swap does not 
 8. **Team abbreviation map**: 32 teams round-trip between nflverse and Sleeper.
 9. **Rankings ingest**: ADP ordering, position ranks, ADP `999` excluded, tier boundaries at a points cliff within a position, no tier without a projection, and a re-run replacing rather than duplicating the board.
 10. **Carry-over and ghosts**: week W + 1 entries copy W for rostered players only; a traded-away locked starter still scores for the old team in W and never appears in W + 1.
-11. **`player_research`**: reads the league's own tables, makes no outbound request, and has no allowance to exhaust however many times it is called.
+11. **`player_research`**: reads the league's own tables and has no allowance to exhaust however many times it is called. Its only outbound path is the shared TTL-guarded refresh (Sections 5.1/5.4) — never a per-agent request, and repeated calls within the TTL make none at all.
 12. **Cost ledger and alarms**: a session with known token counts produces the expected ledger rows and `cost_usd` from `model_prices`; rollups match the ledger; each alarm rule fires exactly once per period when crossed, again at each step for stepped rules; email and webhook payloads are correct; acknowledging clears the banner; the optional pause setting pauses the agent only when on.
 
 ### 15.2 Mock draft
