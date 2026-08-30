@@ -80,6 +80,8 @@ export interface RunSessionDeps {
   /** Tools available to this session kind (§8.6). */
   tools: LeagueTool[];
   toolConfig: ToolContext["config"];
+  /** See ToolContext.refreshProjections; omit in tests to stay offline. */
+  refreshProjections?: ToolContext["refreshProjections"];
   /** Optional hook so the draft workflow can stop the loop when the pick is gone. */
   shouldContinue?: () => Promise<boolean>;
   /**
@@ -436,6 +438,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
     season: settings.season,
     config: deps.toolConfig,
     sessionContext: session.context,
+    ...(deps.refreshProjections ? { refreshProjections: deps.refreshProjections } : {}),
   };
 
   const toolsByName = new Map(deps.tools.map((t) => [t.name, t]));

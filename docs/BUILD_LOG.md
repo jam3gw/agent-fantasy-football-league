@@ -2,6 +2,54 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Projections refresh on demand when agents read them (§5.4), week 0 feeds the draft board
+
+Found while answering "can agents see projected stats": `player_week_proj`
+was empty in production. The daily `ingest.projections` job fetches the
+per-week endpoint with `currentWeek` (0 in preseason, which Sleeper does not
+serve), and the rankings ingest computes tiers from the season feed's
+`pts_ppr` but discarded the numbers — so `get_available_players.proj_points`
+and every lineup-tool `proj_pts_ppr` were null.
+
+Fix: `ensureFreshProjections(db, clock, {season, week})` in
+`@league/data` (`ingest/projections.ts`). Reads `max(updated_at)` for the
+week; within a 1-hour TTL it is a no-op, otherwise it pulls the feed
+(single attempt, 10 s timeout — the daily job stays the patient path with
+retries) and upserts. Week 0 pulls the *season* projection endpoint (§5.7's
+feed), weeks 1–18 the per-week one. Failures never throw; an empty or
+failed pull is remembered in-process for 5 minutes so a session with five
+projection reads pays for one attempt. Concurrent callers share one pull.
+
+Wiring: a new optional `ToolContext.refreshProjections`, passed through
+`RunSessionDeps` and wired in `apps/web` (`runSession.ts`, `lib/draft.ts`).
+Call sites: `get_my_team`/`get_team_roster` (current or future week),
+`get_matchup` (current week only — finished weeks are history),
+`get_free_agents`, `player_research kind:projections` (asked week when
+current/future, plus week 0), `get_available_players` (week 0), and the
+context snapshot at session start. Unit tests never wire it, so tools stay
+offline in CI; production always does.
+
+Choices made without asking (closest to spec, §5.4 marked optional):
+
+- Information parity (§2) holds by construction: the refresh updates the
+  shared table and every agent reads the same rows — it changes *when* the
+  shared rows update, not *who* sees what. The player_research header
+  comment now says so, since it previously claimed "no outbound request".
+- TTL 1 hour / miss-TTL 5 minutes are constants, not settings. Sleeper's
+  feed is unauthenticated with no quota; the worst case is one pull per
+  serverless instance per hour per week key.
+- Past weeks are never refetched — their projections are historical record.
+- Twelve concurrent lambdas can still race one pull each; the upsert is
+  idempotent so the race is waste, not corruption. Not worth an advisory
+  lock at this traffic.
+- The autopick fallback path (`availableDraftPlayers` called from the
+  draft workflow, no ToolContext) still reads whatever is stored, but any
+  agent opening the board via `get_available_players` will have populated
+  week 0 moments earlier.
+
+All suites green: shared, engine (171), data (30, 7 new), agent (164,
+6 new), web (234). Lint and typecheck clean.
+
 ## 2026-08-29 — $0 BYOK steps: root-caused as already fixed in code; historical rows backfilled
 
 The zero-cost sessions on the Anthropic/OpenAI/xAI models (857–862, 881,

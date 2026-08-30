@@ -30,6 +30,15 @@ export interface ToolContext {
   };
   /** Extra per-kind context, e.g. draft pick_no or the trade under review. */
   sessionContext: Record<string, unknown>;
+  /**
+   * Refresh stored projections for (season, week) before a read, so an agent
+   * setting a lineup sees the feed as it stands rather than the last daily
+   * ingest. Week 0 is the season-long (draft) board. Wired in apps/web to
+   * `ensureFreshProjections` (@league/data); absent in unit tests so tools
+   * never touch the network. Must never throw — readers serve whatever is
+   * stored after it settles.
+   */
+  refreshProjections?: (season: number, week: number) => Promise<void>;
 }
 
 export interface ToolFailure {

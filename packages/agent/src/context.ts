@@ -206,6 +206,8 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
         )
     : [];
   const ptsOf = new Map(stats.map((s) => [s.playerId, s.ptsPpr]));
+  // Every session opens on live projections, not the last daily ingest.
+  if (rosterIds.length) await ctx.refreshProjections?.(settings.season, week);
   const projRows = rosterIds.length
     ? await db
         .select({ playerId: playerWeekProj.playerId, proj: playerWeekProj.projPtsPpr })

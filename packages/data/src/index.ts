@@ -7,3 +7,4 @@ export * from "./ingest/players.ts";
 export * from "./ingest/schedule.ts";
 export * from "./ingest/stats.ts";
 export * from "./ingest/rankings.ts";
+export * from "./ingest/projections.ts";
