@@ -27,9 +27,27 @@ step" and asked to add streams.
   dashboard. Streams are auto-closed when a run completes, so no explicit
   close step was added.
 - Tests: `apps/web/test/runStream.test.ts` — delta math (first flush, suffix,
-  step change, retry reset, closing step `-1`), sink emit/skip behavior,
-  reconstruction by concatenation, and the outside-context no-op. Full
-  `pnpm check` green: lint, typecheck, 679 tests.
+  step change, non-extension restart, closing step `-1`), sink emit/skip
+  behavior, reconstruction by concatenation, workflow-step-retry re-emission,
+  and the failure paths (no context, rejected write, locked stream). Full
+  `pnpm check` green: lint, typecheck, 679 tests (682 after review fixes).
+
+Review round 1 (fresh-context reviewer over the diff): no spec violations, no
+security findings; three fixes applied — `getWriter()` moved inside the try
+(it throws synchronously on a locked stream, and outside the try it would
+have propagated into the model step, the exact failure the module promises
+away), `reset: boolean` added to `model_delta` (a retried workflow step
+re-streams a `stepNo` the stream already carries, since stream writes bypass
+the event log; readers had no discard signal), and the "readers reconstruct
+the partial" claim corrected to "as of the last throttled flush" (the tail
+past the final flush reaches only `session_events`). `writableSource` made
+injectable so the write-failure paths are actually tested. Recorded, not
+done: `draft_pick` chunks carry counters but no `pickNo`/`teamId`
+(`DraftRunResult` doesn't expose them; enrichment when someone needs it);
+`session_step` chunks are emitted for `queued` no-slot outcomes on purpose
+(a run visibly waiting beats a silent one); stream writes have no timeout —
+error swallowing covers rejection, not a write that never settles, accepted
+as a platform concern.
 
 ## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
 
