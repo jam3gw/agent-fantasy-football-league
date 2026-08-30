@@ -29,7 +29,22 @@ and on the team page.
 - Team page: per-player "projected X.X" in each lineup/bench/IR row's meta
   line, and the header line now reads "Starters have scored X so far, of a
   projected Y."
-- Lint, typecheck, full suite green (271 web tests + packages).
+- Review round 1 (fresh-context reviewer) found: (1) the home tile could read
+  "Final" up top and "Not started" under the bar during the Monday-done,
+  Tuesday-not-finalized hours; (2) a matchup with two empty lineups (zero
+  occupied slots, e.g. week 1 before the first lineup sessions) read "Final
+  0.0 – 0.0"; (3) the started/projected gating was untested server-side code.
+  Fixed by extracting `gameStatus` (final/live/upcoming/unknown — zero slots
+  is final only once the matchup started) and `cardProgress` into
+  `broadcastLogic.ts`, using them on both pages, and testing both. Also
+  swept the adjacent copy: hero "not kicked off" no longer fires over a done
+  week, the matchups marquee prefers actually-live games over scheduled 0–0s,
+  and the hero's "finished level"/"every slot is done" lines no longer show
+  pre-kickoff.
+- Recorded, not fixed (reviewer finding 4, low likelihood): the projections
+  gate is week-wide, so a week the feed projected where one side's starters
+  happen to have no rows (all byes) would still show that side "proj 0.0".
+- Lint, typecheck, full suite green (271 web tests + packages; now 282 web).
 
 ## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
 

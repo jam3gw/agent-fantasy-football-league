@@ -26,7 +26,7 @@ import {
 } from "@/components/broadcast";
 import { LeaderboardBand, type LeaderRow } from "@/components/leaderboard";
 import { InlineMarkdown } from "@/components/markdown";
-import { flattenMarkdown, winChancePercent } from "@/lib/broadcastLogic";
+import { flattenMarkdown, gameStatus, winChancePercent } from "@/lib/broadcastLogic";
 import { db } from "@/lib/db";
 import {
   benchmarkRows,
@@ -74,7 +74,8 @@ function heroCopy(
   // A game is live once it has actually begun, not merely once its slots are
   // known — before Thursday night every matchup has 18 slots to play, and the
   // hero was announcing "6 games are live" over twelve untouched lineups.
-  const liveCards = cards.filter((c) => !c.final && (c.slotsToPlay ?? 0) > 0 && c.started);
+  const statusOf = (c: GameCard) => gameStatus(c.final, c.slotsToPlay, c.started);
+  const liveCards = cards.filter((c) => statusOf(c) === "live");
 
   if (phase === "pre_draft" || phase === "drafting") {
     return {
@@ -89,7 +90,10 @@ function heroCopy(
   }
 
   if (liveCards.length === 0) {
-    const played = cards.filter((c) => c.final);
+    // Status, not the engine's flag: between Monday night ending and Tuesday's
+    // finalization every game is done but none is flagged final, and "week N
+    // has not kicked off yet" over six finished scores would be absurd.
+    const played = cards.filter((c) => statusOf(c) === "final");
     if (played.length === 0) {
       return {
         eyebrow: `Week ${week}`,
@@ -136,9 +140,10 @@ function heroCopy(
 function GameTile({ card }: { card: GameCard }) {
   const awayLeads = card.awayPoints > card.homePoints;
   const homeLeads = card.homePoints > card.awayPoints;
-  const live = !card.final && (card.slotsToPlay ?? 0) > 0 && card.started;
-  // Slots known, nothing kicked off yet: the week is still ahead of this one.
-  const upcoming = !card.final && (card.slotsToPlay ?? 0) > 0 && !card.started;
+  const status = gameStatus(card.final, card.slotsToPlay, card.started);
+  const live = status === "live";
+  // Nothing kicked off yet: the week is still ahead of this one.
+  const upcoming = status === "upcoming";
   const chance = card.awayWinChance;
   const barPct = chance !== null ? chance * 100 : awayLeads ? 100 : homeLeads ? 0 : 50;
   // Name the side, or "DST, K to play" reads as though it belonged to
@@ -166,14 +171,14 @@ function GameTile({ card }: { card: GameCard }) {
             live ? "text-accent" : "text-faint"
           }`}
         >
-          {live ? "Live" : card.final || card.slotsToPlay === 0 ? "Final" : card.slotsToPlay === null ? "In progress" : "Scheduled"}
+          {live ? "Live" : status === "final" ? "Final" : status === "unknown" ? "In progress" : "Scheduled"}
         </span>
         <span className="text-[11px] text-faint">
           {live
             ? `${card.slotsToPlay} slot${card.slotsToPlay === 1 ? "" : "s"} left`
-            : card.final || card.slotsToPlay === 0
+            : status === "final"
               ? "final"
-              : card.slotsToPlay === null
+              : status === "unknown"
                 ? "schedule not loaded"
                 : "not started"}
         </span>
@@ -226,9 +231,11 @@ function GameTile({ card }: { card: GameCard }) {
         <span className="min-w-0">
           {chance !== null
             ? `${teamName(card.awayTeam)} ${winChancePercent(chance)}% to win`
-            : card.final
+            : status === "final"
               ? `${awayLeads ? teamName(card.awayTeam) : homeLeads ? teamName(card.homeTeam) : "Nobody"} ${awayLeads || homeLeads ? "won" : "— tied"}`
-              : "Not started"}
+              : status === "upcoming"
+                ? "Not started"
+                : ""}
         </span>
         <span className="min-w-0">
           {waiting

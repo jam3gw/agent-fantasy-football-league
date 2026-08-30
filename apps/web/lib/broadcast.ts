@@ -33,6 +33,7 @@ import { db } from "./db";
 import { safeRead as safe, settings } from "./queries";
 import type { Result } from "./broadcastLogic";
 import {
+  cardProgress,
   describeTransaction,
   flattenMarkdown,
   foldForm,
@@ -441,9 +442,16 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
     const home = remainingFor(m.homeTeamId);
     const slotsToPlay = scheduleKnown ? away.slots.length + home.slots.length : null;
     const over = m.final || slotsToPlay === 0;
-    const started =
-      awayPoints > 0 || homePoints > 0 || sideStarted(m.awayTeamId) || sideStarted(m.homeTeamId);
-    const projected = !over && scheduleKnown && projectionsKnown;
+    const progress = cardProgress({
+      over,
+      scheduleKnown,
+      projectionsKnown,
+      awayPoints,
+      homePoints,
+      anyStarterKickedOff: sideStarted(m.awayTeamId) || sideStarted(m.homeTeamId),
+      awayProjectedFinal: awayPoints + away.projected,
+      homeProjectedFinal: homePoints + home.projected,
+    });
     const margin = awayPoints + away.projected - (homePoints + home.projected);
     return {
       matchupId: m.id,
@@ -461,9 +469,7 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
       // No schedule means no idea who is left to play, so no chance is
       // offered rather than one computed from the score alone.
       awayWinChance: over || slotsToPlay === null ? null : winChanceFromMargin(margin),
-      started,
-      awayProjected: projected ? awayPoints + away.projected : null,
-      homeProjected: projected ? homePoints + home.projected : null,
+      ...progress,
     };
   });
 }
