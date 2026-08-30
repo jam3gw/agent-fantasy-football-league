@@ -10,11 +10,12 @@
  */
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import {
   STARTING_SLOTS,
   decisionLogs,
   pendingCheckIns,
+  playerWeekProj,
   scratchpadVersions,
   scratchpads,
   sessions,
@@ -44,7 +45,15 @@ const MAX_WEEK = 18;
 const SESSIONS_SHOWN = 25;
 const DECISIONS_SHOWN = 12;
 
-function PlayerRow({ player, slot }: { player: LineupPlayer | undefined; slot: string }) {
+function PlayerRow({
+  player,
+  slot,
+  projection,
+}: {
+  player: LineupPlayer | undefined;
+  slot: string;
+  projection?: number | null;
+}) {
   const scored = player && player.points !== 0;
   return (
     <div className="grid grid-cols-[46px_minmax(0,1fr)_56px] items-center gap-3 rounded-[10px] border border-border bg-surface px-3.5 py-2.5">
@@ -59,7 +68,12 @@ function PlayerRow({ player, slot }: { player: LineupPlayer | undefined; slot: s
               {player.name}
             </Link>
             <div className="truncate text-[11px] text-faint">
-              {[player.position, player.nflTeam].filter(Boolean).join(" ")}
+              {[
+                [player.position, player.nflTeam].filter(Boolean).join(" "),
+                projection != null ? `projected ${projection.toFixed(1)}` : null,
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </div>
           </>
         ) : (
@@ -151,6 +165,36 @@ export default async function TeamPage({
   const bySlot = new Map(lineup.map((entry) => [entry.slot, entry]));
   const ir = bySlot.get("IR");
   const starterPoints = STARTING_SLOTS.reduce((sum, slot) => sum + (bySlot.get(slot)?.points ?? 0), 0);
+
+  // The week's projections, for every rostered player on the page. A week the
+  // feed has not projected yet returns no rows, and the page then says nothing
+  // rather than projecting zeros.
+  const rosterPlayerIds = [...new Set([...lineup, ...bench].map((p) => p.playerId))];
+  const projections =
+    rosterPlayerIds.length === 0
+      ? []
+      : await safe(
+          () =>
+            db()
+              .select({ playerId: playerWeekProj.playerId, proj: playerWeekProj.projPtsPpr })
+              .from(playerWeekProj)
+              .where(
+                and(
+                  eq(playerWeekProj.season, season),
+                  eq(playerWeekProj.week, week),
+                  inArray(playerWeekProj.playerId, rosterPlayerIds),
+                ),
+              ),
+          [],
+        );
+  const projOf = new Map(projections.map((p) => [p.playerId, p.proj]));
+  const starterProjected =
+    projections.length === 0
+      ? null
+      : STARTING_SLOTS.reduce((sum, slot) => {
+          const entry = bySlot.get(slot);
+          return sum + (entry ? (projOf.get(entry.playerId) ?? 0) : 0);
+        }, 0);
   const scratchpad = pad[0];
   const weeks = Array.from({ length: MAX_WEEK }, (_, i) => i + 1);
 
@@ -213,7 +257,8 @@ export default async function TeamPage({
           <div>
             <h2 className="text-[20px] font-bold tracking-[-0.02em]">Week {week} lineup</h2>
             <p className="mt-1.5 text-[13px] text-muted">
-              Starters have scored {starterPoints.toFixed(2)} so far.
+              Starters have scored {starterPoints.toFixed(2)} so far
+              {starterProjected !== null ? `, of a projected ${starterProjected.toFixed(1)}` : ""}.
             </p>
 
             <nav className="scroll-x mt-3 flex gap-2 text-[13px]" aria-label="Week">
@@ -239,10 +284,18 @@ export default async function TeamPage({
             </nav>
 
             <div className="mt-4 flex flex-col gap-1.5">
-              {STARTING_SLOTS.map((slot) => (
-                <PlayerRow key={slot} slot={slot} player={bySlot.get(slot)} />
-              ))}
-              {ir ? <PlayerRow slot="IR" player={ir} /> : null}
+              {STARTING_SLOTS.map((slot) => {
+                const entry = bySlot.get(slot);
+                return (
+                  <PlayerRow
+                    key={slot}
+                    slot={slot}
+                    player={entry}
+                    projection={entry ? projOf.get(entry.playerId) : null}
+                  />
+                );
+              })}
+              {ir ? <PlayerRow slot="IR" player={ir} projection={projOf.get(ir.playerId)} /> : null}
             </div>
             {lineup.length === 0 ? (
               <p className="mt-2 text-[12px] text-faint">
@@ -261,7 +314,7 @@ export default async function TeamPage({
             ) : (
               <div className="mt-4 flex flex-col gap-1.5">
                 {bench.map((player) => (
-                  <PlayerRow key={player.playerId} slot="BN" player={player} />
+                  <PlayerRow key={player.playerId} slot="BN" player={player} projection={projOf.get(player.playerId)} />
                 ))}
               </div>
             )}
