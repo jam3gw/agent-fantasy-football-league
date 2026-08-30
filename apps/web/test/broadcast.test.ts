@@ -396,6 +396,24 @@ describe("body summaries", () => {
     );
   });
 
+  it("strips nested markers, all the way down", () => {
+    expect(summarizeBody("> - a quoted bullet", 200)).toBe("a quoted bullet");
+  });
+
+  it("does not mistake a sentence opening with a year for an ordered-list item", () => {
+    expect(summarizeBody("2026. That is the year this league runs in.", 200)).toBe(
+      "2026. That is the year this league runs in.",
+    );
+  });
+
+  it("moves a cut off the middle of an inline token rather than stranding a **", () => {
+    const text = `The plan is ${"a".repeat(40)} **a very long bold declaration of intent** and then more`;
+    const out = summarizeBody(text, 60);
+    // The cut at 60 lands inside the bold token, so it retreats to the token's
+    // start — no unbalanced ** survives for the inline renderer to strand.
+    expect(out).toBe(`The plan is ${"a".repeat(40)}…`);
+  });
+
   it("ellipses when there is no sentence break to use", () => {
     const text = "a".repeat(200);
     const out = summarizeBody(text, 50);

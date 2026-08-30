@@ -12,11 +12,11 @@
 import type { ReactNode } from "react";
 
 /**
- * `**bold**`, `*italic*`, `` `code` ``. The underscore forms are deliberately
- * not supported: player and stat keys carry underscores (`pts_allow_14_20`)
- * and would be mangled into italics.
+ * `***bold italic***`, `**bold**`, `*italic*`, `` `code` ``. The underscore
+ * forms are deliberately not supported: player and stat keys carry underscores
+ * (`pts_allow_14_20`) and would be mangled into italics.
  */
-const INLINE = /(\*\*[^*\n]+\*\*|\*[^*\n]+\*|`[^`\n]+`)/g;
+const INLINE = /(\*{3}[^*\n]+\*{3}|\*{2}[^*\n]+\*{2}|\*[^*\n]+\*|`[^`\n]+`)/g;
 
 /** Inline bold, italic and code. Everything else stays literal text. */
 function inline(text: string, key: string): ReactNode[] {
@@ -27,7 +27,13 @@ function inline(text: string, key: string): ReactNode[] {
     const token = match[0];
     const at = match.index;
     if (at > last) nodes.push(text.slice(last, at));
-    if (token.startsWith("**")) {
+    if (token.startsWith("***")) {
+      nodes.push(
+        <strong key={`${key}-s${n}`} className="font-semibold">
+          <em>{token.slice(3, -3)}</em>
+        </strong>,
+      );
+    } else if (token.startsWith("**")) {
       nodes.push(
         <strong key={`${key}-b${n}`} className="font-semibold">
           {token.slice(2, -2)}
@@ -62,7 +68,10 @@ const HEADING = /^(#{1,6})\s+(.*)$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 const NUMBERED = /^\s*\d+[.)]\s+(.*)$/;
 const QUOTE = /^>\s?(.*)$/;
-const RULE = /^\s*([-*_])\1{2,}\s*$/;
+// CommonMark allows spaces inside a thematic break (`- - -`), so the marker
+// may repeat with or without them.
+const RULE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
+const FENCE = /^\s*(?:```|~~~)/;
 
 export function Markdown({
   source,
@@ -70,7 +79,7 @@ export function Markdown({
   className = "space-y-3 text-sm",
 }: {
   source: string;
-  /** A key prefix unique among Markdown blocks rendered on the same page. */
+  /** A key prefix — needs to be unique only among sibling Markdown blocks. */
   id: string | number;
   /** Spacing and base text size of the rendered block. */
   className?: string;
@@ -81,7 +90,25 @@ export function Markdown({
   let bullets: string[] = [];
   let numbered: string[] = [];
   let quote: string[] = [];
+  let fence: string[] | null = null;
   let k = 0;
+
+  // A fenced block renders verbatim in monospace: its lines are code (or an
+  // ASCII table), not Markdown, and block-parsing them would turn a `# comment`
+  // into a heading.
+  const flushFence = () => {
+    if (fence && fence.length > 0) {
+      blocks.push(
+        <pre
+          key={`${id}-f${k++}`}
+          className="overflow-x-auto rounded bg-border/40 p-3 font-mono text-[0.85em] leading-relaxed"
+        >
+          {fence.join("\n")}
+        </pre>,
+      );
+    }
+    fence = null;
+  };
 
   const flush = () => {
     if (paragraph.length > 0) {
@@ -130,6 +157,16 @@ export function Markdown({
   };
 
   for (const line of lines) {
+    if (fence !== null) {
+      if (FENCE.test(line)) flushFence();
+      else fence.push(line);
+      continue;
+    }
+    if (FENCE.test(line)) {
+      flush();
+      fence = [];
+      continue;
+    }
     if (line.trim() === "") {
       flush();
       continue;
@@ -173,6 +210,8 @@ export function Markdown({
     if (bullets.length || numbered.length || quote.length) flush();
     paragraph.push(line);
   }
+  // An unclosed fence still renders — nothing an agent writes is swallowed.
+  flushFence();
   flush();
 
   return <div className={className}>{blocks}</div>;

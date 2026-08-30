@@ -311,20 +311,51 @@ export function describeTransaction(
 }
 
 /**
- * Board posts run long; the rail shows the opening of one. Block-level
- * Markdown markers (heading hashes, list bullets, quote arrows, rules) are
- * dropped before the lines are flattened — flattening would otherwise leave
- * them mid-sentence, where the rail's inline renderer cannot use them. Inline
- * `**bold**` and friends survive for that renderer to handle.
+ * Model-written Markdown flattened to one line for the rails. Block-level
+ * markers (heading hashes, list bullets, quote arrows, rules) are dropped
+ * line-wise before the lines are flattened — flattening would otherwise leave
+ * them stranded mid-sentence, where the inline renderer cannot use them.
+ * Inline `**bold**` and friends survive for that renderer to handle.
+ *
+ * The markers can nest (`> - item`), so the strip repeats within a line. A
+ * number is only a list marker at up to three digits: a sentence opening with
+ * a year (`2026. The season…`) is prose, not item 2026 of a list.
  */
-export function summarizeBody(text: string, max: number): string {
-  const flat = text
-    .replace(/^\s*([-*_])\1{2,}\s*$/gm, " ")
-    .replace(/^\s*(#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s?)/gm, "")
+export function flattenMarkdown(text: string): string {
+  return text
+    .replace(/^\s*([-*_])(?:\s*\1){2,}\s*$/gm, " ")
+    .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d{1,3}[.)]\s+|>\s?)+/gm, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * The same inline tokens `components/markdown` renders, so a truncation point
+ * can be moved off the middle of one.
+ */
+const INLINE_TOKEN = /(\*{3}[^*\n]+\*{3}|\*{2}[^*\n]+\*{2}|\*[^*\n]+\*|`[^`\n]+`)/g;
+
+/**
+ * Where to actually cut when asked to cut at `at`: the same index, unless it
+ * lands inside an inline Markdown token — a `**bold**` cut in half leaves a
+ * stranded literal `**` on the rail, so the cut moves back to the token's
+ * start. If the token itself starts the string there is nothing sensible left
+ * to show before it, and the stray marker is the lesser evil.
+ */
+function tokenSafeCut(flat: string, at: number): number {
+  for (const match of flat.matchAll(INLINE_TOKEN)) {
+    const start = match.index;
+    if (start >= at) break;
+    if (at < start + match[0].length) return start > 0 ? start : at;
+  }
+  return at;
+}
+
+/** Board posts run long; the rail shows the opening of one. */
+export function summarizeBody(text: string, max: number): string {
+  const flat = flattenMarkdown(text);
   if (flat.length <= max) return flat;
-  const cut = flat.slice(0, max);
+  const cut = flat.slice(0, tokenSafeCut(flat, max));
   const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("? "), cut.lastIndexOf("! "));
-  return stop > max * 0.5 ? cut.slice(0, stop + 1) : `${cut.trimEnd()}…`;
+  return stop > max * 0.5 ? flat.slice(0, tokenSafeCut(flat, stop + 1)).trimEnd() : `${cut.trimEnd()}…`;
 }

@@ -23,6 +23,7 @@ import {
 import { formatEt } from "@league/shared";
 import { Container, Eyebrow, Nothing, Panel, Tag, formatEtStamp } from "@/components/broadcast";
 import { InlineMarkdown, Markdown } from "@/components/markdown";
+import { flattenMarkdown } from "@/lib/broadcastLogic";
 import { db } from "@/lib/db";
 import {
   safeRead as safe,
@@ -335,7 +336,7 @@ export default async function TeamPage({
                           {d.week ? ` · week ${d.week}` : ""}
                         </div>
                         <div className="mt-0.5 text-[14px] leading-[1.5]">
-                          <InlineMarkdown source={d.summary} id={`d${d.id}`} />
+                          <InlineMarkdown source={flattenMarkdown(d.summary)} id={`d${d.id}`} />
                         </div>
                       </div>
                       {d.sessionId ? (

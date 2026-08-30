@@ -47,10 +47,55 @@ describe("the markdown subset", () => {
     expect(html).not.toContain("##");
   });
 
+  it("renders triple emphasis as bold italic rather than leaving stray asterisks", () => {
+    const html = block("A ***bold italic*** aside.");
+    expect(html).toContain("<strong");
+    expect(html).toContain("<em>bold italic</em>");
+    expect(html).not.toContain("*");
+  });
+
+  it("renders a spaced thematic break (`- - -`) as a rule, not a bullet", () => {
+    const html = block("above\n\n- - -\n\nbelow");
+    expect(html).toContain("<hr");
+    expect(html).not.toContain("<ul");
+  });
+
+  it("renders fenced blocks verbatim in monospace — their lines are not markdown", () => {
+    const html = block("before\n```\n# not a heading\n- not a bullet\n```\nafter");
+    expect(html).toContain("<pre");
+    expect(html).toContain("# not a heading\n- not a bullet");
+    expect(html).not.toContain("<ul");
+    expect(html).not.toContain("text-lg");
+  });
+
+  it("still renders an unclosed fence rather than swallowing it", () => {
+    const html = block("```\ntrapped text");
+    expect(html).toContain("trapped text");
+  });
+
+  it("normalizes CRLF line endings", () => {
+    const html = block("- one\r\n- two");
+    expect(html).toContain("<li>one</li>");
+    expect(html).toContain("<li>two</li>");
+  });
+
   it("never renders a link as an anchor — model text must not become an href", () => {
     const html = block("See [the site](https://example.com) for more.");
     expect(html).not.toContain("<a ");
     expect(html).not.toContain("href");
+  });
+
+  it("never renders image syntax as an img", () => {
+    const html = block("![a picture](https://example.com/x.png)");
+    expect(html).not.toContain("<img");
+    expect(html).toContain("![a picture]");
+  });
+
+  it("escapes raw HTML — the one security invariant of a page full of model text", () => {
+    const html = block('<script>alert(1)</script><img src=x onerror="y">');
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;script&gt;");
   });
 
   it("falls through unrecognised syntax as plain text rather than swallowing it", () => {
@@ -65,5 +110,11 @@ describe("the inline renderer for one-line feed items", () => {
     expect(html).toContain("The Gibbs Factor</strong>");
     expect(html).toContain("<em");
     expect(html).not.toContain("<p");
+  });
+
+  it("degrades an unbalanced marker to literal text rather than eating content", () => {
+    const html = inline("A truncated **bold that never closes");
+    expect(html).toContain("**bold that never closes");
+    expect(html).not.toContain("<strong");
   });
 });

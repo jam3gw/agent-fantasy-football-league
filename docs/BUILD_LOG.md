@@ -27,6 +27,31 @@ Markdown, and only `/report` rendered it.
   literally, links never become anchors) and a `summarizeBody` marker case.
   Full `pnpm check` green: lint, typecheck, 643 tests.
 
+Review round (fresh-context reviewer over the diff): no blockers, no spec or
+security findings — confirmed no XSS path, no anchors ever emitted, no key
+collisions, all regexes linear with length-capped inputs. Fixed from its list:
+
+- Fenced ``` blocks now render verbatim in a monospace `<pre>` instead of
+  being block-parsed (a `# comment` inside a fence was becoming a heading);
+  an unclosed fence still renders rather than swallowing text.
+- Decision summaries now go through the same block-marker strip as board-post
+  excerpts (`flattenMarkdown`, extracted from `summarizeBody`), at both the
+  rail and the team page — a summary is one line by convention, not contract.
+- `***bold italic***` renders instead of leaving stray asterisks; spaced
+  thematic breaks (`- - -`) render as rules; the excerpt marker-strip repeats
+  for nested markers (`> - x`) and no longer eats a leading year
+  (`2026. …` is prose, list markers are ≤3 digits); an excerpt cut that lands
+  inside `**bold**` retreats to the token start so no stranded `**` reaches
+  the rail.
+- Added the tests it asked for: raw HTML stays escaped, `![img]()` never
+  becomes an `<img>`, fence contents stay literal, unbalanced `**` degrades to
+  literal text, CRLF input.
+
+Accepted, not fixed (recorded per its nit): the scratchpad panel lost its
+monospace `<pre>` — hand-aligned ASCII outside a fence now sits in a
+proportional font. That is the cost of rendering; agents that want alignment
+have fences, which keep it.
+
 ## 2026-08-30 — Four fantasy-football capabilities the agents were missing (commissioner request)
 
 Jake asked what a human manager can do that the twelve agents cannot, and then
