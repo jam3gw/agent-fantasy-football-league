@@ -552,6 +552,30 @@ export async function startQueuedSessions(
   const now = clock.now();
   const reclaimed = await reclaimStuckSessions(database, clock);
 
+  // Ordered by when each session's turn comes, not by when it was booked:
+  // `week.plan` books the whole week's lineup checks in one instant — more
+  // rows than this page — and ordering by `created_at` put that far-future
+  // pile ahead of everything booked after it, so a board reply due *now* was
+  // never even examined until the pile drained weeks later. Due time also
+  // serves the retirement branches below: a session past its deadline is past
+  // its due time too, so it sorts to the front rather than falling off the
+  // page, and a session with neither field coalesces to `created_at`. (A
+  // deadline-less session with a future `due_at` waits for its due time
+  // before the stale check sees it, which only ever retires it later, never
+  // runs it earlier.)
+  //
+  // The validity guard mirrors `parseDate`'s leniency: `due_at` is only ever
+  // written by `createSession` via `toISOString()`, but a cast that throws on
+  // one malformed row would fail this query — and with it every sweep, for
+  // every team, forever, with no way for the sweep to retire the poisoned
+  // row. A value that fails the guard sorts by `created_at` instead, exactly
+  // as `parseDate` returning null treats it on the JS side.
+  // `pg_input_is_valid` is PG16+; production is on 18, and PGlite (tests)
+  // carries it too.
+  const dueAtOrder = sql`coalesce(
+    case when pg_input_is_valid(${sessions.context} ->> 'due_at', 'timestamptz')
+         then (${sessions.context} ->> 'due_at')::timestamptz end,
+    ${sessions.createdAt})`;
   const queued = await database
     .select({
       id: sessions.id,
@@ -562,7 +586,7 @@ export async function startQueuedSessions(
     })
     .from(sessions)
     .where(eq(sessions.status, "queued"))
-    .orderBy(asc(sessions.createdAt))
+    .orderBy(dueAtOrder, asc(sessions.createdAt))
     .limit(MAX_QUEUED_SESSIONS_PER_TICK);
 
   // §4.3: a paused team runs nothing. Pausing was enforced only where sessions
