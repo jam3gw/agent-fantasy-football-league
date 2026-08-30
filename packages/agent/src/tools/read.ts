@@ -984,10 +984,14 @@ export const getFreeAgentsTool = readTool(
     await Promise.all([ctx.refreshProjections?.(season, week), ctx.refreshPlayerFeed?.()]);
 
     // Correlated sub-selects keep the scan in the database; ::float8 so numeric
-    // columns come back as numbers, not strings.
-    const lastWeekExpr = sql<number | null>`(select s.pts_ppr::float8 from player_week_stats s where s.player_id = ${players.playerId} and s.season = ${season} and s.week = ${lastWeek})`;
-    const seasonExpr = sql<number>`coalesce((select sum(s.pts_ppr)::float8 from player_week_stats s where s.player_id = ${players.playerId} and s.season = ${season}), 0)`;
-    const projExpr = sql<number | null>`(select p.proj_pts_ppr::float8 from player_week_proj p where p.player_id = ${players.playerId} and p.season = ${season} and p.week = ${week})`;
+    // columns come back as numbers, not strings. The outer reference must be
+    // the literal `players.player_id`: drizzle renders an interpolated column
+    // unqualified inside a select-list expression, and a bare "player_id" here
+    // rebinds to the subquery's own alias — the subquery stops being
+    // correlated and returns one row per player with stats.
+    const lastWeekExpr = sql<number | null>`(select s.pts_ppr::float8 from player_week_stats s where s.player_id = players.player_id and s.season = ${season} and s.week = ${lastWeek})`;
+    const seasonExpr = sql<number>`coalesce((select sum(s.pts_ppr)::float8 from player_week_stats s where s.player_id = players.player_id and s.season = ${season}), 0)`;
+    const projExpr = sql<number | null>`(select p.proj_pts_ppr::float8 from player_week_proj p where p.player_id = players.player_id and p.season = ${season} and p.week = ${week})`;
 
     const orderBy =
       sort === "trending"
