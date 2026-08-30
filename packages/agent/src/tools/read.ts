@@ -316,16 +316,18 @@ async function rosterPayload(
   const team = idx.get(teamId);
   if (!team) return toolFailure("not_found", `team ${teamId} does not exist`);
 
-  const roster = await getRoster(db, teamId);
-  const ids = roster.map((r) => r.playerId);
-  const now = ctx.clock.now();
   const season = settings.season;
   // Lineup decisions deserve live numbers: pull the projection and player
-  // feeds for the current (or a future) week before reading. Past weeks
-  // never move.
+  // feeds for the current (or a future) week BEFORE any read — the roster
+  // read below carries injury status, so refreshing after it would return
+  // pre-refresh injuries on the very call that refreshed. Past weeks never
+  // move.
   if (week >= settings.currentWeek) {
     await Promise.all([ctx.refreshProjections?.(season, week), ctx.refreshPlayerFeed?.()]);
   }
+  const roster = await getRoster(db, teamId);
+  const ids = roster.map((r) => r.playerId);
+  const now = ctx.clock.now();
   const [{ byTeam }, byes, slots, pts, seasonPts, proj, locked] = await Promise.all([
     weekGames(db, season, week, now),
     byeWeeks(db, season),
@@ -785,6 +787,9 @@ export const getPlayerStatsTool = readTool(
     const season = settings.season;
     const week = settings.currentWeek;
     const ids = [...new Set(args.player_ids)];
+    // Researching specific players is a pre-kickoff question too: the result
+    // carries injury status, so it gets the same freshness as get_my_team.
+    await ctx.refreshPlayerFeed?.();
     const rows = await db.select().from(players).where(inArray(players.playerId, ids));
     if (rows.length === 0) return toolFailure("not_found", "no player matched those ids", "use search_players first");
 

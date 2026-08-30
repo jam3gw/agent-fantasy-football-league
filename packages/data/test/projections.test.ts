@@ -128,6 +128,33 @@ describe("§5.4 on-demand projection refresh", () => {
     expect(await db.select().from(playerWeekProj)).toHaveLength(0);
   });
 
+  it("never throws when the write path fails, and remembers the miss", async () => {
+    stubFeed([feedRow("a", 18.4)]);
+    // Fetch succeeds; the upsert's transaction dies (a dropped connection).
+    const broken = new Proxy(db, {
+      get(target, prop, receiver) {
+        if (prop === "transaction") {
+          return () => {
+            throw new Error("connection reset");
+          };
+        }
+        return Reflect.get(target, prop, receiver) as unknown;
+      },
+    });
+    const result = await ensureFreshProjections(broken as typeof db, clock, { season: SEASON, week: 3 });
+    expect(result).toEqual({ outcome: "unavailable", rows: 0 });
+    // The failure is remembered like a fetch miss: no immediate re-download.
+    const spy = stubFeed([feedRow("a", 18.4)]);
+    await ensureFreshProjections(db, clock, { season: SEASON, week: 3 });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("stamps rows with Clock time so the TTL reader and writer share one clock", async () => {
+    stubFeed([feedRow("a", 18.4)]);
+    await ensureFreshProjections(db, clock, { season: SEASON, week: 3 });
+    expect((await storedRow("a", 3))?.updatedAt).toEqual(clock.now());
+  });
+
   it("shares one pull between concurrent callers for the same week", async () => {
     const spy = stubFeed([feedRow("a", 18.4)]);
     const [r1, r2] = await Promise.all([

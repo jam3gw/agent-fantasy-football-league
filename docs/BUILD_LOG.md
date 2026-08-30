@@ -2,6 +2,56 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Review round on the on-demand refreshers: 1 blocker + 6 should-fixes, all fixed
+
+A fresh-context reviewer took the branch diff against SPEC. Findings and
+what changed (this supersedes details in the two entries below):
+
+1. **Blocker — "never throws" only covered the fetch.** A failing upsert or
+   TTL read would have propagated out of `ensureFresh*`, failed whole
+   sessions at snapshot build, and (worse) bypassed the miss cache so every
+   read re-downloaded and re-threw. Both refreshers now wrap their entire
+   body; any failure degrades to "serve what is stored" and is remembered
+   like a fetch miss. Tested with a proxy DB whose transaction throws.
+2. **`rosterPayload` read the roster (with injury status) before the
+   refresh**, so get_my_team returned pre-refresh injuries on the very call
+   that refreshed. The refresh now runs before any read, with a test that
+   pins the ordering. Same test added for the context snapshot.
+3. **Clock consistency.** TTL checks compare against `Clock.now()`, but rows
+   were stamped with wall-clock `new Date()` — divergent under a simulation
+   clock override. `upsertProjections` now takes `now` (the refresher passes
+   Clock time), and player-feed freshness moved off the fetch-time
+   `sleeper.players` health row onto a new `players.applied` health row that
+   `upsertPlayers` stamps with Clock time inside its own transaction. That
+   also fixes a subtler conflation the reviewer's finding exposed: "a fetch
+   succeeded" is not "the data landed", so a failed write can no longer
+   masquerade as freshness.
+4. **SPEC amended** (§5.1, §5.4, §8.4 player_research row, §15.1 item 11,
+   §13's injury paragraph): the on-demand TTL refresh is now in the spec;
+   "makes no outbound request" became "never a per-agent request — the only
+   outbound path is the shared TTL-guarded refresh".
+5. **The player-feed diff now also compares `position` and
+   `fantasy_positions`** (eligibility changes are lineup-relevant).
+6. **Hot-path performance.** `upsertProjections` is batched (chunked
+   multi-row INSERT ... ON CONFLICT with excluded, deduped by player) —
+   the season board is ~1,700 rows and previously did one round trip each.
+   `player_week_proj` gained a `(season, week)` index (migration 0004) so
+   the TTL probe stops scanning the table. The player-feed refresher caps
+   its on-demand write at 500 changed rows ("deferred": a delta that large
+   is roster-cut day, the hourly job's work; suppressed like a miss so it
+   does not re-download back-to-back).
+7. **Draft clock.** The draft workflow now pre-warms both feeds before each
+   pick session starts, so a stale moment costs the fetch outside the model
+   loop and in-session reads hit the fresh path. `get_player_stats` also
+   refreshes the player feed (it reports injury status; previously the one
+   injury-showing read tool without freshness).
+
+Reviewer concerns checked and found unfounded: duplicate injury.changed
+across concurrent refreshes (deduped by `injurySessionKey` +
+onConflictDoNothing), information parity, secrets, engine-write rule.
+
+## 2026-08-30 — Player feed (injuries) refreshes on demand too (§5.1)
+
 ## 2026-08-30 — Player feed (injuries) refreshes on demand too (§5.1)
 
 Jake's follow-up to the projections change: agents also need pre-kickoff

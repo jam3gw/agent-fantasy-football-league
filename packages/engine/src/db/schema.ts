@@ -269,7 +269,12 @@ export const playerWeekProj = pgTable(
     projPtsPpr: numeric("proj_pts_ppr", { precision: 8, scale: 2, mode: "number" }),
     updatedAt: updatedAt(),
   },
-  (t) => [primaryKey({ columns: [t.playerId, t.season, t.week] })],
+  (t) => [
+    primaryKey({ columns: [t.playerId, t.season, t.week] }),
+    // The on-demand refresh probes max(updated_at) by (season, week) on
+    // every projection read; without this it is a full-table scan.
+    index("player_week_proj_season_week_idx").on(t.season, t.week),
+  ],
 );
 
 export const matchups = pgTable(

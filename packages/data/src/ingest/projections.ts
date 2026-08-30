@@ -78,34 +78,47 @@ async function refresh(
   { season, week, ttlMs = PROJECTIONS_TTL_MS }: { season: number; week: number; ttlMs?: number },
 ): Promise<EnsureProjectionsResult> {
   const now = clock.now().getTime();
-
-  const stored = await db
-    .select({ at: sql<string | Date | null>`max(${playerWeekProj.updatedAt})` })
-    .from(playerWeekProj)
-    .where(and(eq(playerWeekProj.season, season), eq(playerWeekProj.week, week)));
-  const at = stored[0]?.at ? new Date(stored[0].at).getTime() : null;
-  if (at !== null && now - at < ttlMs) return { outcome: "fresh", rows: 0 };
-
-  const missedAt = lastMissAt.get(key);
-  if (missedAt !== undefined && now - missedAt < PROJECTIONS_MISS_TTL_MS) {
-    return { outcome: "unavailable", rows: 0 };
-  }
-
-  let entries;
   try {
-    entries =
-      week === 0
-        ? await fetchSeasonProjections(season, { db, ...FETCH_OPTS })
-        : await fetchWeekProjections(season, week, { db, ...FETCH_OPTS });
-  } catch {
-    entries = null;
-  }
+    const stored = await db
+      .select({ at: sql<string | Date | null>`max(${playerWeekProj.updatedAt})` })
+      .from(playerWeekProj)
+      .where(and(eq(playerWeekProj.season, season), eq(playerWeekProj.week, week)));
+    const at = stored[0]?.at ? new Date(stored[0].at).getTime() : null;
+    if (at !== null && now - at < ttlMs) return { outcome: "fresh", rows: 0 };
 
-  const rows = entries && entries.length > 0 ? await upsertProjections(db, { season, week, entries }) : 0;
-  if (rows === 0) {
+    const missedAt = lastMissAt.get(key);
+    if (missedAt !== undefined && now - missedAt < PROJECTIONS_MISS_TTL_MS) {
+      return { outcome: "unavailable", rows: 0 };
+    }
+
+    let entries;
+    try {
+      entries =
+        week === 0
+          ? await fetchSeasonProjections(season, { db, ...FETCH_OPTS })
+          : await fetchWeekProjections(season, week, { db, ...FETCH_OPTS });
+    } catch {
+      entries = null;
+    }
+
+    // The upsert stamps rows with Clock time so the TTL reader and the writer
+    // share one clock (matters under a simulation clock override, §15.3).
+    const rows =
+      entries && entries.length > 0
+        ? await upsertProjections(db, { season, week, entries, now: clock.now() })
+        : 0;
+    if (rows === 0) {
+      lastMissAt.set(key, now);
+      return { outcome: "unavailable", rows: 0 };
+    }
+    lastMissAt.delete(key);
+    return { outcome: "refreshed", rows };
+  } catch {
+    // "Never throws" covers the whole body: a failing TTL read or upsert (a
+    // dropped connection, a transient DB error) degrades to "serve what is
+    // stored" and is remembered like a fetch miss, so it cannot fail a
+    // session or turn every read into a re-download.
     lastMissAt.set(key, now);
     return { outcome: "unavailable", rows: 0 };
   }
-  lastMissAt.delete(key);
-  return { outcome: "refreshed", rows };
 }
