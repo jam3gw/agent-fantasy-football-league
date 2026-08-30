@@ -233,6 +233,14 @@ describe("transaction descriptions", () => {
     ).toBe("Drafted Jahmyr Gibbs. “Why **Zero RB** is dead.”");
   });
 
+  it("falls back when a reason flattens to nothing rather than showing empty quotes", () => {
+    const fenced = "```\ncode only\n```";
+    expect(describeTransaction("draft_pick", { name: "Jahmyr Gibbs", reason: fenced })).toBe(
+      "Drafted Jahmyr Gibbs.",
+    );
+    expect(describeTransaction("commissioner", { reason: fenced })).toBe("The commissioner acted.");
+  });
+
   it("describes a draft pick from the snake_case payload the draft paths write", () => {
     // make_pick (packages/agent/src/tools/draft.ts) records `player_id`,
     // `name`, `position`, `nfl_team`, `pick_no`, `round`, `reason` — reading

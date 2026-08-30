@@ -151,15 +151,16 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
       kind: d.kind.replace(/_/g, " "),
       // A summary is one line by convention, not by contract: an agent that
       // writes block Markdown into one gets the markers stripped, same as a
-      // board post.
-      body: flattenMarkdown(d.summary),
+      // board post. One that was nothing but fenced code flattens to "", and
+      // a rail row must still say something.
+      body: flattenMarkdown(d.summary) || "(nothing outside a code block)",
       bad: false,
     })),
     ...posts.map((p) => ({
       at: p.at,
       teamId: p.teamId,
       kind: "board post",
-      body: summarizeBody(p.body, 160),
+      body: summarizeBody(p.body, 160) || "(nothing outside a code block)",
       bad: false,
     })),
     ...txns.map((t) => ({

@@ -302,12 +302,17 @@ export function describeTransaction(
       }
       // The reason is agent prose, same as a decision summary: one line by
       // convention only, so block markers are flattened out before the rail.
+      // A reason that flattens to nothing (all fenced code) drops its quote
+      // entirely rather than showing empty curly quotes.
       const reason = text("reason");
-      return reason ? `Drafted ${who}${where}. “${flattenMarkdown(reason)}”` : `Drafted ${who}${where}.`;
+      const why = reason ? flattenMarkdown(reason) : "";
+      return why ? `Drafted ${who}${where}. “${why}”` : `Drafted ${who}${where}.`;
     }
     case "commissioner": {
       const reason = text("reason");
-      return reason ? flattenMarkdown(reason) : "The commissioner acted.";
+      // `||` and not a pre-flatten truthiness check: an all-fence reason
+      // flattens to "" and must still fall back.
+      return (reason ? flattenMarkdown(reason) : "") || "The commissioner acted.";
     }
     default:
       return type.replace(/_/g, " ");

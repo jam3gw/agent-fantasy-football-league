@@ -122,7 +122,14 @@ describe("the markdown subset", () => {
     expect(html).toContain("~~~");
     expect(html).toContain("more code");
     expect(html).toContain("prose");
-    expect(html).not.toContain("<p>more code");
+    expect(html).not.toContain(">more code</p>");
+  });
+
+  it("accepts up to three leading spaces on a heading or quote, per CommonMark", () => {
+    const html = block("   ## Plan\n   > quoted");
+    expect(html).not.toContain("## Plan");
+    expect(html).toContain("Plan");
+    expect(html).toContain("<blockquote");
   });
 
   it("normalizes CRLF line endings", () => {

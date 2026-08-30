@@ -67,13 +67,14 @@ export function InlineMarkdown({ source, id }: { source: string; id: string }) {
   return <>{inline(source, id)}</>;
 }
 
-const HEADING = /^(#{1,6})\s+(.*)$/;
+// CommonMark allows up to three leading spaces before a heading or quote.
+const HEADING = /^\s{0,3}(#{1,6})\s+(.*)$/;
 const BULLET = /^\s*[-*+]\s+(.*)$/;
 // A number is only a list marker at up to three digits: a sentence opening
 // with a year (`2026. The season…`) is prose, not item 2026 of a list. Same
 // rule as `flattenMarkdown` in `lib/broadcastLogic.ts`.
 const NUMBERED = /^\s*(\d{1,3})[.)]\s+(.*)$/;
-const QUOTE = /^>\s?(.*)$/;
+const QUOTE = /^\s{0,3}>\s?(.*)$/;
 // CommonMark allows spaces inside a thematic break (`- - -`), so the marker
 // may repeat with or without them.
 const RULE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;

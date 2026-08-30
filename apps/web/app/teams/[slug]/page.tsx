@@ -336,7 +336,10 @@ export default async function TeamPage({
                           {d.week ? ` · week ${d.week}` : ""}
                         </div>
                         <div className="mt-0.5 text-[14px] leading-[1.5]">
-                          <InlineMarkdown source={flattenMarkdown(d.summary)} id={`d${d.id}`} />
+                          <InlineMarkdown
+                            source={flattenMarkdown(d.summary) || "(nothing outside a code block)"}
+                            id={`d${d.id}`}
+                          />
                         </div>
                       </div>
                       {d.sessionId ? (

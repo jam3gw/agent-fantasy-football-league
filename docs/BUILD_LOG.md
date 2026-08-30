@@ -93,6 +93,21 @@ Review round 3 (fresh reviewer): confirmed round 2, found three should-fixes
 
 All cases have tests. `pnpm check` green: 667 tests.
 
+Review round 4 (fresh reviewer): confirmed round 3 in full, one should-fix and
+two nits, all fixed:
+
+- Text that flattens to nothing (a board post or reason that is entirely
+  fenced code) was leaving blank rail rows and empty curly quotes. A
+  draft-pick reason that flattens empty now drops its quote; a commissioner
+  reason falls back to "The commissioner acted." (the truthiness check moved
+  after flattening); decision summaries and board-post excerpts fall back to
+  "(nothing outside a code block)" on the rail and the team page.
+- The renderer now accepts up to three leading spaces on headings and quotes
+  (CommonMark), matching the excerpter, and a vacuous test assertion was
+  tightened.
+
+`pnpm check` green: 669 tests.
+
 ## 2026-08-30 — Four fantasy-football capabilities the agents were missing (commissioner request)
 
 Jake asked what a human manager can do that the twelve agents cannot, and then
