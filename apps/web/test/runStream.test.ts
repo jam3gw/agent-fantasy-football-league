@@ -64,6 +64,18 @@ describe("partialDelta", () => {
       ),
     ).toEqual({ reasoning: "closing", text: "", reset: true });
   });
+
+  it("keeps a contentless restart — only an empty extension is silent", () => {
+    // A step's first flush can be empty (the throttle flushes on the very
+    // first delta part); the reset must survive it or a reader would keep a
+    // failed attempt's chunks and concatenate both attempts.
+    expect(
+      partialDelta(
+        { stepNo: -2, reasoning: "", text: "" },
+        { stepNo: 5, reasoning: "", text: "" },
+      ),
+    ).toEqual({ reasoning: "", text: "", reset: true });
+  });
 });
 
 describe("createRunStreamPartialSink", () => {
@@ -71,6 +83,7 @@ describe("createRunStreamPartialSink", () => {
     const chunks: RunStreamChunk[] = [];
     const sink = createRunStreamPartialSink(42, async (c) => {
       chunks.push(c);
+      return true;
     });
 
     await sink({ stepNo: 0, reasoning: "a", text: "" });
@@ -91,6 +104,7 @@ describe("createRunStreamPartialSink", () => {
     const chunks: RunStreamChunk[] = [];
     const sink = createRunStreamPartialSink(7, async (c) => {
       chunks.push(c);
+      return true;
     });
     const flushes = [
       { stepNo: 2, reasoning: "I sho", text: "" },
@@ -114,6 +128,7 @@ describe("createRunStreamPartialSink", () => {
     const chunks: RunStreamChunk[] = [];
     const emit = async (c: RunStreamChunk) => {
       chunks.push(c);
+      return true;
     };
     await createRunStreamPartialSink(9, emit)({ stepNo: 5, reasoning: "attempt one", text: "" });
     await createRunStreamPartialSink(9, emit)({ stepNo: 5, reasoning: "attempt", text: "" });
@@ -121,6 +136,32 @@ describe("createRunStreamPartialSink", () => {
     expect(chunks).toEqual([
       { kind: "model_delta", sessionId: 9, stepNo: 5, reasoning: "attempt one", text: "", reset: true },
       { kind: "model_delta", sessionId: 9, stepNo: 5, reasoning: "attempt", text: "", reset: true },
+    ]);
+  });
+
+  it("does not advance past a dropped write — the next delta covers the hole", async () => {
+    // Partials are cumulative, so a failed emit must leave `prev` where the
+    // reader last caught up; otherwise later suffixes concatenate around an
+    // undetectable gap for the rest of the step.
+    const chunks: RunStreamChunk[] = [];
+    let failNext = false;
+    const sink = createRunStreamPartialSink(3, async (c) => {
+      if (failNext) {
+        failNext = false;
+        return false;
+      }
+      chunks.push(c);
+      return true;
+    });
+
+    await sink({ stepNo: 0, reasoning: "one ", text: "" });
+    failNext = true;
+    await sink({ stepNo: 0, reasoning: "one two ", text: "" }); // dropped
+    await sink({ stepNo: 0, reasoning: "one two three", text: "" });
+
+    expect(chunks).toEqual([
+      { kind: "model_delta", sessionId: 3, stepNo: 0, reasoning: "one ", text: "", reset: true },
+      { kind: "model_delta", sessionId: 3, stepNo: 0, reasoning: "two three", text: "", reset: false },
     ]);
   });
 });
@@ -137,7 +178,7 @@ describe("emitRunChunk", () => {
   it("is a silent no-op outside a workflow context", async () => {
     // getWritable() throws here (no workflow or step is running); the helper
     // must swallow that so tests and scripts never notice the stream.
-    await expect(emitRunChunk(chunk)).resolves.toBeUndefined();
+    await expect(emitRunChunk(chunk)).resolves.toBe(false);
   });
 
   it("swallows a rejected write and releases the lock", async () => {
@@ -146,7 +187,7 @@ describe("emitRunChunk", () => {
         throw new Error("stream backend down");
       },
     });
-    await expect(emitRunChunk(chunk, () => writable)).resolves.toBeUndefined();
+    await expect(emitRunChunk(chunk, () => writable)).resolves.toBe(false);
     // The lock was released even though the write rejected — a second writer
     // can be acquired. (An unreleased lock would hang the step's request.)
     expect(() => writable.getWriter()).not.toThrow();
@@ -155,7 +196,18 @@ describe("emitRunChunk", () => {
   it("swallows a locked stream (concurrent writer)", async () => {
     const writable = new WritableStream<RunStreamChunk>();
     const held = writable.getWriter(); // getWriter() inside emit throws
-    await expect(emitRunChunk(chunk, () => writable)).resolves.toBeUndefined();
+    await expect(emitRunChunk(chunk, () => writable)).resolves.toBe(false);
     held.releaseLock();
+  });
+
+  it("reports true when the write lands", async () => {
+    const received: RunStreamChunk[] = [];
+    const writable = new WritableStream<RunStreamChunk>({
+      write: async (c) => {
+        received.push(c);
+      },
+    });
+    await expect(emitRunChunk(chunk, () => writable)).resolves.toBe(true);
+    expect(received).toEqual([chunk]);
   });
 });
