@@ -37,6 +37,29 @@ Not built, deliberately: `read_url` stays out (spec-optional; §5.8 still says
 same §8.10 comparability argument — so the decision is flagged here rather
 than queued quietly.
 
+**Review round one** (fresh-context reviewer, per the standing loop) found
+seven items; all fixed:
+- `defense_vs_position` counted non-final live rows (partial Sundays rank
+  defenses on incomparable denominators) and the degraded-week story was
+  asymmetric (nflverse overwrites offense/K rows with a null opponent but
+  never touches D/ST or unmapped players' live rows). Fix: aggregate
+  `final = true` rows only — a degraded week now drops out entirely, since
+  its finalized rows carry no opponent and the untouched live rows are not
+  final. Spec row and comment reworded to say what the code does.
+- The kind could return an empty page for a position with no rows, which the
+  §8.4 sentence forbids; the not_found check now runs post-filter.
+- `get_player_stats` could hit the §8.2 page cap (each item grew by up to 4
+  `upcoming_opponents`) with `has_more: true` and no way to continue; it now
+  takes `offset`.
+- `upcoming_opponents` included a game already final (Sunday night before the
+  week advances), shrinking the real lookahead to 3; final games are filtered.
+- `player_ids` silently ignored for `defense_vs_position` — documented in the
+  §8.4 row (rows are defenses, not players).
+- The jobs.ts lookahead loop was untested; extracted as `ingestProjections`
+  (injectable fetcher) in `@league/data` with a test covering the
+  null-week-skip. Plus: a vacuous lineup assertion fixed, reporter
+  (team-less) future-week shape and week-arg-ignored assertions added.
+
 SPEC updated: §5.3 (stored team/opponent), §5.4 (three-week window), §6
 (`player_week_stats` columns), §8.4 (`get_matchup`, `get_player_stats`,
 `player_research` rows). Tests: future-pairings and unscheduled-week shapes,

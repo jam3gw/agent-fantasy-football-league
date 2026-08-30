@@ -780,7 +780,7 @@ export const getTeamWeekResultsTool = readTool(
 export const getPlayerStatsTool = readTool(
   "get_player_stats",
   "Up to 20 players: this season's points by week with key stats, last season's totals, injury status, NFL team, the next four opponents with projected points where loaded, bye week, and who owns them.",
-  z.object({ player_ids: z.array(z.string()).min(1).max(20) }),
+  z.object({ player_ids: z.array(z.string()).min(1).max(20), offset: z.number().int().min(0).optional() }),
   async (args, ctx) => {
     const db = ctx.db;
     const settings = await getSettings(db);
@@ -832,9 +832,11 @@ export const getPlayerStatsTool = readTool(
         .filter((s) => s.playerId === p.playerId)
         .map((s) => ({ week: s.week, pts_ppr: s.ptsPpr, final: s.final, stats: keyStats(s.stats) }));
       // The next few games, not just one: bye-week planning and "add him
-      // before the soft stretch" both need the lookahead in one call.
+      // before the soft stretch" both need the lookahead in one call. A game
+      // already final (Sunday night, before the week advances Tuesday) is not
+      // "upcoming" — without this the lookahead silently shrinks to 3.
       const upcoming = p.nflTeam
-        ? futureGames.filter((g) => g.home === p.nflTeam || g.away === p.nflTeam).slice(0, 4)
+        ? futureGames.filter((g) => g.status !== "final" && (g.home === p.nflTeam || g.away === p.nflTeam)).slice(0, 4)
         : [];
       const next = upcoming[0];
       const last = lastById.get(p.playerId);
@@ -875,7 +877,9 @@ export const getPlayerStatsTool = readTool(
       };
     });
     const missing = ids.filter((id) => !rows.some((r) => r.playerId === id));
-    return pageRows(items, 0, items.length, { missing_player_ids: missing });
+    // Items are long (a season of by_week rows each); when the §8.2 page cap
+    // cuts the list, has_more/next_offset point at the rest via `offset`.
+    return pageRows(items, args.offset ?? 0, items.length, { missing_player_ids: missing });
   },
 );
 
@@ -1823,11 +1827,15 @@ export const playerResearchTool = readTool(
     }
 
     if (args.kind === "defense_vs_position") {
-      // Fantasy points allowed by each NFL defense to each position, from our
-      // own finalized weekly rows. The opponent column is written by the stats
-      // feed per game, so a traded player's early weeks stay attributed to the
-      // team he played them for. Weeks scored through the degraded nflverse
-      // ladder carry no opponent and are left out — for every defense alike.
+      // Fantasy points allowed by each NFL defense to each position. Only
+      // finalized rows count: mid-Sunday partials would rank defenses on
+      // incomparable denominators (an early game counted as a full week while
+      // late games have no row at all). The opponent column is written by the
+      // stats feed per game, so a traded player's early weeks stay attributed
+      // to the team he played them for. A week scored through the degraded
+      // nflverse ladder drops out entirely: its finalized rows carry no
+      // opponent, and the live rows the fallback did not overwrite (D/ST,
+      // unmapped players) are not final.
       const rows = await db
         .select({
           defense: playerWeekStats.opponent,
@@ -1842,19 +1850,12 @@ export const playerResearchTool = readTool(
             eq(playerWeekStats.season, season),
             gt(playerWeekStats.week, 0),
             sql`${playerWeekStats.week} <= ${settings.currentWeek}`,
+            eq(playerWeekStats.final, true),
             sql`${playerWeekStats.opponent} is not null`,
             inArray(players.position, [...FANTASY_POSITIONS]),
           ),
         )
         .groupBy(playerWeekStats.opponent, players.position);
-
-      if (rows.length === 0) {
-        return toolFailure(
-          "not_found",
-          "no per-game stats with opponents are loaded yet this season",
-          "this builds up from week 1 as games finalize",
-        );
-      }
       const perGame = rows.map((r) => ({
         defense: r.defense!,
         position: r.position!,
@@ -1889,6 +1890,15 @@ export const playerResearchTool = readTool(
             pts_ppr_allowed_per_game: r.avg,
             rank: i + 1,
           }),
+        );
+      }
+      // Post-filter, like every other kind (§8.4): a position with no
+      // finalized games yet is not_found, never an empty page.
+      if (ranked.length === 0) {
+        return toolFailure(
+          "not_found",
+          `no finalized games with opponents are on record yet${position === "ALL" ? "" : ` for ${position}`}`,
+          "this builds up from week 1 as games finalize",
         );
       }
       return pageRows(ranked, offset, limit, {

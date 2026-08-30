@@ -336,11 +336,18 @@ describe("get_matchup", () => {
     const mine = res.my_matchup as Record<string, unknown>;
     expect((mine.home as { team_id: number }).team_id).toBe(a);
     expect((mine.away as { team_id: number }).team_id).toBe(b);
-    // No lineups and no points: the week has not been played.
-    expect(mine.lineup).toBeUndefined();
+    // No lineups and no points: the week has not been played. (Lineups live
+    // on each side in the past/current shape, so assert on the sides.)
+    expect((mine.home as Record<string, unknown>).lineup).toBeUndefined();
+    expect((mine.away as Record<string, unknown>).lineup).toBeUndefined();
     expect((mine.home as Record<string, unknown>).points).toBeUndefined();
     expect((res.other_matchups as unknown[]).length).toBe(1);
     expect(String(res.note)).toContain("pairings only");
+
+    // The reporter (no team) gets every pairing under other_matchups.
+    const reporter = ok(await getMatchupTool.execute({ week: 5 }, ctxFor({ teamId: null })));
+    expect(reporter.my_matchup).toBeNull();
+    expect((reporter.other_matchups as unknown[]).length).toBe(2);
   });
 
   it("still reports an unscheduled future week as empty", async () => {
@@ -1062,15 +1069,18 @@ describe("player_research", () => {
     const wr = await makePlayer(db, { position: "WR", fullName: "Wideout", nflTeam: "KC" });
     await db.insert(playerWeekStats).values([
       // DEN allows 30 then 10 to RBs (20/game); MIA allows 12 once.
-      { playerId: rb1, season: SEASON, week: 1, opponent: "DEN", stats: {}, ptsPpr: 30 },
-      { playerId: rb2, season: SEASON, week: 2, opponent: "DEN", stats: {}, ptsPpr: 10 },
-      { playerId: rb1, season: SEASON, week: 2, opponent: "MIA", stats: {}, ptsPpr: 12 },
+      { playerId: rb1, season: SEASON, week: 1, opponent: "DEN", stats: {}, ptsPpr: 30, final: true },
+      { playerId: rb2, season: SEASON, week: 2, opponent: "DEN", stats: {}, ptsPpr: 10, final: true },
+      { playerId: rb1, season: SEASON, week: 2, opponent: "MIA", stats: {}, ptsPpr: 12, final: true },
       // A WR row must not leak into the RB table.
-      { playerId: wr, season: SEASON, week: 1, opponent: "DEN", stats: {}, ptsPpr: 25 },
+      { playerId: wr, season: SEASON, week: 1, opponent: "DEN", stats: {}, ptsPpr: 25, final: true },
       // A degraded-source row with no opponent is left out.
-      { playerId: rb2, season: SEASON, week: 3, opponent: null, stats: {}, ptsPpr: 40 },
+      { playerId: rb2, season: SEASON, week: 3, opponent: null, stats: {}, ptsPpr: 40, final: true },
+      // A live, non-final row never counts: mid-Sunday partials would rank
+      // defenses on incomparable denominators.
+      { playerId: rb1, season: SEASON, week: 3, opponent: "DEN", stats: {}, ptsPpr: 3, final: false },
       // Last season never counts.
-      { playerId: rb1, season: SEASON - 1, week: 1, opponent: "MIA", stats: {}, ptsPpr: 99 },
+      { playerId: rb1, season: SEASON - 1, week: 1, opponent: "MIA", stats: {}, ptsPpr: 99, final: true },
     ]);
 
     const res = ok(await playerResearchTool.execute({ kind: "defense_vs_position", position: "RB" }, ctxFor()));
@@ -1080,6 +1090,12 @@ describe("player_research", () => {
       { nfl_team: "MIA", position: "RB", games: 1, pts_ppr_allowed_total: 12, pts_ppr_allowed_per_game: 12, rank: 2 },
     ]);
     expect(String(res.note)).toContain("softest");
+
+    // The week argument is meaningless for a season-to-date table and ignored.
+    const withWeek = ok(
+      await playerResearchTool.execute({ kind: "defense_vs_position", position: "RB", week: 1 }, ctxFor()),
+    );
+    expect(withWeek.items).toEqual(items);
 
     // Unfiltered, the WR table shows up beside the RB one, ranked within itself.
     const all = ok(await playerResearchTool.execute({ kind: "defense_vs_position" }, ctxFor()));
@@ -1092,6 +1108,16 @@ describe("player_research", () => {
   it("defense_vs_position reports not_found before any game has an opponent on record", async () => {
     await seedLeague(db);
     const res = (await playerResearchTool.execute({ kind: "defense_vs_position" }, ctxFor())) as { error: string };
+    expect(res.error).toBe("not_found");
+  });
+
+  it("defense_vs_position reports not_found for a position with no finalized games, never an empty page", async () => {
+    await seedLeague(db);
+    const rb = await makePlayer(db, { position: "RB", fullName: "Only Back", nflTeam: "KC" });
+    await db.insert(playerWeekStats).values({ playerId: rb, season: SEASON, week: 1, opponent: "DEN", stats: {}, ptsPpr: 10, final: true });
+    const res = (await playerResearchTool.execute({ kind: "defense_vs_position", position: "K" }, ctxFor())) as {
+      error: string;
+    };
     expect(res.error).toBe("not_found");
   });
 });

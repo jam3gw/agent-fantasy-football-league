@@ -89,6 +89,27 @@ export function projectionWeeks(from: number): number[] {
   return out;
 }
 
+/**
+ * §5.4 — one projections run: fetch and upsert every week in the lookahead
+ * window. A week whose fetch returns null (feed down or absent) is skipped
+ * without failing the others. The fetcher is injectable for tests.
+ */
+export async function ingestProjections(
+  db: EngineDb,
+  input: {
+    season: number;
+    from: number;
+    fetchWeek: (season: number, week: number) => Promise<SleeperStatsEntry[] | null>;
+  },
+): Promise<number> {
+  let n = 0;
+  for (const week of projectionWeeks(input.from)) {
+    const entries = await input.fetchWeek(input.season, week);
+    if (entries) n += await upsertProjections(db, { season: input.season, week, entries });
+  }
+  return n;
+}
+
 /** §5.4 projections — optional; same entry shape with projected pts_ppr. */
 export async function upsertProjections(
   db: EngineDb,

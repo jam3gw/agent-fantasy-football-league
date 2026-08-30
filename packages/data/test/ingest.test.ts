@@ -9,13 +9,14 @@ import {
   rosterEntries,
   scoringDiscrepancies,
   sessions,
+  playerWeekProj,
   playerWeekStats,
   teams,
 } from "@league/engine";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { upsertPlayers, upsertTrending } from "../src/ingest/players.ts";
 import { upsertGames } from "../src/ingest/schedule.ts";
-import { projectionWeeks, upsertWeekStats } from "../src/ingest/stats.ts";
+import { ingestProjections, projectionWeeks, upsertWeekStats } from "../src/ingest/stats.ts";
 import type { SleeperPlayerRaw } from "../src/sleeper.ts";
 
 let db: TestDb;
@@ -126,6 +127,26 @@ describe("projections lookahead (§5.4)", () => {
     expect(projectionWeeks(1)).toEqual([1, 2, 3]);
     expect(projectionWeeks(17)).toEqual([17, 18]);
     expect(projectionWeeks(18)).toEqual([18]);
+  });
+
+  it("ingests every week in the window and skips a week whose fetch returns null", async () => {
+    const fetched: number[] = [];
+    const n = await ingestProjections(db, {
+      season: 2026,
+      from: 4,
+      fetchWeek: async (_season, week) => {
+        fetched.push(week);
+        if (week === 5) return null; // feed down for one week: the others still land
+        return [{ player_id: "p1", season: 2026, week, stats: { pts_ppr: week + 0.5 } }];
+      },
+    });
+    expect(fetched).toEqual([4, 5, 6]);
+    expect(n).toBe(2);
+    const rows = await db.select().from(playerWeekProj);
+    expect(rows.map((r) => [r.week, r.projPtsPpr]).sort()).toEqual([
+      [4, 4.5],
+      [6, 6.5],
+    ]);
   });
 });
 
