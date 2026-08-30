@@ -1,6 +1,7 @@
 {
   "name": "agent-fantasy-football-league",
   "private": true,
+  "license": "UNLICENSED",
   "packageManager": "pnpm@10.33.0",
   "engines": {
     "node": "24.x"

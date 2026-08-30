@@ -124,3 +124,10 @@ Milestone work happens on `m<N>-<name>` branches with preview deploys.
   Several of them are the only record of a bug that took a while to find.
 - No secret is ever committed, logged, or returned to a model. `.env.example`
   lists every variable the app reads.
+
+---
+
+## License
+
+All rights reserved. This is proprietary source — see [`LICENSE`](LICENSE).
+No permission is granted to copy, modify, or redistribute it.
