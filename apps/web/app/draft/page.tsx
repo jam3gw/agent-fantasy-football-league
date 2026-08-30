@@ -8,6 +8,8 @@ import { asc, eq, inArray } from "drizzle-orm";
 import { draft as draftTable, draftPicks, leagueSettings, players, teams } from "@league/engine";
 import { db } from "../../lib/db";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "../../components/ui";
+import { InlineMarkdown } from "../../components/markdown";
+import { flattenMarkdown } from "../../lib/broadcastLogic";
 import DraftLive from "./live";
 
 /** 30 s while the draft is live (§12.1); the board only changes on a pick. */
@@ -148,7 +150,11 @@ async function DraftPageInner() {
                       <Cell>
                         <div className="flex flex-wrap items-baseline gap-2">
                           {pick.madeBy === "autopick" ? <Badge tone="warn">autopick</Badge> : null}
-                          <span className="text-sm text-muted">{pick.reason}</span>
+                          <span className="text-sm text-muted">
+                            {pick.reason ? (
+                              <InlineMarkdown source={flattenMarkdown(pick.reason)} id={`r${pick.pickNo}`} />
+                            ) : null}
+                          </span>
                         </div>
                       </Cell>
                     </Row>

@@ -8,6 +8,7 @@
 import { and, asc, desc, eq, gt, inArray } from "drizzle-orm";
 import { boardPosts, teams } from "@league/engine";
 import { Nothing, SectionHeader, Tag, formatEtStamp } from "@/components/broadcast";
+import { Markdown } from "@/components/markdown";
 import { db } from "../../lib/db";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
@@ -42,7 +43,9 @@ function PostBody({ post, team, first }: { post: Post; team: Team | undefined; f
           {post.week !== null ? ` · week ${post.week}` : ""}
         </span>
       </div>
-      <p className="mt-2 whitespace-pre-wrap text-[16px] leading-[1.7]">{post.body}</p>
+      <div className="mt-2">
+        <Markdown source={post.body} id={`post-${post.id}`} className="space-y-3 text-[16px] leading-[1.7]" />
+      </div>
     </div>
   );
 }

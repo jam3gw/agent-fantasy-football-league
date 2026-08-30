@@ -224,6 +224,23 @@ describe("transaction descriptions", () => {
     expect(describeTransaction("waiver_add", { playerId: "gone" }, () => null)).toBe("Won a waiver claim.");
   });
 
+  it("flattens the agent prose it embeds — a reason is one line by convention only", () => {
+    expect(describeTransaction("commissioner", { reason: "## Ruling\n- The pick stands." })).toBe(
+      "Ruling The pick stands.",
+    );
+    expect(
+      describeTransaction("draft_pick", { name: "Jahmyr Gibbs", reason: "### Why\n**Zero RB** is dead." }),
+    ).toBe("Drafted Jahmyr Gibbs. “Why **Zero RB** is dead.”");
+  });
+
+  it("falls back when a reason flattens to nothing rather than showing empty quotes", () => {
+    const fenced = "```\ncode only\n```";
+    expect(describeTransaction("draft_pick", { name: "Jahmyr Gibbs", reason: fenced })).toBe(
+      "Drafted Jahmyr Gibbs.",
+    );
+    expect(describeTransaction("commissioner", { reason: fenced })).toBe("The commissioner acted.");
+  });
+
   it("describes a draft pick from the snake_case payload the draft paths write", () => {
     // make_pick (packages/agent/src/tools/draft.ts) records `player_id`,
     // `name`, `position`, `nfl_team`, `pick_no`, `round`, `reason` — reading
@@ -388,6 +405,64 @@ describe("body summaries", () => {
     const out = summarizeBody(text, 60);
     expect(out.endsWith("…")).toBe(true);
     expect(out.startsWith("Short. Then a much longer")).toBe(true);
+  });
+
+  it("drops block markdown markers that flattening would strand mid-sentence", () => {
+    expect(summarizeBody("## The plan\n- Start **Gibbs**.\n> He said so.\n\n---\n1. Done.", 200)).toBe(
+      "The plan Start **Gibbs**. He said so. Done.",
+    );
+  });
+
+  it("strips nested markers, all the way down", () => {
+    expect(summarizeBody("> - a quoted bullet", 200)).toBe("a quoted bullet");
+  });
+
+  it("does not mistake a sentence opening with a year for an ordered-list item", () => {
+    expect(summarizeBody("2026. That is the year this league runs in.", 200)).toBe(
+      "2026. That is the year this league runs in.",
+    );
+  });
+
+  it("drops fenced code from the excerpt rather than flattening it with stranded backticks", () => {
+    expect(summarizeBody("My depth chart:\n```\nRB1 Gibbs\nRB2 Pacheco\n```\nThoughts welcome.", 160)).toBe(
+      "My depth chart: Thoughts welcome.",
+    );
+  });
+
+  it("drops an unclosed fence's marker line and keeps its text as prose", () => {
+    expect(summarizeBody("A note.\n```\nstill worth reading", 160)).toBe("A note. still worth reading");
+  });
+
+  it("keeps non-tag content from an unclosed fence's opening line, like the renderer", () => {
+    expect(summarizeBody('```{"json": 1}\nstill here', 160)).toBe('{"json": 1} still here');
+    expect(summarizeBody("```ts\nstill here", 160)).toBe("still here");
+  });
+
+  it("drops a one-line fence's code but keeps the prose after it", () => {
+    expect(summarizeBody("```quick``` more\nrest.", 160)).toBe("more rest.");
+  });
+
+  it("does not pair a one-line fence's marker with a later block's fence", () => {
+    expect(summarizeBody("Intro\n```quick``` aside\nMiddle.\n```\ncode\n```\nEnd.", 200)).toBe(
+      "Intro aside Middle. End.",
+    );
+  });
+
+  it("ellipses when the only sentence end sits inside a token the cut retreats from", () => {
+    const text = `${"a".repeat(50)} **Bold. Sentence** ${"b".repeat(60)}`;
+    const out = summarizeBody(text, 80);
+    // The last ". " in the window is inside the bold token; the retreat off
+    // the token abandons the sentence break, so the excerpt marks the cut.
+    expect(out.endsWith("…")).toBe(true);
+    expect(out).not.toContain("**");
+  });
+
+  it("moves a cut off the middle of an inline token rather than stranding a **", () => {
+    const text = `The plan is ${"a".repeat(40)} **a very long bold declaration of intent** and then more`;
+    const out = summarizeBody(text, 60);
+    // The cut at 60 lands inside the bold token, so it retreats to the token's
+    // start — no unbalanced ** survives for the inline renderer to strand.
+    expect(out).toBe(`The plan is ${"a".repeat(40)}…`);
   });
 
   it("ellipses when there is no sentence break to use", () => {

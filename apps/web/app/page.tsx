@@ -25,6 +25,8 @@ import {
   formatEtClock,
 } from "@/components/broadcast";
 import { LeaderboardBand, type LeaderRow } from "@/components/leaderboard";
+import { InlineMarkdown } from "@/components/markdown";
+import { flattenMarkdown } from "@/lib/broadcastLogic";
 import { db } from "@/lib/db";
 import {
   benchmarkRows,
@@ -42,16 +44,17 @@ import { latestReporterPost, safeRead as safe } from "@/lib/queries";
 // background, so the CDN serves a copy at most 30s stale.
 export const revalidate = 30;
 
-/** Markdown to a plain-text excerpt of roughly `maxWords` words. */
+/**
+ * Markdown to a plain-text excerpt of roughly `maxWords` words. Links and
+ * images reduce to their text here, then `flattenMarkdown` (the rail's
+ * flattener) drops fences and block markers, and the leftover inline marks
+ * are stripped because this teaser renders as plain text, not through
+ * `InlineMarkdown`.
+ */
 function excerpt(md: string, maxWords = 90): string {
-  const plain = md
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replace(/^[#>\-*\s]+/gm, "")
-    .replace(/[*_`~]/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const plain = flattenMarkdown(
+    md.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1"),
+  ).replace(/[*_`~]/g, "");
   const words = plain.split(" ").filter(Boolean);
   return words.length <= maxWords ? plain : `${words.slice(0, maxWords).join(" ")}…`;
 }
@@ -357,7 +360,9 @@ export default async function HomePage() {
                           {item.kind}
                         </span>
                       </div>
-                      <p className="mt-1.5 text-[13px] leading-[1.55] text-muted">{item.body}</p>
+                      <p className="mt-1.5 text-[13px] leading-[1.55] text-muted">
+                        <InlineMarkdown source={item.body} id={`act${i}`} />
+                      </p>
                     </div>
                   </div>
                 ))}

@@ -2,6 +2,142 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
+
+Jake sent screenshots of a team page's "What this agent is thinking" panel and
+the home page's activity rail showing raw `**bold**` and `###` markers — the
+agents write their scratchpads, board posts, and decision summaries in
+Markdown, and only `/report` rendered it.
+
+- The report page's dependency-free subset renderer (headings, lists, quotes,
+  rules, inline bold/italic/code; plain-text fallthrough; links shown as text,
+  never anchors — nothing model-written becomes a clickable href) moved to
+  `apps/web/components/markdown.tsx` unchanged, plus an `InlineMarkdown`
+  variant that renders only the inline tokens for one-line contexts.
+- Now rendered as Markdown: the scratchpad and its version history (team
+  page), board posts (`/board`), decision summaries (team page "Recent
+  moves"), the home activity rail's bodies, and `/report` as before.
+- `summarizeBody` (the rail's board-post excerpter) now drops block markers
+  line-wise before flattening, since flattening strands `###`/`- ` mid-sentence
+  where the inline renderer can't use them; inline tokens survive for it.
+- Chose the existing subset renderer over adding a Markdown dependency: it is
+  already the site's safety story for model-written text (no hrefs, nothing
+  swallowed), and the agents' notes use exactly the subset it covers.
+- Tests: `apps/web/test/markdown.test.ts` (subset renders, tables fall through
+  literally, links never become anchors) and a `summarizeBody` marker case.
+  Full `pnpm check` green: lint, typecheck, 643 tests.
+
+Review round (fresh-context reviewer over the diff): no blockers, no spec or
+security findings — confirmed no XSS path, no anchors ever emitted, no key
+collisions, all regexes linear with length-capped inputs. Fixed from its list:
+
+- Fenced ``` blocks now render verbatim in a monospace `<pre>` instead of
+  being block-parsed (a `# comment` inside a fence was becoming a heading);
+  an unclosed fence still renders rather than swallowing text.
+- Decision summaries now go through the same block-marker strip as board-post
+  excerpts (`flattenMarkdown`, extracted from `summarizeBody`), at both the
+  rail and the team page — a summary is one line by convention, not contract.
+- `***bold italic***` renders instead of leaving stray asterisks; spaced
+  thematic breaks (`- - -`) render as rules; the excerpt marker-strip repeats
+  for nested markers (`> - x`) and no longer eats a leading year
+  (`2026. …` is prose, list markers are ≤3 digits); an excerpt cut that lands
+  inside `**bold**` retreats to the token start so no stranded `**` reaches
+  the rail.
+- Added the tests it asked for: raw HTML stays escaped, `![img]()` never
+  becomes an `<img>`, fence contents stay literal, unbalanced `**` degrades to
+  literal text, CRLF input.
+
+Accepted, not fixed (recorded per its nit): the scratchpad panel lost its
+monospace `<pre>` — hand-aligned ASCII outside a fence now sits in a
+proportional font. That is the cost of rendering; agents that want alignment
+have fences, which keep it.
+
+Review round 2 (fresh reviewer): confirmed round 1's fixes empirically, then
+found three new fence-shaped should-fixes, all fixed:
+
+- A one-line fence (` ```code``` `) was swallowing its content and dragging
+  the rest of the document into code. The fence parser now handles one-line
+  fences (code renders, trailing prose stays prose), distinguishes an info
+  string (bare language tag, dropped) from content on the opening line
+  (kept), and only closes a fence with the character that opened it.
+- `flattenMarkdown` now drops paired fenced blocks whole from rail excerpts
+  (code is not prose; half-flattening stranded backtick runs) and drops an
+  unpaired fence-marker line alone, its lines flattening as prose.
+- When the only sentence end in an excerpt window sits inside an inline token
+  (`**Bold. Sentence**`), the retreat off the token also abandons the
+  sentence break — the excerpt now carries an ellipsis in that case instead
+  of ending mid-phrase unmarked.
+- Nits: the two inline-token regexes (renderer and excerpter) now name each
+  other as twins to be changed together. `**a* b**` rendering `*` + em +
+  `b**` was noted and accepted as lossless fallthrough.
+
+All fixed cases have tests. `pnpm check` green: 660 tests.
+
+Review round 3 (fresh reviewer): confirmed round 2, found three should-fixes
+(renderer/excerpter divergences on fence edges) and three nits, all fixed:
+
+- A closing fence must now be at least as long as its opener (CommonMark), so
+  a ````-fence can show a ```-example without the example's fence closing the
+  block early and the rest of the document being swallowed into code.
+- `flattenMarkdown` gained the renderer's one-line-fence handling: the code
+  drops, prose after the closing run survives, and the one-liner's marker can
+  no longer pair with a later block's fence. Paired-fence closers now mirror
+  the renderer exactly (same character, at least as long).
+- The renderer got the flattener's ≤3-digit list-marker rule — `2026. The
+  season begins.` was rendering as an ordered list item "1." — and ordered
+  lists now carry `start`, so a list beginning at 3 numbers from 3.
+- Nits: a one-line fence's trailing strip takes only the closing character's
+  run (a literal `~~~` after ```` ```code``` ```` survives); draft-pick and
+  commissioner reasons in `describeTransaction` are flattened like decision
+  summaries before reaching the rail.
+
+All cases have tests. `pnpm check` green: 667 tests.
+
+Review round 4 (fresh reviewer): confirmed round 3 in full, one should-fix and
+two nits, all fixed:
+
+- Text that flattens to nothing (a board post or reason that is entirely
+  fenced code) was leaving blank rail rows and empty curly quotes. A
+  draft-pick reason that flattens empty now drops its quote; a commissioner
+  reason falls back to "The commissioner acted." (the truthiness check moved
+  after flattening); decision summaries and board-post excerpts fall back to
+  "(nothing outside a code block)" on the rail and the team page.
+- The renderer now accepts up to three leading spaces on headings and quotes
+  (CommonMark), matching the excerpter, and a vacuous test assertion was
+  tightened.
+
+`pnpm check` green: 669 tests.
+
+Review round 5 (fresh reviewer): confirmed round 4, one should-fix and two
+nits, all fixed:
+
+- `/matchups/[week]`'s "Why {team} picked this lineup" panel was a missed
+  call site — it rendered `decisionLogs.summary` raw. It now flattens and
+  inline-renders like the other three surfaces, with the same empty-flatten
+  fallback.
+- The excerpter now keeps non-tag content from an unclosed fence's opening
+  line (` ```{"json": 1} ` kept, ` ```ts ` dropped), matching the renderer.
+- The home page's pre-existing `excerpt()` (reporter teaser) was a divergent
+  near-duplicate flattener; it now builds on `flattenMarkdown` and only adds
+  link/image reduction and inline-mark stripping for its plain-text output.
+
+`pnpm check` green: 670 tests.
+
+Review round 6 (fresh reviewer, with an explicit sweep of every agent-text
+surface in `apps/web/app`): confirmed round 5; four more raw surfaces and one
+nit, all fixed the same way (`InlineMarkdown` over `flattenMarkdown`):
+
+- `/draft` board's reason column, `/transactions`' draft-pick reason line,
+  `/trades`' vote reasons, and the team page's check-in reasons.
+- The team page's motto (already inline-rendered elsewhere).
+- Left as-is on the reviewer's own advice: the `/transactions` commissioner
+  case's `k: v` payload dump (reads as a data dump, like the players-page
+  JSON), engine-composed strings (power-ranking notes, timeline bodies,
+  waiver failure reasons, trade resolution reasons), and session transcripts
+  (intentionally verbatim).
+
+`pnpm check` green: 670 tests.
+
 ## 2026-08-30 — Four fantasy-football capabilities the agents were missing (commissioner request)
 
 Jake asked what a human manager can do that the twelve agents cannot, and then
