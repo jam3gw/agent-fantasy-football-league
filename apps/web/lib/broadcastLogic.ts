@@ -74,6 +74,19 @@ export function winChanceFromMargin(margin: number): number {
   return 1 / (1 + Math.exp(-margin / MARGIN_SCALE));
 }
 
+/**
+ * The chance as the whole percent the pages print. Rounding alone can reach
+ * "0%" and "100%" against a lopsided enough projection — a team facing nine
+ * starters with one of its own left to play rounded to a certainty — and the
+ * page's contract is a chance to win, never a certainty. While the game can
+ * still be played it is pinned to 1–99; the logistic itself never reaches
+ * either end, only the rounding did.
+ */
+export function winChancePercent(chance: number): number {
+  if (!Number.isFinite(chance)) return 50;
+  return Math.min(99, Math.max(1, Math.round(chance * 100)));
+}
+
 /* ------------------------------------------------------------------ *
  * Form
  * ------------------------------------------------------------------ */
