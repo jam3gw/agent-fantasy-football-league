@@ -7,7 +7,9 @@
 import { describe, expect, it } from "vitest";
 import {
   MARGIN_SCALE,
+  cardProgress,
   describeTransaction,
+  gameStatus,
   foldForm,
   newestFirst,
   powerScore,
@@ -101,6 +103,78 @@ describe("win chance as the printed percent", () => {
 
   it("falls back to a coin flip on a chance that is not a number", () => {
     expect(winChancePercent(Number.NaN)).toBe(50);
+  });
+});
+
+describe("what state a game card is in", () => {
+  it("is upcoming before anything kicks off, however many slots wait", () => {
+    expect(gameStatus(false, 18, false)).toBe("upcoming");
+  });
+
+  it("is live once the matchup has started and slots remain", () => {
+    expect(gameStatus(false, 7, true)).toBe("live");
+  });
+
+  it("is final on the engine's flag, whatever the slots say", () => {
+    expect(gameStatus(true, 18, false)).toBe("final");
+    expect(gameStatus(true, null, false)).toBe("final");
+  });
+
+  it("treats zero slots as final only in a week that actually started", () => {
+    // Monday night is over but the week finalizes Tuesday: done, not "live".
+    expect(gameStatus(false, 0, true)).toBe("final");
+    // Two empty lineups before kickoff also count zero slots; that is a
+    // lineup gap, not a finished game — "Final 0.0 – 0.0" was the bug here.
+    expect(gameStatus(false, 0, false)).toBe("upcoming");
+  });
+
+  it("is unknown without a schedule, unless the flag already says final", () => {
+    expect(gameStatus(false, null, false)).toBe("unknown");
+    expect(gameStatus(false, null, true)).toBe("unknown");
+  });
+});
+
+describe("started and projected finals on a card", () => {
+  const base = {
+    over: false,
+    scheduleKnown: true,
+    projectionsKnown: true,
+    awayPoints: 0,
+    homePoints: 0,
+    anyStarterKickedOff: false,
+    awayProjectedFinal: 110.5,
+    homeProjectedFinal: 98.2,
+  };
+
+  it("carries both projected finals while the game is on", () => {
+    expect(cardProgress(base)).toEqual({ started: false, awayProjected: 110.5, homeProjected: 98.2 });
+  });
+
+  it("counts a kicked-off starter or points on the board as started", () => {
+    expect(cardProgress({ ...base, anyStarterKickedOff: true }).started).toBe(true);
+    expect(cardProgress({ ...base, homePoints: 3.4 }).started).toBe(true);
+  });
+
+  it("does not call a missing schedule started without points on the board", () => {
+    // No schedule means nothing looks kicked off; only points can say so.
+    const blind = { ...base, scheduleKnown: false, projectionsKnown: false };
+    expect(cardProgress(blind).started).toBe(false);
+    expect(cardProgress({ ...blind, awayPoints: 12 }).started).toBe(true);
+  });
+
+  it("offers no projection when the week's projections are not ingested", () => {
+    const p = cardProgress({ ...base, projectionsKnown: false });
+    expect(p.awayProjected).toBeNull();
+    expect(p.homeProjected).toBeNull();
+  });
+
+  it("offers no projection without the week's schedule", () => {
+    expect(cardProgress({ ...base, scheduleKnown: false }).awayProjected).toBeNull();
+  });
+
+  it("offers no projection once the game is over — the score is the answer", () => {
+    const p = cardProgress({ ...base, over: true, anyStarterKickedOff: true });
+    expect(p).toEqual({ started: true, awayProjected: null, homeProjected: null });
   });
 });
 

@@ -88,6 +88,63 @@ export function winChancePercent(chance: number): number {
 }
 
 /* ------------------------------------------------------------------ *
+ * Game state
+ * ------------------------------------------------------------------ */
+
+export type GameStatus = "final" | "live" | "upcoming" | "unknown";
+
+/**
+ * What state a matchup card is in, from the three facts a card carries, so
+ * every page prints the same answer instead of each rebuilding the ternary.
+ *
+ * Zero slots to play is not on its own a finished game: a week of empty
+ * lineups also counts zero occupied slots before anything has kicked off, and
+ * calling that "Final 0.0 – 0.0" buries the actual story, which is that
+ * nobody set a lineup. So zero slots reads as final only once the matchup has
+ * started — which also covers the Monday-done, Tuesday-not-yet-finalized
+ * hours, when the engine's flag is still false but every player is done. The
+ * flag itself always wins, and a null slot count (schedule not ingested)
+ * means only the flag could say the game is over.
+ */
+export function gameStatus(final: boolean, slotsToPlay: number | null, started: boolean): GameStatus {
+  if (final) return "final";
+  if (slotsToPlay === null) return "unknown";
+  if (!started) return "upcoming";
+  return slotsToPlay === 0 ? "final" : "live";
+}
+
+/**
+ * The started flag and projected finals a game card carries.
+ *
+ * Started means the matchup's week has actually begun for it: a starter's NFL
+ * game has kicked off, or points are on the board. With no schedule ingested
+ * nothing looks kicked off, so points are the only signal left — a card must
+ * not call a scoring week "upcoming".
+ *
+ * A projected final is offered only while it is a forecast of something: not
+ * once the game is over, and not when the week's schedule or projections are
+ * missing — null, never a zero that reads as a prediction.
+ */
+export function cardProgress(input: {
+  over: boolean;
+  scheduleKnown: boolean;
+  projectionsKnown: boolean;
+  awayPoints: number;
+  homePoints: number;
+  anyStarterKickedOff: boolean;
+  awayProjectedFinal: number;
+  homeProjectedFinal: number;
+}): { started: boolean; awayProjected: number | null; homeProjected: number | null } {
+  const started = input.awayPoints > 0 || input.homePoints > 0 || input.anyStarterKickedOff;
+  const offered = !input.over && input.scheduleKnown && input.projectionsKnown;
+  return {
+    started,
+    awayProjected: offered ? input.awayProjectedFinal : null,
+    homeProjected: offered ? input.homeProjectedFinal : null,
+  };
+}
+
+/* ------------------------------------------------------------------ *
  * Form
  * ------------------------------------------------------------------ */
 
