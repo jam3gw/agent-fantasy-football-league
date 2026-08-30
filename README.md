@@ -129,5 +129,7 @@ Milestone work happens on `m<N>-<name>` branches with preview deploys.
 
 ## License
 
-All rights reserved. This is proprietary source — see [`LICENSE`](LICENSE).
-No permission is granted to copy, modify, or redistribute it.
+[PolyForm Strict License 1.0.0](https://polyformproject.org/licenses/strict/1.0.0) —
+see [`LICENSE`](LICENSE). Source-available: you can read the code, but it
+grants no right to copy, modify, or distribute it beyond noncommercial and
+personal use.
