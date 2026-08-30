@@ -96,27 +96,24 @@ the Neon `main` database (it had only ever applied main's migrations);
 `/api/healthz` returns `ok: true` with a fresh tick and the homepage serves
 200.
 
-**Known issue — this branch's preview database is wedged.** The Vercel-Neon
-integration's per-branch database
-(`preview/claude/agent-capabilities-fantasy-football-w2ujgx`,
-`br-falling-sky-avgb2f7i`) applied the *original* `0004_stats_team_opponent`
-from the pre-merge pushes. After the renumbering it holds both migrations'
-effects (the proj index and the two stats columns) but records neither new
-journal row, so its preview deploy failed with 42701 (duplicate column) and
-any future push to this git branch will fail its preview the same way.
-Production and every other branch are unaffected. Writing the two journal
-rows by SQL was blocked by the session's permission classifier, so the fix
-is queued for Jake below.
+**Preview database wedge — found and fixed.** The Vercel-Neon integration's
+per-branch database (`preview/claude/agent-capabilities-fantasy-football-w2ujgx`,
+`br-falling-sky-avgb2f7i`) had applied the *original* `0004_stats_team_opponent`
+from the pre-merge pushes. After the renumbering it held both migrations'
+effects (the proj index and the two stats columns) but recorded neither new
+journal row, so its preview deploy failed with 42701 (duplicate column).
+Production and every other branch were unaffected. Fixed with Jake's
+go-ahead by inserting the two missing `drizzle.__drizzle_migrations` rows
+(hashes of `0004_proj_season_week_idx` and `0005_stats_team_opponent`, with
+their journal `when` values) on that branch; the migrator's high-water mark
+now sits at 0005, schema verified to match. The stale pre-renumber journal
+row is inert and left for the audit trail. The push carrying this log entry
+is the proof: its preview deploy runs the migrator against the repaired
+database.
 
 ### Questions for Jake
 
-None blocking. FYI: to unwedge this branch's preview database, either reset
-the Neon branch `br-falling-sky-avgb2f7i` from its parent in the Neon
-console (one click; it is a disposable fork of prod), or run this on it:
-`insert into drizzle.__drizzle_migrations (hash, created_at) values
-('736e9f3d5218fce2db2da8848608664f067e8251300557673ff976605b9d484f', 1788058208545),
-('635bdfebafe0748f03ba3019701d3ffa5c5a97c3d8fa3cb0a57429fcfd4034f8', 1788060771054);`
-Nothing needs this until someone pushes to that branch again.
+None.
 
 SPEC updated: §5.3 (stored team/opponent), §5.4 (three-week window), §6
 (`player_week_stats` columns), §8.4 (`get_matchup`, `get_player_stats`,
