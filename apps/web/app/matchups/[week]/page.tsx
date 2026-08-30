@@ -19,7 +19,7 @@ import { STARTING_SLOTS, decisionLogs, lockedPlayerIds, playerWeekProj } from "@
 import type { StartingSlot } from "@league/engine";
 import { Bar, CardLink, Container, LiveDot, Nothing, Panel, Tag } from "@/components/broadcast";
 import { InlineMarkdown } from "@/components/markdown";
-import { flattenMarkdown } from "@/lib/broadcastLogic";
+import { flattenMarkdown, winChancePercent } from "@/lib/broadcastLogic";
 import { db, leagueClock } from "@/lib/db";
 import { gameCards, teamName, type GameCard } from "@/lib/broadcast";
 import { liveStatus, safeRead as safe, settings, teamLineup, type LineupPlayer } from "@/lib/queries";
@@ -274,14 +274,18 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
         <div className="bg-band text-band-text">
           <Container className="pb-9 pt-8">
             <div className="flex flex-wrap items-center gap-3">
-              {!featured.final && (featured.slotsToPlay ?? 0) > 0 ? (
+              {!featured.final && (featured.slotsToPlay ?? 0) > 0 && featured.started ? (
                 <span className="flex items-center gap-2 rounded bg-accent px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em]">
                   <LiveDot className="bg-band-text" />
                   Live
                 </span>
               ) : (
                 <span className="rounded bg-band-fill px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-band-muted">
-                  Final
+                  {featured.final || featured.slotsToPlay === 0
+                    ? "Final"
+                    : featured.slotsToPlay === null
+                      ? "In progress"
+                      : "Scheduled"}
                 </span>
               )}
               <span className="text-[12px] uppercase tracking-[0.06em] text-band-muted">
@@ -301,21 +305,35 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
                 </div>
                 <div className="mt-1 text-[13px] text-band-muted">{featured.awayTeam?.modelLabel}</div>
               </div>
-              <div className="flex items-center justify-center gap-5">
-                <div
-                  className={`text-[clamp(2.5rem,7vw,58px)] font-extrabold tabular-nums tracking-[-0.04em] ${
-                    featured.awayPoints >= featured.homePoints ? "text-accent-bright" : ""
-                  }`}
-                >
-                  {featured.awayPoints.toFixed(2)}
+              <div className="flex items-start justify-center gap-5">
+                <div className="text-center">
+                  <div
+                    className={`text-[clamp(2.5rem,7vw,58px)] font-extrabold tabular-nums tracking-[-0.04em] ${
+                      featured.awayPoints >= featured.homePoints ? "text-accent-bright" : ""
+                    }`}
+                  >
+                    {featured.awayPoints.toFixed(2)}
+                  </div>
+                  {featured.awayProjected !== null ? (
+                    <div className="mt-0.5 text-[12px] tabular-nums text-band-muted">
+                      proj {featured.awayProjected.toFixed(1)}
+                    </div>
+                  ) : null}
                 </div>
-                <div className="text-[20px] text-band-faint">–</div>
-                <div
-                  className={`text-[clamp(2.5rem,7vw,58px)] font-extrabold tabular-nums tracking-[-0.04em] ${
-                    featured.homePoints > featured.awayPoints ? "text-accent-bright" : ""
-                  }`}
-                >
-                  {featured.homePoints.toFixed(2)}
+                <div className="self-center text-[20px] text-band-faint">–</div>
+                <div className="text-center">
+                  <div
+                    className={`text-[clamp(2.5rem,7vw,58px)] font-extrabold tabular-nums tracking-[-0.04em] ${
+                      featured.homePoints > featured.awayPoints ? "text-accent-bright" : ""
+                    }`}
+                  >
+                    {featured.homePoints.toFixed(2)}
+                  </div>
+                  {featured.homeProjected !== null ? (
+                    <div className="mt-0.5 text-[12px] tabular-nums text-band-muted">
+                      proj {featured.homeProjected.toFixed(1)}
+                    </div>
+                  ) : null}
                 </div>
               </div>
               <div>
@@ -345,7 +363,7 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
             <div className="mt-2 flex flex-wrap justify-between gap-3 text-[12px] text-band-muted">
               <span>
                 {featured.awayWinChance !== null
-                  ? `${teamName(featured.awayTeam)} has a ${Math.round(featured.awayWinChance * 100)}% chance to win`
+                  ? `${teamName(featured.awayTeam)} has a ${winChancePercent(featured.awayWinChance)}% chance to win`
                   : featured.awayPoints === featured.homePoints
                     ? "This one finished level"
                     : `${featured.awayPoints > featured.homePoints ? teamName(featured.awayTeam) : teamName(featured.homeTeam)} won it`}
@@ -491,8 +509,15 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
                         ? "in progress"
                         : card.slotsToPlay === 0
                           ? "final"
-                          : `${card.slotsToPlay} slots left`}
+                          : card.started
+                            ? `${card.slotsToPlay} slots left`
+                            : "not started"}
                   </span>
+                  {card.awayProjected !== null && card.homeProjected !== null ? (
+                    <span className="text-[12px] tabular-nums text-faint">
+                      proj {card.awayProjected.toFixed(1)} – {card.homeProjected.toFixed(1)}
+                    </span>
+                  ) : null}
                   <span className="text-[19px] font-bold tabular-nums tracking-[-0.02em]">
                     {card.awayPoints.toFixed(1)} – {card.homePoints.toFixed(1)}
                   </span>

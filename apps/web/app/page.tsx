@@ -26,7 +26,7 @@ import {
 } from "@/components/broadcast";
 import { LeaderboardBand, type LeaderRow } from "@/components/leaderboard";
 import { InlineMarkdown } from "@/components/markdown";
-import { flattenMarkdown } from "@/lib/broadcastLogic";
+import { flattenMarkdown, winChancePercent } from "@/lib/broadcastLogic";
 import { db } from "@/lib/db";
 import {
   benchmarkRows,
@@ -71,7 +71,10 @@ function heroCopy(
   week: number,
   phase: string,
 ): { eyebrow: string; headline: string; standfirst: string } {
-  const liveCards = cards.filter((c) => !c.final && (c.slotsToPlay ?? 0) > 0);
+  // A game is live once it has actually begun, not merely once its slots are
+  // known — before Thursday night every matchup has 18 slots to play, and the
+  // hero was announcing "6 games are live" over twelve untouched lineups.
+  const liveCards = cards.filter((c) => !c.final && (c.slotsToPlay ?? 0) > 0 && c.started);
 
   if (phase === "pre_draft" || phase === "drafting") {
     return {
@@ -133,7 +136,9 @@ function heroCopy(
 function GameTile({ card }: { card: GameCard }) {
   const awayLeads = card.awayPoints > card.homePoints;
   const homeLeads = card.homePoints > card.awayPoints;
-  const live = !card.final && (card.slotsToPlay ?? 0) > 0;
+  const live = !card.final && (card.slotsToPlay ?? 0) > 0 && card.started;
+  // Slots known, nothing kicked off yet: the week is still ahead of this one.
+  const upcoming = !card.final && (card.slotsToPlay ?? 0) > 0 && !card.started;
   const chance = card.awayWinChance;
   const barPct = chance !== null ? chance * 100 : awayLeads ? 100 : homeLeads ? 0 : 50;
   // Name the side, or "DST, K to play" reads as though it belonged to
@@ -161,12 +166,12 @@ function GameTile({ card }: { card: GameCard }) {
             live ? "text-accent" : "text-faint"
           }`}
         >
-          {live ? "Live" : card.final ? "Final" : card.slotsToPlay === null ? "In progress" : "Scheduled"}
+          {live ? "Live" : card.final || card.slotsToPlay === 0 ? "Final" : card.slotsToPlay === null ? "In progress" : "Scheduled"}
         </span>
         <span className="text-[11px] text-faint">
           {live
             ? `${card.slotsToPlay} slot${card.slotsToPlay === 1 ? "" : "s"} left`
-            : card.final
+            : card.final || card.slotsToPlay === 0
               ? "final"
               : card.slotsToPlay === null
                 ? "schedule not loaded"
@@ -176,21 +181,38 @@ function GameTile({ card }: { card: GameCard }) {
 
       <div className="mt-3 flex flex-col gap-[9px]">
         {[
-          { team: card.awayTeam, pointsValue: card.awayPoints, leads: awayLeads },
-          { team: card.homeTeam, pointsValue: card.homePoints, leads: homeLeads },
+          { team: card.awayTeam, pointsValue: card.awayPoints, projected: card.awayProjected, leads: awayLeads },
+          { team: card.homeTeam, pointsValue: card.homePoints, projected: card.homeProjected, leads: homeLeads },
         ].map((side, i) => (
           <div key={i} className="flex items-baseline justify-between gap-2.5">
             <div className="min-w-0">
               <div className="truncate text-[16px] font-semibold tracking-[-0.01em]">{teamName(side.team)}</div>
               <div className="truncate text-[11px] text-faint">{side.team?.modelLabel ?? ""}</div>
             </div>
-            <div
-              className={`text-[29px] font-bold tabular-nums tracking-[-0.03em] ${
-                side.leads ? "text-accent" : "text-foreground"
-              }`}
-            >
-              {side.pointsValue.toFixed(1)}
-            </div>
+            {upcoming && side.projected !== null ? (
+              // Before kickoff a 0.0 in the score column says nothing; the
+              // lineup's projected total is the number worth the big type,
+              // marked as a projection rather than dressed up as a score.
+              <div className="flex items-baseline gap-1.5">
+                <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-faint">proj</span>
+                <span className="text-[29px] font-bold tabular-nums tracking-[-0.03em] text-muted">
+                  {side.projected.toFixed(1)}
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-baseline gap-1.5">
+                {live && side.projected !== null ? (
+                  <span className="text-[11px] tabular-nums text-faint">proj {side.projected.toFixed(1)}</span>
+                ) : null}
+                <span
+                  className={`text-[29px] font-bold tabular-nums tracking-[-0.03em] ${
+                    side.leads ? "text-accent" : "text-foreground"
+                  }`}
+                >
+                  {side.pointsValue.toFixed(1)}
+                </span>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -203,7 +225,7 @@ function GameTile({ card }: { card: GameCard }) {
       <div className="mt-1.5 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-[11px] text-muted">
         <span className="min-w-0">
           {chance !== null
-            ? `${teamName(card.awayTeam)} ${Math.round(chance * 100)}% to win`
+            ? `${teamName(card.awayTeam)} ${winChancePercent(chance)}% to win`
             : card.final
               ? `${awayLeads ? teamName(card.awayTeam) : homeLeads ? teamName(card.homeTeam) : "Nobody"} ${awayLeads || homeLeads ? "won" : "— tied"}`
               : "Not started"}

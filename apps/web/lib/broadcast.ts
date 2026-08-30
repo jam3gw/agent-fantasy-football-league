@@ -256,6 +256,24 @@ export interface GameCard {
   homeToPlay: string[];
   /** Away team's chance to win, 0–1, or null once the game is over. */
   awayWinChance: number | null;
+  /**
+   * Whether this matchup's week has actually begun for it: some starter's NFL
+   * game has kicked off, or points are on the board. The tick flips a game
+   * from "scheduled" at kickoff (§13.2), so before Thursday night every
+   * matchup is started=false — a page that treated "slots still to play" as
+   * "live" was calling Wednesday afternoon a live week.
+   */
+  started: boolean;
+  /**
+   * Each side's projected final: points already scored plus what its starters
+   * still to play have left in their projections. Before kickoff that is the
+   * starting lineup's projected total for the week. Null when the schedule or
+   * the week's projections are not in the database — no number is offered
+   * rather than a zero that reads as a forecast — and null once the game is
+   * over, when the score itself is the answer.
+   */
+  awayProjected: number | null;
+  homeProjected: number | null;
 }
 
 /**
@@ -356,9 +374,14 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
   const scheduleKnown = games.length > 0;
   const finished = new Set<string>();
   const playing = new Set<string>();
+  const kickedOff = new Set<string>();
   for (const g of games) {
     playing.add(g.home);
     playing.add(g.away);
+    if (g.status !== "scheduled") {
+      kickedOff.add(g.home);
+      kickedOff.add(g.away);
+    }
     if (g.status === "final") {
       finished.add(g.home);
       finished.add(g.away);
@@ -401,6 +424,16 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
     };
   };
 
+  // Projections arrive with the weekly ingest; a week without any is a week
+  // where every "projected total" would read 0.0, which is a claim, not a gap.
+  const projectionsKnown = projections.length > 0;
+
+  const sideStarted = (teamId: number): boolean =>
+    (bySide.get(teamId) ?? []).some((s) => {
+      const nflTeam = nflTeamOf.get(s.playerId);
+      return nflTeam != null && kickedOff.has(nflTeam);
+    });
+
   return weekly.map((m) => {
     const awayPoints = m.awayPoints ?? 0;
     const homePoints = m.homePoints ?? 0;
@@ -408,6 +441,9 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
     const home = remainingFor(m.homeTeamId);
     const slotsToPlay = scheduleKnown ? away.slots.length + home.slots.length : null;
     const over = m.final || slotsToPlay === 0;
+    const started =
+      awayPoints > 0 || homePoints > 0 || sideStarted(m.awayTeamId) || sideStarted(m.homeTeamId);
+    const projected = !over && scheduleKnown && projectionsKnown;
     const margin = awayPoints + away.projected - (homePoints + home.projected);
     return {
       matchupId: m.id,
@@ -425,6 +461,9 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
       // No schedule means no idea who is left to play, so no chance is
       // offered rather than one computed from the score alone.
       awayWinChance: over || slotsToPlay === null ? null : winChanceFromMargin(margin),
+      started,
+      awayProjected: projected ? awayPoints + away.projected : null,
+      homeProjected: projected ? homePoints + home.projected : null,
     };
   });
 }

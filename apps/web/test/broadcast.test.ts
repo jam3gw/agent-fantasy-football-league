@@ -17,6 +17,7 @@ import {
   transactionPlayerIds,
   remainingPoints,
   winChanceFromMargin,
+  winChancePercent,
   type FinalGame,
 } from "../lib/broadcastLogic";
 
@@ -80,6 +81,26 @@ describe("win chance", () => {
 
   it("keeps the scale a positive number", () => {
     expect(MARGIN_SCALE).toBeGreaterThan(0);
+  });
+});
+
+describe("win chance as the printed percent", () => {
+  it("rounds an ordinary chance to its whole percent", () => {
+    expect(winChancePercent(0.5)).toBe(50);
+    expect(winChancePercent(0.614)).toBe(61);
+  });
+
+  it("never prints a certainty while the game can still be played", () => {
+    // A lineup facing nine starters with one of its own left rounded to
+    // "100% to win" on the page, which the copy promises never to say.
+    expect(winChancePercent(0.9999)).toBe(99);
+    expect(winChancePercent(winChanceFromMargin(150))).toBe(99);
+    expect(winChancePercent(0.0001)).toBe(1);
+    expect(winChancePercent(winChanceFromMargin(-150))).toBe(1);
+  });
+
+  it("falls back to a coin flip on a chance that is not a number", () => {
+    expect(winChancePercent(Number.NaN)).toBe(50);
   });
 });
 

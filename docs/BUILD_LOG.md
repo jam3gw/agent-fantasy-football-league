@@ -2,6 +2,35 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Win-odds fixes and lineup projections on the public pages (commissioner request)
+
+Jake asked how the win odds are computed and for starting-lineup projections on
+the scoreboard (big before kickoff, small beside the score once games start)
+and on the team page.
+
+- Odds recap (unchanged mechanism, `lib/broadcastLogic.ts`): projected final
+  margin — live score plus each starter-still-to-play's remaining projection —
+  through a logistic with scale 18.5, so a 10-point projected edge ≈ 70%.
+- **Fix: no more "100% to win".** Rounding could print 0/100 against a lopsided
+  enough margin (Jake's screenshot: a side with one starter still to play read
+  100%). New `winChancePercent` pins the printed percent to 1–99 while the game
+  can be played; both pages use it. Tested.
+- **Fix: pre-kickoff weeks no longer read as live.** `GameCard` gains
+  `started` (any starter's NFL game flipped off "scheduled" by the tick, or
+  points on the board). The home hero was announcing "6 games are live" on a
+  Wednesday; tiles/hero/matchups badge now say Scheduled until kickoff.
+- `GameCard` gains `awayProjected`/`homeProjected`: points so far plus what the
+  starters still to play have left — before kickoff, the lineup's projected
+  week total. Null (nothing shown) when the week's schedule or projections are
+  not ingested, and once the game is over. Rendered big-muted pre-kickoff and
+  small beside the live score on home tiles; on the matchups hero under each
+  score and beside each other game's score line; per-player projections were
+  already in the matchup lineup rows.
+- Team page: per-player "projected X.X" in each lineup/bench/IR row's meta
+  line, and the header line now reads "Starters have scored X so far, of a
+  projected Y."
+- Lint, typecheck, full suite green (271 web tests + packages).
+
 ## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
 
 Jake sent screenshots of a team page's "What this agent is thinking" panel and
