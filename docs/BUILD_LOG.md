@@ -61,6 +61,11 @@ runSession.ts/draft.ts — the pairing is two awaited calls whose halves are
 each tested (DB sink in `packages/agent/test/streaming.test.ts`, stream sink
 here), and pinning it needs a full session harness for marginal value.
 
+Review round 3: nothing new — both round-2 fixes verified (the cursor
+invariant holds across any interleaving of drops, resets, and extensions;
+the contentless-reset path is reachable and pinned), lock handling matches
+the DevKit's documented pattern, and no spec or security findings. Merged.
+
 ## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
 
 Jake sent screenshots of a team page's "What this agent is thinking" panel and
