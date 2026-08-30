@@ -1,0 +1,794 @@
+{
+  "anthropic/claude-fable-5": {
+    "name": "Claude Fable 5",
+    "context_window": 1000000,
+    "max_tokens": 128000,
+    "pricing": {
+      "input": "0.00001",
+      "output": "0.00005",
+      "input_cache_read": "0.000001",
+      "input_cache_write": "0.0000125",
+      "web_search": "10",
+      "regional": {
+        "us": {
+          "input": "0.000011",
+          "output": "0.000055",
+          "input_cache_read": "0.0000011",
+          "input_cache_write": "0.00001375"
+        }
+      }
+    },
+    "type": "language"
+  },
+  "anthropic/claude-opus-5": {
+    "name": "Claude Opus 5",
+    "context_window": 1000000,
+    "max_tokens": 128000,
+    "pricing": {
+      "input": "0.000005",
+      "output": "0.000025",
+      "input_cache_read": "0.0000005",
+      "input_cache_write": "0.00000625",
+      "web_search": "10",
+      "fast": {
+        "input": "0.00001",
+        "output": "0.00005",
+        "input_cache_read": "0.000001",
+        "input_cache_write": "0.0000125"
+      },
+      "regional": {
+        "eu": {
+          "input": "0.0000055",
+          "output": "0.0000275",
+          "input_cache_read": "0.00000055",
+          "input_cache_write": "0.000006875"
+        },
+        "us": {
+          "input": "0.0000055",
+          "output": "0.0000275",
+          "input_cache_read": "0.00000055",
+          "input_cache_write": "0.000006875",
+          "fast": {
+            "input": "0.000011",
+            "output": "0.000055",
+            "input_cache_read": "0.0000011",
+            "input_cache_write": "0.00001375"
+          }
+        }
+      }
+    },
+    "type": "language"
+  },
+  "anthropic/claude-sonnet-5": {
+    "name": "Claude Sonnet 5",
+    "context_window": 1000000,
+    "max_tokens": 128000,
+    "pricing": {
+      "input": "0.000002",
+      "output": "0.00001",
+      "input_cache_read": "0.0000002",
+      "input_cache_write": "0.0000025",
+      "web_search": "10",
+      "regional": {
+        "eu": {
+          "input": "0.0000022",
+          "output": "0.000011",
+          "input_cache_read": "0.00000022",
+          "input_cache_write": "0.00000275"
+        },
+        "us": {
+          "input": "0.0000022",
+          "output": "0.000011",
+          "input_cache_read": "0.00000022",
+          "input_cache_write": "0.00000275"
+        }
+      }
+    },
+    "type": "language"
+  },
+  "openai/gpt-5.6-sol": {
+    "name": "GPT 5.6 Sol",
+    "context_window": 1050000,
+    "max_tokens": 128000,
+    "pricing": {
+      "input": "0.000002",
+      "input_tiers": [
+        {
+          "cost": "0.000002",
+          "min": 0,
+          "max": 272000
+        },
+        {
+          "cost": "0.000004",
+          "min": 272000
+        }
+      ],
+      "output": "0.00001",
+      "output_tiers": [
+        {
+          "cost": "0.00001",
+          "min": 0,
+          "max": 272000
+        },
+        {
+          "cost": "0.000015",
+          "min": 272000
+        }
+      ],
+      "input_cache_read": "0.0000002",
+      "input_cache_read_tiers": [
+        {
+          "cost": "0.0000002",
+          "min": 0,
+          "max": 272000
+        },
+        {
+          "cost": "0.0000004",
+          "min": 272000
+        }
+      ],
+      "input_cache_write": "0.0000025",
+      "input_cache_write_tiers": [
+        {
+          "cost": "0.0000025",
+          "min": 0,
+          "max": 272000
+        },
+        {
+          "cost": "0.000005",
+          "min": 272000
+        }
+      ],
+      "web_search": "10",
+      "service_tiers": {
+        "flex": {
+          "input": "0.000001",
+          "output": "0.000005",
+          "input_cache_read": "0.0000001",
+          "long_context": {
+            "threshold": 272000,
+            "input": "0.000002",
+            "output": "0.0000075",
+            "input_cache_read": "0.0000002"
+          }
+        },
+        "priority": {
+          "input": "0.000004",
+          "output": "0.00002",
+          "input_cache_read": "0.0000004",
+          "long_context": {
+            "threshold": 272000,
+            "input": "0.000008",
+            "output": "0.00003",
+            "input_cache_read": "0.0000008"
+          }
+        }
+      },
+      "varies_by_provider": true,
+      "fast": {
+        "input": "0.000004",
+        "input_tiers": [
+          {
+            "cost": "0.000004",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.000008",
+            "min": 272000
+          }
+        ],
+        "output": "0.00002",
+        "output_tiers": [
+          {
+            "cost": "0.00002",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.00003",
+            "min": 272000
+          }
+        ],
+        "input_cache_read": "0.0000004",
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000004",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.0000008",
+            "min": 272000
+          }
+        ],
+        "input_cache_write": "0.0000025",
+        "input_cache_write_tiers": [
+          {
+            "cost": "0.0000025",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.000005",
+            "min": 272000
+          }
+        ]
+      },
+      "regional": {
+        "us": {
+          "input": "0.0000022",
+          "input_tiers": [
+            {
+              "cost": "0.0000022",
+              "min": 0,
+              "max": 272000
+            },
+            {
+              "cost": "0.0000044",
+              "min": 272000
+            }
+          ],
+          "output": "0.000011",
+          "output_tiers": [
+            {
+              "cost": "0.000011",
+              "min": 0,
+              "max": 272000
+            },
+            {
+              "cost": "0.0000165",
+              "min": 272000
+            }
+          ],
+          "input_cache_read": "0.00000022",
+          "input_cache_read_tiers": [
+            {
+              "cost": "0.00000022",
+              "min": 0,
+              "max": 272000
+            },
+            {
+              "cost": "0.00000044",
+              "min": 272000
+            }
+          ],
+          "input_cache_write": "0.000001375",
+          "input_cache_write_tiers": [
+            {
+              "cost": "0.000001375",
+              "min": 0,
+              "max": 272000
+            },
+            {
+              "cost": "0.00000275",
+              "min": 272000
+            }
+          ],
+          "fast": {
+            "input": "0.0000044",
+            "input_tiers": [
+              {
+                "cost": "0.0000044",
+                "min": 0,
+                "max": 272000
+              },
+              {
+                "cost": "0.0000088",
+                "min": 272000
+              }
+            ],
+            "output": "0.000022",
+            "output_tiers": [
+              {
+                "cost": "0.000022",
+                "min": 0,
+                "max": 272000
+              },
+              {
+                "cost": "0.000033",
+                "min": 272000
+              }
+            ],
+            "input_cache_read": "0.00000044",
+            "input_cache_read_tiers": [
+              {
+                "cost": "0.00000044",
+                "min": 0,
+                "max": 272000
+              },
+              {
+                "cost": "0.00000088",
+                "min": 272000
+              }
+            ],
+            "input_cache_write": "0.000001375",
+            "input_cache_write_tiers": [
+              {
+                "cost": "0.000001375",
+                "min": 0,
+                "max": 272000
+              },
+              {
+                "cost": "0.00000275",
+                "min": 272000
+              }
+            ]
+          }
+        }
+      }
+    },
+    "type": "language"
+  },
+  "openai/gpt-5.6-terra": {
+    "name": "GPT 5.6 Terra",
+    "context_window": 1050000,
+    "max_tokens": 128000,
+    "pricing": {
+      "input": "0.000002",
+      "input_tiers": [
+        {
+          "cost": "0.000002",
+          "min": 0,
+          "max": 272000
+        },
+        {
+          "cost": "0.000004",
+          "min": 272000
+        }
+      ],
+      "output": "0.000012",
+      "output_tiers": [
+        {
+          "cost": "0.000012",
+          "min": 0,
+          "max": 272000
+        },
+        {
+          "cost": "0.000018",
+          "min": 272000
+        }
+      ],
+      "input_cache_read": "0.0000002",
+      "input_cache_read_tiers": [
+        {
+          "cost": "0.0000002",
+          "min": 0,
+          "max": 272000
+        },
+        {
+          "cost": "0.0000004",
+          "min": 272000
+        }
+      ],
+      "input_cache_write": "0.0000025",
+      "input_cache_write_tiers": [
+        {
+          "cost": "0.0000025",
+          "min": 0,
+          "max": 272000
+        },
+        {
+          "cost": "0.000005",
+          "min": 272000
+        }
+      ],
+      "web_search": "10",
+      "service_tiers": {
+        "flex": {
+          "input": "0.000001",
+          "output": "0.000006",
+          "input_cache_read": "0.0000001",
+          "long_context": {
+            "threshold": 272000,
+            "input": "0.000002",
+            "output": "0.000009",
+            "input_cache_read": "0.0000002"
+          }
+        },
+        "priority": {
+          "input": "0.000004",
+          "output": "0.000024",
+          "input_cache_read": "0.0000004",
+          "long_context": {
+            "threshold": 272000,
+            "input": "0.000008",
+            "output": "0.000036",
+            "input_cache_read": "0.0000008"
+          }
+        }
+      },
+      "fast": {
+        "input": "0.000004",
+        "input_tiers": [
+          {
+            "cost": "0.000004",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.000008",
+            "min": 272000
+          }
+        ],
+        "output": "0.000024",
+        "output_tiers": [
+          {
+            "cost": "0.000024",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.000036",
+            "min": 272000
+          }
+        ],
+        "input_cache_read": "0.0000004",
+        "input_cache_read_tiers": [
+          {
+            "cost": "0.0000004",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.0000008",
+            "min": 272000
+          }
+        ],
+        "input_cache_write": "0.0000025",
+        "input_cache_write_tiers": [
+          {
+            "cost": "0.0000025",
+            "min": 0,
+            "max": 272000
+          },
+          {
+            "cost": "0.000005",
+            "min": 272000
+          }
+        ]
+      },
+      "regional": {
+        "us": {
+          "input": "0.0000022",
+          "input_tiers": [
+            {
+              "cost": "0.0000022",
+              "min": 0,
+              "max": 272000
+            },
+            {
+              "cost": "0.0000044",
+              "min": 272000
+            }
+          ],
+          "output": "0.0000132",
+          "output_tiers": [
+            {
+              "cost": "0.0000132",
+              "min": 0,
+              "max": 272000
+            },
+            {
+              "cost": "0.0000198",
+              "min": 272000
+            }
+          ],
+          "input_cache_read": "0.00000022",
+          "input_cache_read_tiers": [
+            {
+              "cost": "0.00000022",
+              "min": 0,
+              "max": 272000
+            },
+            {
+              "cost": "0.00000044",
+              "min": 272000
+            }
+          ],
+          "input_cache_write": "0.00000275",
+          "input_cache_write_tiers": [
+            {
+              "cost": "0.00000275",
+              "min": 0,
+              "max": 272000
+            },
+            {
+              "cost": "0.0000055",
+              "min": 272000
+            }
+          ],
+          "fast": {
+            "input": "0.0000044",
+            "input_tiers": [
+              {
+                "cost": "0.0000044",
+                "min": 0,
+                "max": 272000
+              },
+              {
+                "cost": "0.0000088",
+                "min": 272000
+              }
+            ],
+            "output": "0.0000264",
+            "output_tiers": [
+              {
+                "cost": "0.0000264",
+                "min": 0,
+                "max": 272000
+              },
+              {
+                "cost": "0.0000396",
+                "min": 272000
+              }
+            ],
+            "input_cache_read": "0.00000044",
+            "input_cache_read_tiers": [
+              {
+                "cost": "0.00000044",
+                "min": 0,
+                "max": 272000
+              },
+              {
+                "cost": "0.00000088",
+                "min": 272000
+              }
+            ],
+            "input_cache_write": "0.00000275",
+            "input_cache_write_tiers": [
+              {
+                "cost": "0.00000275",
+                "min": 0,
+                "max": 272000
+              },
+              {
+                "cost": "0.0000055",
+                "min": 272000
+              }
+            ]
+          }
+        }
+      }
+    },
+    "type": "language"
+  },
+  "google/gemini-3.1-pro-preview": {
+    "name": "Gemini 3.1 Pro Preview",
+    "context_window": 1000000,
+    "max_tokens": 64000,
+    "pricing": {
+      "input": "0.000002",
+      "input_tiers": [
+        {
+          "cost": "0.000002",
+          "min": 0,
+          "max": 200001
+        },
+        {
+          "cost": "0.000004",
+          "min": 200001
+        }
+      ],
+      "output": "0.000012",
+      "output_tiers": [
+        {
+          "cost": "0.000012",
+          "min": 0,
+          "max": 200001
+        },
+        {
+          "cost": "0.000018",
+          "min": 200001
+        }
+      ],
+      "input_cache_read": "0.0000002",
+      "input_cache_read_tiers": [
+        {
+          "cost": "0.0000002",
+          "min": 0,
+          "max": 200001
+        },
+        {
+          "cost": "0.0000004",
+          "min": 200001
+        }
+      ],
+      "web_search": "14",
+      "maps_search": "14",
+      "service_tiers": {
+        "priority": {
+          "input": "0.0000036",
+          "output": "0.0000216",
+          "input_cache_read": "0.00000036",
+          "long_context": {
+            "threshold": 200001,
+            "input": "0.0000072",
+            "output": "0.0000324",
+            "input_cache_read": "0.00000072"
+          }
+        },
+        "flex": {
+          "input": "0.000001",
+          "output": "0.000006",
+          "long_context": {
+            "threshold": 200001,
+            "input": "0.000002",
+            "output": "0.000009"
+          }
+        }
+      }
+    },
+    "type": "language"
+  },
+  "spacexai/grok-4.6": {
+    "name": "Grok 4.6",
+    "context_window": 500000,
+    "max_tokens": 500000,
+    "pricing": {
+      "input": "0.000002",
+      "input_tiers": [
+        {
+          "cost": "0.000002",
+          "min": 0,
+          "max": 200001
+        },
+        {
+          "cost": "0.000004",
+          "min": 200001
+        }
+      ],
+      "output": "0.000006",
+      "output_tiers": [
+        {
+          "cost": "0.000006",
+          "min": 0,
+          "max": 200001
+        },
+        {
+          "cost": "0.000012",
+          "min": 200001
+        }
+      ],
+      "input_cache_read": "0.0000005",
+      "input_cache_read_tiers": [
+        {
+          "cost": "0.0000005",
+          "min": 0,
+          "max": 200001
+        },
+        {
+          "cost": "0.000001",
+          "min": 200001
+        }
+      ],
+      "web_search": "5",
+      "service_tiers": {
+        "priority": {
+          "input": "0.000004",
+          "output": "0.000012",
+          "input_cache_read": "0.000001",
+          "long_context": {
+            "threshold": 200001,
+            "input": "0.000008",
+            "output": "0.000024",
+            "input_cache_read": "0.000002"
+          }
+        }
+      }
+    },
+    "type": "language"
+  },
+  "deepseek/deepseek-v4-pro": {
+    "name": "DeepSeek V4 Pro",
+    "context_window": 1000000,
+    "max_tokens": 384000,
+    "pricing": {
+      "input": "0.00000066",
+      "output": "0.00000198",
+      "input_cache_read": "0.000000022",
+      "peak_pricing": {
+        "multiplier": 2,
+        "windows": [
+          {
+            "start_minute_utc": 60,
+            "end_minute_utc": 240,
+            "days_of_week": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          },
+          {
+            "start_minute_utc": 360,
+            "end_minute_utc": 600,
+            "days_of_week": [
+              1,
+              2,
+              3,
+              4,
+              5
+            ]
+          }
+        ]
+      },
+      "varies_by_provider": true,
+      "regional": {
+        "us": {
+          "input": "0.00000174",
+          "output": "0.00000348",
+          "input_cache_read": "0.00000015"
+        }
+      }
+    },
+    "type": "language"
+  },
+  "moonshotai/kimi-k3": {
+    "name": "Kimi K3",
+    "context_window": 1000000,
+    "max_tokens": 131072,
+    "pricing": {
+      "input": "0.000003",
+      "output": "0.000015",
+      "input_cache_read": "0.0000003",
+      "varies_by_provider": true,
+      "fast": {
+        "input": "0.0000045",
+        "output": "0.0000225",
+        "input_cache_read": "0.00000045"
+      },
+      "regional": {
+        "us": {
+          "input": "0.000003",
+          "output": "0.000015",
+          "input_cache_read": "0.0000003"
+        }
+      }
+    },
+    "type": "language"
+  },
+  "alibaba/qwen3.8-max": {
+    "name": "Qwen 3.8 Max",
+    "context_window": 1000000,
+    "max_tokens": 128000,
+    "pricing": {
+      "input": "0.000002",
+      "output": "0.000006",
+      "input_cache_read": "0.00000025",
+      "input_cache_write": "0.0000025"
+    },
+    "type": "language"
+  },
+  "meta/muse-spark-1.2": {
+    "name": "Muse Spark 1.2",
+    "context_window": 1048576,
+    "max_tokens": 1048576,
+    "pricing": {
+      "input": "0.00000125",
+      "output": "0.00000425",
+      "input_cache_read": "0.00000015"
+    },
+    "type": "language"
+  },
+  "zai/glm-5.3": {
+    "name": "GLM 5.3",
+    "context_window": 1000000,
+    "max_tokens": 1000000,
+    "pricing": {
+      "input": "0.0000014",
+      "output": "0.0000044",
+      "input_cache_read": "0.00000014",
+      "varies_by_provider": true,
+      "regional": {
+        "us": {
+          "input": "0.0000014",
+          "output": "0.0000044",
+          "input_cache_read": "0.00000014"
+        }
+      }
+    },
+    "type": "language"
+  }
+}
