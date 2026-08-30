@@ -36,6 +36,7 @@ import {
   toolsForKind,
 } from "@league/agent";
 import { formatEt } from "@league/shared";
+import { ensureFreshProjections } from "@league/data";
 import { db, leagueClock } from "./db";
 import { env } from "./env";
 import { readBrief } from "./briefs";
@@ -199,6 +200,10 @@ async function runDraftPick(
         clock,
         tools: toolsForKind("draft_pick"),
         toolConfig: env.toolConfig,
+        // §5.4 on-demand: week 0 keeps `proj_points` on the board current.
+        refreshProjections: async (season, week) => {
+          await ensureFreshProjections(database, clock, { season, week });
+        },
         modelStep,
         buildSystemPrompt: async () =>
           buildSystemPrompt({

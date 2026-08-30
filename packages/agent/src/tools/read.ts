@@ -320,6 +320,9 @@ async function rosterPayload(
   const ids = roster.map((r) => r.playerId);
   const now = ctx.clock.now();
   const season = settings.season;
+  // Lineup decisions deserve live numbers: pull the projection feed for the
+  // current (or a future) week before reading. Past weeks never move.
+  if (week >= settings.currentWeek) await ctx.refreshProjections?.(season, week);
   const [{ byTeam }, byes, slots, pts, seasonPts, proj, locked] = await Promise.all([
     weekGames(db, season, week, now),
     byeWeeks(db, season),
@@ -690,6 +693,8 @@ export const getMatchupTool = readTool(
         `the current week is ${settings.currentWeek}`,
       );
     }
+    // The current week's projections still move; finished weeks are history.
+    if (week === settings.currentWeek) await ctx.refreshProjections?.(settings.season, week);
     const idx = await teamIndex(db);
     const rows = await db.select().from(matchups).where(eq(matchups.week, week));
     if (rows.length === 0) {
@@ -927,6 +932,8 @@ export const getFreeAgentsTool = readTool(
     const lastWeek = week > 1 ? week - 1 : 1;
     const position = args.position?.toUpperCase();
     const sort = args.sort ?? "trending";
+    // A pickup is judged on this week's projection — refresh it before reading.
+    await ctx.refreshProjections?.(season, week);
 
     // Correlated sub-selects keep the scan in the database; ::float8 so numeric
     // columns come back as numbers, not strings.
@@ -1656,10 +1663,12 @@ export const webSearchTool = readTool(
  * Replaced `fantasypros_lookup` on 2026-08-29. Every field below is already in
  * our own tables — rankings from the Sleeper ADP ingest (§5.7), projections
  * from the weekly projection ingest, injury and trending data from the hourly
- * player feed — so this tool makes no outbound request, needs no key, and has
- * no daily allowance to spend. It also makes "same information for all twelve
- * agents" true by construction rather than by convention: every agent reads the
- * same rows at the same moment.
+ * player feed — so this tool needs no key and has no daily allowance to spend.
+ * The one outbound path is `ctx.refreshProjections` (§5.4 on-demand): before a
+ * `projections` read for the current week or later, the shared table is
+ * refreshed from the feed when stale. That keeps "same information for all
+ * twelve agents" true by construction: every agent reads the same rows, the
+ * refresh only changes when those shared rows update.
  *
  * There is no `news` kind. Sleeper carries no news feed, and `web_search`
  * already covers it.
@@ -1759,6 +1768,8 @@ export const playerResearchTool = readTool(
     }
 
     if (args.kind === "projections") {
+      // Week 0 is the season-long board; current and future weeks still move.
+      if (week === 0 || week >= settings.currentWeek) await ctx.refreshProjections?.(season, week);
       const rows = await db
         .select({
           playerId: playerWeekProj.playerId,

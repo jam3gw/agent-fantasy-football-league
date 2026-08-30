@@ -504,6 +504,8 @@ export const getAvailablePlayersTool = defineTool({
   schema: getAvailablePlayersSchema,
   execute: async (args, ctx) => {
     const settings = await getSettings(ctx.db);
+    // Week 0 is the season-long projection board behind `proj_points` (§10.3).
+    await ctx.refreshProjections?.(settings.season, 0);
     let pool = await availableDraftPlayers(ctx.db, settings.season);
 
     if (args.position) {
