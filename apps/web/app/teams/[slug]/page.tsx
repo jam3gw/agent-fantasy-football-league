@@ -22,6 +22,8 @@ import {
 } from "@league/engine";
 import { formatEt } from "@league/shared";
 import { Container, Eyebrow, Nothing, Panel, Tag, formatEtStamp } from "@/components/broadcast";
+import { InlineMarkdown, Markdown } from "@/components/markdown";
+import { flattenMarkdown } from "@/lib/broadcastLogic";
 import { db } from "@/lib/db";
 import {
   safeRead as safe,
@@ -182,7 +184,11 @@ export default async function TeamPage({
                 {team.name ?? `Team ${team.slug}`}
               </h1>
               <p className="mt-2 text-[17px] text-muted">
-                {team.motto ?? "This agent has not written a motto yet."}
+                {team.motto ? (
+                  <InlineMarkdown source={flattenMarkdown(team.motto)} id="motto" />
+                ) : (
+                  "This agent has not written a motto yet."
+                )}
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {team.paused ? <Tag size="sm">paused</Tag> : null}
@@ -273,9 +279,11 @@ export default async function TeamPage({
                 {!scratchpad || scratchpad.content.trim() === "" ? (
                   <Nothing>This agent has not written anything in its scratchpad yet.</Nothing>
                 ) : (
-                  <pre className="whitespace-pre-wrap break-words font-mono text-[13px] leading-[1.7]">
-                    {scratchpad.content}
-                  </pre>
+                  <Markdown
+                    source={scratchpad.content}
+                    id="pad"
+                    className="space-y-3 break-words text-[13px] leading-[1.7]"
+                  />
                 )}
                 {versions.length > 0 ? (
                   <details className="mt-4">
@@ -293,9 +301,13 @@ export default async function TeamPage({
                               </Link>
                             ) : null}
                           </div>
-                          <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[12px] leading-[1.6]">
-                            {v.content}
-                          </pre>
+                          <div className="mt-2">
+                            <Markdown
+                              source={v.content}
+                              id={`pad-v${v.id}`}
+                              className="space-y-2 break-words text-[12px] leading-[1.6]"
+                            />
+                          </div>
                         </li>
                       ))}
                     </ol>
@@ -327,7 +339,12 @@ export default async function TeamPage({
                           {d.kind.replace(/_/g, " ")}
                           {d.week ? ` · week ${d.week}` : ""}
                         </div>
-                        <div className="mt-0.5 text-[14px] leading-[1.5]">{d.summary}</div>
+                        <div className="mt-0.5 text-[14px] leading-[1.5]">
+                          <InlineMarkdown
+                            source={flattenMarkdown(d.summary) || "(nothing outside a code block)"}
+                            id={`d${d.id}`}
+                          />
+                        </div>
                       </div>
                       {d.sessionId ? (
                         <Link href={`/sessions/${d.sessionId}`} className="text-[12px] font-semibold text-accent">
@@ -355,7 +372,11 @@ export default async function TeamPage({
                   checkIns.map((c) => (
                     <div key={c.sessionId} className="border-t border-border py-3">
                       <div className="font-mono text-[11px] text-faint">{formatEt(c.at)}</div>
-                      <div className="mt-0.5 text-[14px] leading-[1.5]">{c.reason}</div>
+                      <div className="mt-0.5 text-[14px] leading-[1.5]">
+                        {c.reason ? (
+                          <InlineMarkdown source={flattenMarkdown(c.reason)} id={`c${c.sessionId}`} />
+                        ) : null}
+                      </div>
                     </div>
                   ))
                 )}

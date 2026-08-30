@@ -18,6 +18,8 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { STARTING_SLOTS, decisionLogs, lockedPlayerIds, playerWeekProj } from "@league/engine";
 import type { StartingSlot } from "@league/engine";
 import { Bar, CardLink, Container, LiveDot, Nothing, Panel, Tag } from "@/components/broadcast";
+import { InlineMarkdown } from "@/components/markdown";
+import { flattenMarkdown } from "@/lib/broadcastLogic";
 import { db, leagueClock } from "@/lib/db";
 import { gameCards, teamName, type GameCard } from "@/lib/broadcast";
 import { liveStatus, safeRead as safe, settings, teamLineup, type LineupPlayer } from "@/lib/queries";
@@ -440,7 +442,12 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
                     </div>
                     {reason ? (
                       <>
-                        <p className="mt-2.5 text-[15px] leading-[1.65]">{reason.summary}</p>
+                        <p className="mt-2.5 text-[15px] leading-[1.65]">
+                          <InlineMarkdown
+                            source={flattenMarkdown(reason.summary) || "(nothing outside a code block)"}
+                            id={`why${team?.id ?? i}`}
+                          />
+                        </p>
                         {reason.sessionId ? (
                           <div className="mt-3">
                             <CardLink href={`/sessions/${reason.sessionId}`}>
