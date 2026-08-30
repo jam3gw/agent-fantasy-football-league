@@ -1,0 +1,1 @@
+CREATE INDEX "player_week_proj_season_week_idx" ON "player_week_proj" USING btree ("season","week");
