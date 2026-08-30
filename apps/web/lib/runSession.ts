@@ -20,7 +20,7 @@ import {
   type RunSessionResult,
 } from "@league/agent";
 import { getSettings, sessions, teams } from "@league/engine";
-import { ensureFreshProjections } from "@league/data";
+import { ensureFreshPlayerFeed, ensureFreshProjections } from "@league/data";
 import { formatEt } from "@league/shared";
 import { db, leagueClock } from "./db";
 import { env } from "./env";
@@ -132,10 +132,13 @@ export async function runAgentSession(
     ...(options.stepBudgetMs === undefined ? {} : { stepBudgetMs: options.stepBudgetMs }),
     tools: toolsForKind(session.kind),
     toolConfig: env.toolConfig,
-    // §5.4 on-demand: projection reads re-pull the Sleeper feed when the
-    // stored week is stale. TTL-guarded and never throws (see @league/data).
+    // §5.4 / §5.1 on-demand: projection and player-feed reads re-pull the
+    // Sleeper feeds when stale. TTL-guarded and never throw (see @league/data).
     refreshProjections: async (season, week) => {
       await ensureFreshProjections(database, clock, { season, week });
+    },
+    refreshPlayerFeed: async () => {
+      await ensureFreshPlayerFeed(database, clock);
     },
     modelStep,
     buildSystemPrompt: async () => {

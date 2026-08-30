@@ -1052,11 +1052,37 @@ describe("refreshProjections wiring", () => {
     const kc = await makePlayer(db, { nflTeam: "KC", position: "RB" });
     await rosterPlayer(db, a, kc);
     const refresh = refresherWriting([{ playerId: kc, week: 1, pts: 17.3 }]);
+    const feed = vi.fn(async () => {});
 
-    const res = ok(await getMyTeamTool.execute({}, ctxFor({ teamId: a, refreshProjections: refresh })));
+    const res = ok(
+      await getMyTeamTool.execute({}, ctxFor({ teamId: a, refreshProjections: refresh, refreshPlayerFeed: feed })),
+    );
     expect(refresh).toHaveBeenCalledExactlyOnceWith(SEASON, 1);
+    expect(feed).toHaveBeenCalledOnce();
     const rows = res.players as Array<Record<string, unknown>>;
     expect(rows[0]!.proj_pts_ppr).toBe(17.3);
+  });
+
+  it("player_research refreshes the player feed for injuries but not for trending", async () => {
+    await seedLeague(db);
+    const wr = await makePlayer(db, { nflTeam: "SF", position: "WR" });
+    await db.update(players).set({ trendingAdds: 12 }).where(eq(players.playerId, wr));
+    const feed = vi.fn(async () => {
+      await db
+        .update(players)
+        .set({ injuryStatus: "Questionable", injuryBodyPart: "Ankle" })
+        .where(eq(players.playerId, wr));
+    });
+    const ctx = ctxFor({ refreshPlayerFeed: feed });
+
+    const res = ok(await playerResearchTool.execute({ kind: "injuries" }, ctx));
+    expect(feed).toHaveBeenCalledOnce();
+    const items = res.items as Array<Record<string, unknown>>;
+    expect(items.find((i) => i.player_id === wr)!.injury_status).toBe("Questionable");
+
+    feed.mockClear();
+    ok(await playerResearchTool.execute({ kind: "trending" }, ctx));
+    expect(feed).not.toHaveBeenCalled();
   });
 
   it("get_matchup refreshes the current week but never a finished one", async () => {
