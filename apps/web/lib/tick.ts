@@ -552,6 +552,15 @@ export async function startQueuedSessions(
   const now = clock.now();
   const reclaimed = await reclaimStuckSessions(database, clock);
 
+  // Ordered by when each session's turn comes, not by when it was booked:
+  // `week.plan` books the whole week's lineup checks in one instant — more
+  // rows than this page — and ordering by `created_at` put that far-future
+  // pile ahead of everything booked after it, so a board reply due *now* was
+  // never even examined until the pile drained weeks later. Due time also
+  // serves the two retirement branches below: a session past its deadline is
+  // past its due time too, and a stale one with no deadline coalesces to its
+  // old `created_at`, so both sort to the front rather than falling off the
+  // page.
   const queued = await database
     .select({
       id: sessions.id,
@@ -562,7 +571,7 @@ export async function startQueuedSessions(
     })
     .from(sessions)
     .where(eq(sessions.status, "queued"))
-    .orderBy(asc(sessions.createdAt))
+    .orderBy(sql`coalesce((${sessions.context} ->> 'due_at')::timestamptz, ${sessions.createdAt})`, asc(sessions.createdAt))
     .limit(MAX_QUEUED_SESSIONS_PER_TICK);
 
   // §4.3: a paused team runs nothing. Pausing was enforced only where sessions
