@@ -2,7 +2,30 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
-## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
+## 2026-08-30 — get_free_agents SQL error: drizzle drops the correlation qualifier
+
+Every `get_free_agents` call in production failed with a `tool_error` (reported
+by Gridiron Gambit's session; confirmed in `session_events` rows 4613/4664/4700).
+Root cause: the three "correlated" scalar sub-selects in the tool interpolate
+`${players.playerId}` into raw SQL, and drizzle renders a column embedded in a
+**select-list** expression unqualified (where/order-by columns stay qualified).
+The generated `s.player_id = "player_id"` rebinds to the subquery's own alias —
+`s.player_id = s.player_id`, always true — so the last-week and projection
+sub-selects returned one row per player with data: Postgres 21000, "more than
+one row returned by a subquery used as an expression". It broke the moment the
+2026 week-1 stats/projection feeds populated more than one player, which is why
+it "worked" all preseason and then failed for every position and sort at once.
+
+- Fix: the outer reference is now the literal `players.player_id` in the raw
+  SQL, with a comment stating the constraint. Same for the season-total
+  sub-select, which never threw but summed the whole league's points.
+- Why tests missed it: the fixture seeded a stats row for exactly one player,
+  so the uncorrelated subquery still returned one row. The sort test now seeds
+  stats for three players and projections for two, asserts per-player values
+  for all four sorts, and reproduced the exact production error (PG 21000 on
+  PGlite) before the fix.
+- No other occurrence of the pattern in the repo (only these three
+  expressions embed a column inside a select-list `sql` template).
 
 Jake sent screenshots of a team page's "What this agent is thinking" panel and
 the home page's activity rail showing raw `**bold**` and `###` markers — the

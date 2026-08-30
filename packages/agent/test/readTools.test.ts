@@ -525,16 +525,40 @@ describe("get_free_agents", () => {
     const wr = await makePlayer(db, { fullName: "Some WR", position: "WR" });
     await db.update(players).set({ trendingAdds: 5000 }).where(eq(players.playerId, hot));
     await db.update(players).set({ trendingAdds: 1 }).where(eq(players.playerId, cold));
-    await db
-      .insert(playerWeekStats)
-      .values({ playerId: cold, season: SEASON, week: 1, stats: {}, ptsPpr: 30 });
+    // Stats and projections for MORE THAN ONE player: an uncorrelated scalar
+    // sub-select survives a single seeded row, so a lone row here once hid a
+    // "more than one row returned by a subquery" failure in production.
+    await db.insert(playerWeekStats).values([
+      { playerId: cold, season: SEASON, week: 1, stats: {}, ptsPpr: 30 },
+      { playerId: hot, season: SEASON, week: 1, stats: {}, ptsPpr: 7 },
+      { playerId: wr, season: SEASON, week: 1, stats: {}, ptsPpr: 12 },
+    ]);
+    await db.insert(playerWeekProj).values([
+      { playerId: hot, season: SEASON, week: 2, projPtsPpr: 9 },
+      { playerId: wr, season: SEASON, week: 2, projPtsPpr: 14 },
+    ]);
 
     const trending = ok(await getFreeAgentsTool.execute({ sort: "trending" }, ctxFor()));
     expect((trending.items as Array<{ player_id: string }>)[0]!.player_id).toBe(hot);
 
     const lastWeek = ok(await getFreeAgentsTool.execute({ sort: "last_week" }, ctxFor()));
-    expect((lastWeek.items as Array<{ player_id: string; last_week_points: number }>)[0]!.player_id).toBe(cold);
-    expect((lastWeek.items as Array<{ last_week_points: number }>)[0]!.last_week_points).toBe(30);
+    const lastWeekItems = lastWeek.items as Array<{ player_id: string; last_week_points: number | null }>;
+    expect(lastWeekItems[0]!.player_id).toBe(cold);
+    expect(lastWeekItems[0]!.last_week_points).toBe(30);
+    // Each row carries its own player's numbers, not another row's.
+    expect(lastWeekItems.find((i) => i.player_id === hot)!.last_week_points).toBe(7);
+
+    const season = ok(await getFreeAgentsTool.execute({ sort: "season" }, ctxFor()));
+    const seasonItems = season.items as Array<{ player_id: string; season_points: number }>;
+    expect(seasonItems[0]!.player_id).toBe(cold);
+    expect(seasonItems.find((i) => i.player_id === wr)!.season_points).toBe(12);
+
+    const proj = ok(await getFreeAgentsTool.execute({ sort: "proj" }, ctxFor()));
+    const projItems = proj.items as Array<{ player_id: string; proj_pts_ppr: number | null }>;
+    expect(projItems[0]!.player_id).toBe(wr);
+    expect(projItems[0]!.proj_pts_ppr).toBe(14);
+    expect(projItems.find((i) => i.player_id === hot)!.proj_pts_ppr).toBe(9);
+    expect(projItems.find((i) => i.player_id === cold)!.proj_pts_ppr).toBeNull();
 
     const byPos = ok(await getFreeAgentsTool.execute({ position: "WR" }, ctxFor()));
     expect((byPos.items as Array<{ player_id: string }>).map((i) => i.player_id)).toEqual([wr]);
