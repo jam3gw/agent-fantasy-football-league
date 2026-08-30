@@ -15,6 +15,9 @@ import type { ReactNode } from "react";
  * `***bold italic***`, `**bold**`, `*italic*`, `` `code` ``. The underscore
  * forms are deliberately not supported: player and stat keys carry underscores
  * (`pts_allow_14_20`) and would be mangled into italics.
+ *
+ * `INLINE_TOKEN` in `lib/broadcastLogic.ts` is this pattern's twin, used to
+ * keep excerpt cuts off the middle of a token — change both together.
  */
 const INLINE = /(\*{3}[^*\n]+\*{3}|\*{2}[^*\n]+\*{2}|\*[^*\n]+\*|`[^`\n]+`)/g;
 
@@ -71,7 +74,9 @@ const QUOTE = /^>\s?(.*)$/;
 // CommonMark allows spaces inside a thematic break (`- - -`), so the marker
 // may repeat with or without them.
 const RULE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
-const FENCE = /^\s*(?:```|~~~)/;
+const FENCE = /^\s*(`{3,}|~{3,})(.*)$/;
+/** What may follow an opening fence as an info string: a bare language tag. */
+const INFO_STRING = /^[\w+#.-]*$/;
 
 export function Markdown({
   source,
@@ -91,6 +96,7 @@ export function Markdown({
   let numbered: string[] = [];
   let quote: string[] = [];
   let fence: string[] | null = null;
+  let fenceChar = "";
   let k = 0;
 
   // A fenced block renders verbatim in monospace: its lines are code (or an
@@ -158,13 +164,34 @@ export function Markdown({
 
   for (const line of lines) {
     if (fence !== null) {
-      if (FENCE.test(line)) flushFence();
+      // A closing fence uses the opening's character and carries nothing
+      // after the marker (CommonMark: no closing info string). Anything else
+      // on such a line is content.
+      const close = FENCE.exec(line);
+      if (close && close[1][0] === fenceChar && close[2].trim() === "") flushFence();
       else fence.push(line);
       continue;
     }
-    if (FENCE.test(line)) {
+    const open = FENCE.exec(line);
+    if (open) {
       flush();
-      fence = [];
+      const markerChar = open[1][0];
+      const rest = open[2];
+      const closeAt = rest.indexOf(markerChar.repeat(3));
+      if (closeAt >= 0) {
+        // A one-line fence (```code```): the code renders, nothing is
+        // dropped, and text after the closing marker stays prose.
+        const content = rest.slice(0, closeAt).trim();
+        fence = content === "" ? [] : [content];
+        flushFence();
+        const after = rest.slice(closeAt).replace(/^[`~]+/, "").trim();
+        if (after !== "") paragraph.push(after);
+      } else {
+        fenceChar = markerChar;
+        // A bare language tag after the marker is an info string and drops;
+        // anything else is content and is kept as the fence's first line.
+        fence = INFO_STRING.test(rest.trim()) ? [] : [rest];
+      }
       continue;
     }
     if (line.trim() === "") {

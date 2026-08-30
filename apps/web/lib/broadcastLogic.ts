@@ -322,16 +322,25 @@ export function describeTransaction(
  * a year (`2026. The season…`) is prose, not item 2026 of a list.
  */
 export function flattenMarkdown(text: string): string {
-  return text
-    .replace(/^\s*([-*_])(?:\s*\1){2,}\s*$/gm, " ")
-    .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d{1,3}[.)]\s+|>\s?)+/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
+  return (
+    text
+      // Fenced code drops whole: code is not prose, and half-flattening it
+      // strands backtick runs on the rail — the artifact class this removes.
+      .replace(/^[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?^[ \t]*\1[`~]*[ \t]*$/gm, " ")
+      // An unpaired fence-marker line drops alone; the lines under it flatten
+      // as prose, mirroring the renderer's unclosed-fence behavior.
+      .replace(/^[ \t]*(?:`{3,}|~{3,}).*$/gm, " ")
+      .replace(/^\s*([-*_])(?:\s*\1){2,}\s*$/gm, " ")
+      .replace(/^\s*(?:#{1,6}\s+|[-*+]\s+|\d{1,3}[.)]\s+|>\s?)+/gm, "")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
 }
 
 /**
  * The same inline tokens `components/markdown` renders, so a truncation point
- * can be moved off the middle of one.
+ * can be moved off the middle of one. Twin of `INLINE` in
+ * `components/markdown.tsx` — change both together.
  */
 const INLINE_TOKEN = /(\*{3}[^*\n]+\*{3}|\*{2}[^*\n]+\*{2}|\*[^*\n]+\*|`[^`\n]+`)/g;
 
@@ -357,5 +366,13 @@ export function summarizeBody(text: string, max: number): string {
   if (flat.length <= max) return flat;
   const cut = flat.slice(0, tokenSafeCut(flat, max));
   const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("? "), cut.lastIndexOf("! "));
-  return stop > max * 0.5 ? flat.slice(0, tokenSafeCut(flat, stop + 1)).trimEnd() : `${cut.trimEnd()}…`;
+  if (stop > max * 0.5) {
+    // The sentence end itself can sit inside a token (`**Bold. Sentence**`);
+    // retreating off the token then also abandons the clean sentence break,
+    // so the excerpt is mid-phrase after all and reads as one.
+    const at = tokenSafeCut(flat, stop + 1);
+    const head = flat.slice(0, at).trimEnd();
+    return at < stop + 1 ? `${head}…` : head;
+  }
+  return `${cut.trimEnd()}…`;
 }

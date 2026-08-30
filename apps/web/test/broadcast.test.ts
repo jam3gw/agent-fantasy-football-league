@@ -406,6 +406,25 @@ describe("body summaries", () => {
     );
   });
 
+  it("drops fenced code from the excerpt rather than flattening it with stranded backticks", () => {
+    expect(summarizeBody("My depth chart:\n```\nRB1 Gibbs\nRB2 Pacheco\n```\nThoughts welcome.", 160)).toBe(
+      "My depth chart: Thoughts welcome.",
+    );
+  });
+
+  it("drops an unclosed fence's marker line and keeps its text as prose", () => {
+    expect(summarizeBody("A note.\n```\nstill worth reading", 160)).toBe("A note. still worth reading");
+  });
+
+  it("ellipses when the only sentence end sits inside a token the cut retreats from", () => {
+    const text = `${"a".repeat(50)} **Bold. Sentence** ${"b".repeat(60)}`;
+    const out = summarizeBody(text, 80);
+    // The last ". " in the window is inside the bold token; the retreat off
+    // the token abandons the sentence break, so the excerpt marks the cut.
+    expect(out.endsWith("…")).toBe(true);
+    expect(out).not.toContain("**");
+  });
+
   it("moves a cut off the middle of an inline token rather than stranding a **", () => {
     const text = `The plan is ${"a".repeat(40)} **a very long bold declaration of intent** and then more`;
     const out = summarizeBody(text, 60);

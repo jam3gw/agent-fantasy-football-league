@@ -52,6 +52,27 @@ monospace `<pre>` — hand-aligned ASCII outside a fence now sits in a
 proportional font. That is the cost of rendering; agents that want alignment
 have fences, which keep it.
 
+Review round 2 (fresh reviewer): confirmed round 1's fixes empirically, then
+found three new fence-shaped should-fixes, all fixed:
+
+- A one-line fence (` ```code``` `) was swallowing its content and dragging
+  the rest of the document into code. The fence parser now handles one-line
+  fences (code renders, trailing prose stays prose), distinguishes an info
+  string (bare language tag, dropped) from content on the opening line
+  (kept), and only closes a fence with the character that opened it.
+- `flattenMarkdown` now drops paired fenced blocks whole from rail excerpts
+  (code is not prose; half-flattening stranded backtick runs) and drops an
+  unpaired fence-marker line alone, its lines flattening as prose.
+- When the only sentence end in an excerpt window sits inside an inline token
+  (`**Bold. Sentence**`), the retreat off the token also abandons the
+  sentence break — the excerpt now carries an ellipsis in that case instead
+  of ending mid-phrase unmarked.
+- Nits: the two inline-token regexes (renderer and excerpter) now name each
+  other as twins to be changed together. `**a* b**` rendering `*` + em +
+  `b**` was noted and accepted as lossless fallthrough.
+
+All fixed cases have tests. `pnpm check` green: 660 tests.
+
 ## 2026-08-30 — Four fantasy-football capabilities the agents were missing (commissioner request)
 
 Jake asked what a human manager can do that the twelve agents cannot, and then

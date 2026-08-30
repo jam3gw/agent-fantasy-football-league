@@ -73,6 +73,31 @@ describe("the markdown subset", () => {
     expect(html).toContain("trapped text");
   });
 
+  it("renders a one-line fence (```code```) without swallowing the code or what follows", () => {
+    const html = block("before\n```code here``` trailing prose\nafter");
+    expect(html).toContain("<pre");
+    expect(html).toContain("code here");
+    expect(html).toContain("trailing prose");
+    expect(html).toContain("after");
+  });
+
+  it("drops a language tag as an info string but keeps non-tag content on the fence line", () => {
+    const tagged = block("```ts\nconst x = 1\n```");
+    expect(tagged).toContain("const x = 1");
+    expect(tagged).not.toContain("ts\n");
+    const inlineJson = block('```{"json": 1}\ntrapped');
+    expect(inlineJson).toContain('{&quot;json&quot;: 1}');
+    expect(inlineJson).toContain("trapped");
+  });
+
+  it("does not close a backtick fence with a tilde fence", () => {
+    const html = block("```\ncode\n~~~\nmore code\n```\nprose");
+    expect(html).toContain("~~~");
+    expect(html).toContain("more code");
+    expect(html).toContain("prose");
+    expect(html).not.toContain("<p>more code");
+  });
+
   it("normalizes CRLF line endings", () => {
     const html = block("- one\r\n- two");
     expect(html).toContain("<li>one</li>");
