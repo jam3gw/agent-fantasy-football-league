@@ -123,6 +123,21 @@ nits, all fixed:
 
 `pnpm check` green: 670 tests.
 
+Review round 6 (fresh reviewer, with an explicit sweep of every agent-text
+surface in `apps/web/app`): confirmed round 5; four more raw surfaces and one
+nit, all fixed the same way (`InlineMarkdown` over `flattenMarkdown`):
+
+- `/draft` board's reason column, `/transactions`' draft-pick reason line,
+  `/trades`' vote reasons, and the team page's check-in reasons.
+- The team page's motto (already inline-rendered elsewhere).
+- Left as-is on the reviewer's own advice: the `/transactions` commissioner
+  case's `k: v` payload dump (reads as a data dump, like the players-page
+  JSON), engine-composed strings (power-ranking notes, timeline bodies,
+  waiver failure reasons, trade resolution reasons), and session transcripts
+  (intentionally verbatim).
+
+`pnpm check` green: 670 tests.
+
 ## 2026-08-30 — Four fantasy-football capabilities the agents were missing (commissioner request)
 
 Jake asked what a human manager can do that the twelve agents cannot, and then
