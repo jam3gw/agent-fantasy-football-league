@@ -592,6 +592,19 @@ describe("the tick's sweeper is the only thing that starts a session", () => {
       context: { due_at: "soon-ish", deadline_at: new Date(clock.now().getTime() + 3600_000).toISOString() },
     });
     await db.insert(sessions).values({
+      teamId: teamIds[2]!,
+      kind: "weekly_review",
+      trigger: "t",
+      // Shape-valid but out of range: a bare shape regex would let this one
+      // through to the cast, which still throws. `pg_input_is_valid` is the
+      // airtight predicate.
+      idempotencyKey: "out-of-range-due",
+      modelId: "m/1",
+      status: "queued",
+      createdAt: new Date(clock.now().getTime() - 300_000),
+      context: { due_at: "2026-99-99T99:99:99.000Z", deadline_at: new Date(clock.now().getTime() + 3600_000).toISOString() },
+    });
+    await db.insert(sessions).values({
       teamId: teamIds[1]!,
       kind: "board_reply",
       trigger: "board",
@@ -606,7 +619,7 @@ describe("the tick's sweeper is the only thing that starts a session", () => {
     const result = await startQueuedSessions(db, clock, async (id) => {
       started.push(id);
     });
-    expect(result.started).toBe(2);
+    expect(result.started).toBe(3);
   });
 
   it("leaves a running session alone while it is still working", async () => {
