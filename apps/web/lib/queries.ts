@@ -1,0 +1,226 @@
+import "server-only";
+/**
+ * Read helpers shared by the public pages. Pages are server components that
+ * read the database directly; nothing here is exposed to the client.
+ */
+import { and, desc, eq, inArray } from "drizzle-orm";
+import {
+  boardPosts,
+  computeStandings,
+  getSettings,
+  health,
+  lineupEntries,
+  matchups,
+  nflGames,
+  players,
+  playerWeekStats,
+  reporterPosts,
+  rosterEntries,
+  teams,
+  transactions,
+  type StandingsRow,
+} from "@league/engine";
+import { db } from "./db";
+
+export type TeamRow = typeof teams.$inferSelect;
+
+export async function allTeams(): Promise<TeamRow[]> {
+  return db().select().from(teams);
+}
+
+export async function teamBySlug(slug: string): Promise<TeamRow | undefined> {
+  return (await db().select().from(teams).where(eq(teams.slug, slug)))[0];
+}
+
+export async function settings() {
+  return getSettings(db());
+}
+
+export async function standings(): Promise<StandingsRow[]> {
+  return computeStandings(db());
+}
+
+export async function weekMatchups(week: number) {
+  return db().select().from(matchups).where(eq(matchups.week, week));
+}
+
+/**
+ * Live scoring status for the public pages (§13.2, §13.4).
+ *
+ * §13.4: "if the Sleeper feed fails for 10 minutes during games, the site
+ * shows 'Live scores delayed' and keeps the last data". That banner existed
+ * only on /admin/health, so the one audience the rule is written for — the
+ * spectators reading the scores — never saw it, and §13.2's "last update time"
+ * was nowhere either.
+ */
+export const LIVE_STALE_MS = 10 * 60_000;
+
+export interface LiveStatus {
+  liveGames: number;
+  lastUpdateAt: Date | null;
+  delayed: boolean;
+}
+
+export async function liveStatus(now: Date = new Date()): Promise<LiveStatus> {
+  const current = await settings();
+  const [live, poll] = await Promise.all([
+    db()
+      .select({ gameId: nflGames.gameId })
+      .from(nflGames)
+      .where(and(eq(nflGames.season, current.season), eq(nflGames.status, "live"))),
+    db().select().from(health).where(eq(health.key, "live.poll")),
+  ]);
+  const lastUpdateAt = poll[0]?.lastSuccessAt ?? null;
+  return {
+    liveGames: live.length,
+    lastUpdateAt,
+    delayed:
+      live.length > 0 && (lastUpdateAt === null || now.getTime() - lastUpdateAt.getTime() > LIVE_STALE_MS),
+  };
+}
+
+export async function latestReporterPost() {
+  return (await db().select().from(reporterPosts).orderBy(desc(reporterPosts.createdAt)).limit(1))[0];
+}
+
+export async function latestBoardPosts(limit = 10) {
+  return db().select().from(boardPosts).orderBy(desc(boardPosts.createdAt)).limit(limit);
+}
+
+export async function recentTransactions(limit = 50) {
+  return db().select().from(transactions).orderBy(desc(transactions.createdAt)).limit(limit);
+}
+
+export interface LineupPlayer {
+  slot: string;
+  playerId: string;
+  name: string;
+  position: string | null;
+  nflTeam: string | null;
+  points: number;
+}
+
+/** A team's lineup for a week with points by player, ghosts included (§7.5). */
+export async function teamLineup(teamId: number, week: number, season: number): Promise<LineupPlayer[]> {
+  const entries = await db()
+    .select({ playerId: lineupEntries.playerId, slot: lineupEntries.slot })
+    .from(lineupEntries)
+    .where(and(eq(lineupEntries.teamId, teamId), eq(lineupEntries.week, week)));
+  if (entries.length === 0) return [];
+  const ids = entries.map((e) => e.playerId);
+  const meta = await db()
+    .select({ playerId: players.playerId, name: players.fullName, position: players.position, nflTeam: players.nflTeam })
+    .from(players)
+    .where(inArray(players.playerId, ids));
+  const stats = await db()
+    .select({ playerId: playerWeekStats.playerId, ptsPpr: playerWeekStats.ptsPpr })
+    .from(playerWeekStats)
+    .where(and(eq(playerWeekStats.season, season), eq(playerWeekStats.week, week), inArray(playerWeekStats.playerId, ids)));
+  const metaOf = new Map(meta.map((m) => [m.playerId, m]));
+  const ptsOf = new Map(stats.map((s) => [s.playerId, s.ptsPpr ?? 0]));
+  return entries.map((e) => ({
+    slot: e.slot,
+    playerId: e.playerId,
+    name: metaOf.get(e.playerId)?.name ?? e.playerId,
+    position: metaOf.get(e.playerId)?.position ?? null,
+    nflTeam: metaOf.get(e.playerId)?.nflTeam ?? null,
+    points: ptsOf.get(e.playerId) ?? 0,
+  }));
+}
+
+/** Bench = rostered players with no lineup entry that week (§3.1). */
+export async function teamBench(teamId: number, week: number, season: number): Promise<LineupPlayer[]> {
+  const roster = await db()
+    .select({ playerId: rosterEntries.playerId, name: players.fullName, position: players.position, nflTeam: players.nflTeam })
+    .from(rosterEntries)
+    .innerJoin(players, eq(players.playerId, rosterEntries.playerId))
+    .where(eq(rosterEntries.teamId, teamId));
+  const entries = await db()
+    .select({ playerId: lineupEntries.playerId })
+    .from(lineupEntries)
+    .where(and(eq(lineupEntries.teamId, teamId), eq(lineupEntries.week, week)));
+  const placed = new Set(entries.map((e) => e.playerId));
+  const bench = roster.filter((r) => !placed.has(r.playerId));
+  if (bench.length === 0) return [];
+  const stats = await db()
+    .select({ playerId: playerWeekStats.playerId, ptsPpr: playerWeekStats.ptsPpr })
+    .from(playerWeekStats)
+    .where(
+      and(
+        eq(playerWeekStats.season, season),
+        eq(playerWeekStats.week, week),
+        inArray(playerWeekStats.playerId, bench.map((b) => b.playerId)),
+      ),
+    );
+  const ptsOf = new Map(stats.map((s) => [s.playerId, s.ptsPpr ?? 0]));
+  return bench.map((b) => ({
+    slot: "BN",
+    playerId: b.playerId,
+    name: b.name,
+    position: b.position,
+    nflTeam: b.nflTeam,
+    points: ptsOf.get(b.playerId) ?? 0,
+  }));
+}
+
+/**
+ * Pages use ISR (§12.1: revalidate 30 s live, 5 min otherwise), so Next
+ * prerenders them at build time. A database that is unreachable or empty
+ * during a build must not fail the deploy, and a blip at request time must not
+ * 500 a public page — an empty section is the right degradation for a site
+ * whose whole job is showing league state. `safeRead` runs one page query and
+ * degrades to a fallback instead of throwing.
+ *
+ * Once one read has proved the database unreachable, the rest of the page's
+ * reads would each wait out their own connect timeout — a page with a dozen
+ * of them can blow past the 60 seconds Next allows a prerender and fail the
+ * deploy. So the first connection failure opens a breaker: reads return their
+ * fallback immediately until it lapses, and the page renders its empty state
+ * at once. It closes on its own, so the next revalidation tries again.
+ */
+const BREAKER_MS = 5_000;
+let unreachableUntil = 0;
+
+/**
+ * Codes that mean the database could not be reached at all. Deliberately not
+ * here: `ECONNRESET` and `CONNECTION_CLOSED`, which are how a pooler drops an
+ * idle connection — a single one of those must not blank a page, least of all
+ * a page whose empty render the CDN would then cache for five minutes.
+ */
+const CONNECTION_CODES = new Set([
+  "CONNECT_TIMEOUT",
+  "CONNECTION_REFUSED",
+  "ECONNREFUSED",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
+  "ENOTFOUND",
+  "ETIMEDOUT",
+]);
+
+/** Is this "the database is not answering" rather than "that query is wrong"? */
+function isConnectionFailure(error: unknown): boolean {
+  for (let cause: unknown = error, depth = 0; cause && depth < 5; depth++) {
+    const code = (cause as { code?: unknown }).code;
+    if (typeof code === "string" && CONNECTION_CODES.has(code)) return true;
+    cause = (cause as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/** Test seam: forget that the database was unreachable. */
+export function resetDatabaseBreaker(): void {
+  unreachableUntil = 0;
+}
+
+export async function safeRead<T>(read: () => Promise<T>, fallback: T): Promise<T> {
+  if (Date.now() < unreachableUntil) return fallback;
+  try {
+    return await read();
+  } catch (error) {
+    if (isConnectionFailure(error)) unreachableUntil = Date.now() + BREAKER_MS;
+    // Surfaced in the function logs and on /admin/health via the health table;
+    // the page itself just renders empty.
+    console.error("[page query failed]", error instanceof Error ? error.message : error);
+    return fallback;
+  }
+}

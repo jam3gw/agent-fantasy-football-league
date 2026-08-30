@@ -1,0 +1,272 @@
+/**
+ * The `draft.completed` handler (§9.3): the transition that turns a finished
+ * draft into a running season.
+ */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { FixedClock } from "@league/shared";
+import { createTestDb, type TestDb } from "./helpers/db.ts";
+import { makeGame, makePlayer, seedLeague, seedTeams } from "./helpers/factories.ts";
+import { createSession, handleEvent } from "../src/events.ts";
+import { getSettings } from "../src/settings.ts";
+import { draft, leagueSettings, lineupEntries, matchups, players, scheduledJobs, sessions, teams } from "../src/db/schema.ts";
+
+let db: TestDb;
+let close: () => Promise<void>;
+
+beforeEach(async () => {
+  ({ db, close } = await createTestDb());
+});
+afterEach(async () => {
+  await close();
+});
+
+/** A drafted league on the eve of week 1. */
+async function seedDraftedLeague() {
+  await seedLeague(db, { phase: "drafting", currentWeek: 1 });
+  const ids = await seedTeams(db);
+  await db.insert(draft).values({ id: 1, status: "complete", order: ids, currentPick: 168 });
+  // Week 1 kicks off after the draft ends; weeks 2 and 3 follow.
+  await makeGame(db, { week: 1, kickoffAt: new Date("2026-09-10T00:20:00Z"), home: "SEA", away: "NE" });
+  await makeGame(db, { week: 2, kickoffAt: new Date("2026-09-17T00:20:00Z"), home: "KC", away: "BUF" });
+  await makeGame(db, { week: 3, kickoffAt: new Date("2026-09-24T00:20:00Z"), home: "SF", away: "DAL" });
+  return ids;
+}
+
+describe("draft.completed (§9.3)", () => {
+  it("starts the season: phase, start_week, free agents, waiver order, schedule, sessions", async () => {
+    const clock = new FixedClock("2026-09-05T20:00:00Z"); // before week 1's kickoff
+    const ids = await seedDraftedLeague();
+    // A player left over on waivers from the pre-draft period.
+    await makePlayer(db, { playerId: "leftover", waiverUntil: new Date("2026-09-20T00:00:00Z") });
+
+    await handleEvent(db, clock, { type: "draft.completed" });
+
+    const settings = await getSettings(db);
+    expect(settings.phase).toBe("regular");
+    // The draft ended before week 1 kicked off, so the season starts at week 1.
+    expect(settings.startWeek).toBe(1);
+    expect(settings.currentWeek).toBe(1);
+
+    // §3.4 rule 3: everyone is a free agent after the draft.
+    const stillOnWaivers = (await db.select().from(players)).filter((p) => p.waiverUntil !== null);
+    expect(stillOnWaivers).toEqual([]);
+
+    // Waiver order is the reverse of the draft order.
+    const teamRows = await db.select().from(teams);
+    const lastDrafter = ids[ids.length - 1]!;
+    expect(teamRows.find((t) => t.id === lastDrafter)!.waiverPriority).toBe(1);
+    expect(teamRows.find((t) => t.id === ids[0]!)!.waiverPriority).toBe(12);
+
+    // The schedule exists.
+    const games = await db.select().from(matchups);
+    expect(games.length).toBeGreaterThan(0);
+
+    // Every team gets a weekly_review so lineups get set, plus draft grades.
+    const created = await db.select().from(sessions);
+    const reviews = created.filter((s) => s.kind === "weekly_review");
+    expect(reviews).toHaveLength(12);
+    expect(created.filter((s) => s.kind === "reporter_draft_grades")).toHaveLength(1);
+    // ...staggered, not all at once (§9.3).
+    const dueTimes = new Set(reviews.map((r) => r.createdAt.getTime()));
+    expect(dueTimes.size).toBeGreaterThan(0);
+
+    // And the first week is queued for planning.
+    const jobs = await db.select().from(scheduledJobs);
+    expect(jobs.some((j) => j.type === "week.plan")).toBe(true);
+  });
+
+  it("a late draft starts at the first week that has not kicked off yet (§3.7)", async () => {
+    // The draft finishes after week 1 and week 2 have already kicked off.
+    const clock = new FixedClock("2026-09-18T12:00:00Z");
+    await seedDraftedLeague();
+
+    await handleEvent(db, clock, { type: "draft.completed" });
+
+    const settings = await getSettings(db);
+    expect(settings.startWeek).toBe(3);
+    expect(settings.currentWeek).toBe(3);
+  });
+
+  it("moves the draft's auto-filled lineup entries to the real start week", async () => {
+    // Draft-time slotting (§3.1) wrote entries for week 1; the draft slipped
+    // past two kickoffs, so week 1 is never played. Without the move, every
+    // team's start-week lineup is empty — the exact gap the slotting closes.
+    const clock = new FixedClock("2026-09-18T12:00:00Z");
+    const teamIds = await seedDraftedLeague();
+    const pid = await makePlayer(db, { position: "QB" });
+    await db.insert(lineupEntries).values({ teamId: teamIds[0]!, week: 1, playerId: pid, slot: "QB" });
+
+    await handleEvent(db, clock, { type: "draft.completed" });
+
+    const rows = await db.select().from(lineupEntries);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ teamId: teamIds[0], week: 3, slot: "QB" });
+  });
+
+  it("is idempotent: running it twice does not double up sessions or matchups", async () => {
+    const clock = new FixedClock("2026-09-05T20:00:00Z");
+    await seedDraftedLeague();
+
+    await handleEvent(db, clock, { type: "draft.completed" });
+    const firstSessions = (await db.select().from(sessions)).length;
+    const firstMatchups = (await db.select().from(matchups)).length;
+
+    await handleEvent(db, clock, { type: "draft.completed" });
+    expect((await db.select().from(sessions)).length).toBe(firstSessions);
+    expect((await db.select().from(matchups)).length).toBe(firstMatchups);
+  });
+
+  it("skips a paused team when booking the post-draft reviews", async () => {
+    const clock = new FixedClock("2026-09-05T20:00:00Z");
+    const ids = await seedDraftedLeague();
+    await db.update(teams).set({ paused: true }).where(eq(teams.id, ids[0]!));
+
+    await handleEvent(db, clock, { type: "draft.completed" });
+    const reviews = (await db.select().from(sessions)).filter((s) => s.kind === "weekly_review");
+    expect(reviews).toHaveLength(11);
+    expect(reviews.some((r) => r.teamId === ids[0]!)).toBe(false);
+  });
+});
+
+describe("trade events never run the season setup (§9.3)", () => {
+  // `trade.vote_cast` fires on every vote of every trade. Sharing a case with
+  // `draft.completed` rewound the league to its first week, cleared every
+  // waiver window and reset the rolling waiver order — mid-season, ten times
+  // per trade.
+  it.each(["trade.vote_cast", "trade.failed"] as const)(
+    "%s leaves settings, waiver windows and waiver order alone",
+    async (type) => {
+      const clock = new FixedClock("2026-10-20T15:00:00Z");
+      await seedDraftedLeague();
+      await db.update(leagueSettings).set({ phase: "regular", startWeek: 1, currentWeek: 7 }).where(eq(leagueSettings.id, 1));
+      const teamRows = await db.select().from(teams);
+      // A rolling waiver order that has already moved away from reverse draft.
+      await db.update(teams).set({ waiverPriority: 1 }).where(eq(teams.id, teamRows[3]!.id));
+      const until = new Date("2026-10-22T09:00:00Z");
+      await makePlayer(db, { playerId: "on-waivers", waiverUntil: until });
+      const sessionsBefore = (await db.select().from(sessions)).length;
+
+      await handleEvent(db, clock, { type, tradeId: 1 } as never);
+
+      const settings = await getSettings(db);
+      expect(settings.currentWeek).toBe(7);
+      expect(settings.phase).toBe("regular");
+      const player = (await db.select().from(players).where(eq(players.playerId, "on-waivers")))[0]!;
+      expect(player.waiverUntil?.toISOString()).toBe(until.toISOString());
+      const after = await db.select().from(teams);
+      expect(after.find((t) => t.id === teamRows[3]!.id)!.waiverPriority).toBe(1);
+      expect((await db.select().from(sessions)).length).toBe(sessionsBefore);
+    },
+  );
+});
+
+describe("createSession stamps what the scheduler and the ledger need", () => {
+  it("carries the fantasy week even when the caller does not pass one", async () => {
+    // The spend rollups attribute a step to a week through this (§8.7). The
+    // event-driven kinds — trade_response, trade_vote, injury_response,
+    // board_reply, reporter_trade_note — pass no week, and dropped out of the
+    // week's totals entirely until it was defaulted here.
+    const clock = new FixedClock("2026-10-20T15:00:00Z");
+    await seedLeague(db, { phase: "regular", currentWeek: 7 });
+    const ids = await seedTeams(db);
+    const settings = await getSettings(db);
+
+    const sessionId = await createSession(db, settings, {
+      teamId: ids[0]!,
+      kind: "board_reply",
+      trigger: "board.posted",
+      idempotencyKey: "no-week",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { thread_post_id: 4 },
+    });
+
+    const row = (await db.select().from(sessions).where(eq(sessions.id, sessionId!)))[0]!;
+    expect(row.context.week).toBe(7);
+    expect(row.context.thread_post_id).toBe(4);
+    expect(typeof row.context.due_at).toBe("string");
+    expect(typeof row.context.deadline_at).toBe("string");
+  });
+
+  it("does not override a week the caller passed", async () => {
+    const clock = new FixedClock("2026-10-20T15:00:00Z");
+    await seedLeague(db, { phase: "regular", currentWeek: 7 });
+    const ids = await seedTeams(db);
+    const settings = await getSettings(db);
+    const sessionId = await createSession(db, settings, {
+      teamId: ids[0]!,
+      kind: "lineup_check",
+      trigger: "week.plan",
+      idempotencyKey: "next-week",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { week: 8 },
+    });
+    const row = (await db.select().from(sessions).where(eq(sessions.id, sessionId!)))[0]!;
+    expect(row.context.week).toBe(8);
+  });
+
+  it("leaves the pre-season kinds without a week, even when the caller passes one", async () => {
+    // §8.7 counts the draft under "plus the draft", not against a week: a draft
+    // is fourteen sessions per agent, and calling that "week 1" puts the whole
+    // draft against the $40 weekly alarm on draft day. `runOnboardingAction`
+    // passes `week` explicitly, so the exclusion has to beat the caller — a
+    // spread that merged the caller's context last would silently lose to it.
+    const clock = new FixedClock("2026-09-01T15:00:00Z");
+    await seedLeague(db, { phase: "pre_draft", currentWeek: 1 });
+    const ids = await seedTeams(db);
+    const settings = await getSettings(db);
+
+    const onboarding = await createSession(db, settings, {
+      teamId: ids[0]!,
+      kind: "onboarding",
+      trigger: "commissioner",
+      idempotencyKey: "onboard-1",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { week: settings.currentWeek },
+    });
+    const onboardingRow = (await db.select().from(sessions).where(eq(sessions.id, onboarding!)))[0]!;
+    expect(onboardingRow.context.week).toBeUndefined();
+    expect("week" in onboardingRow.context).toBe(false);
+
+    const pick = await createSession(db, settings, {
+      teamId: ids[0]!,
+      kind: "draft_pick",
+      trigger: "draft",
+      idempotencyKey: "pick-1",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { pick_no: 1, week: 1 },
+    });
+    const pickRow = (await db.select().from(sessions).where(eq(sessions.id, pick!)))[0]!;
+    expect(pickRow.context.week).toBeUndefined();
+    // The rest of the caller's context still survives.
+    expect(pickRow.context.pick_no).toBe(1);
+    expect(typeof pickRow.context.deadline_at).toBe("string");
+  });
+
+  it("books no second starter: the queued session row is the queue", async () => {
+    const clock = new FixedClock("2026-10-20T15:00:00Z");
+    await seedLeague(db, { phase: "regular", currentWeek: 7 });
+    const ids = await seedTeams(db);
+    const settings = await getSettings(db);
+    await createSession(db, settings, {
+      teamId: ids[0]!,
+      kind: "weekly_review",
+      trigger: "job:weekly_review",
+      idempotencyKey: "solo",
+      modelId: "m/1",
+      dueAt: clock.now(),
+      now: clock.now(),
+      context: { week: 7 },
+    });
+    const jobs = await db.select().from(scheduledJobs);
+    expect(jobs.filter((j) => j.type === "session.run")).toEqual([]);
+  });
+});
