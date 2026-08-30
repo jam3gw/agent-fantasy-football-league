@@ -564,14 +564,16 @@ export async function startQueuedSessions(
   // before the stale check sees it, which only ever retires it later, never
   // runs it earlier.)
   //
-  // The shape guard mirrors `parseDate`'s leniency: `due_at` is only ever
+  // The validity guard mirrors `parseDate`'s leniency: `due_at` is only ever
   // written by `createSession` via `toISOString()`, but a cast that throws on
   // one malformed row would fail this query — and with it every sweep, for
   // every team, forever, with no way for the sweep to retire the poisoned
   // row. A value that fails the guard sorts by `created_at` instead, exactly
   // as `parseDate` returning null treats it on the JS side.
+  // `pg_input_is_valid` is PG16+; production is on 18, and PGlite (tests)
+  // carries it too.
   const dueAtOrder = sql`coalesce(
-    case when ${sessions.context} ->> 'due_at' ~ '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}'
+    case when pg_input_is_valid(${sessions.context} ->> 'due_at', 'timestamptz')
          then (${sessions.context} ->> 'due_at')::timestamptz end,
     ${sessions.createdAt})`;
   const queued = await database
