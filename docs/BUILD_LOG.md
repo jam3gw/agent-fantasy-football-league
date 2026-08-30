@@ -79,6 +79,17 @@ it requested ids in insertion order, which PGlite's heap order satisfies
 without the sort. The test now requests ids in reverse insertion order, so
 deleting the sort fails it. Nothing else new; loop closed.
 
+**Merge with the on-demand-refresh branch** (main moved mid-session, next
+entry): the two compose — `get_matchup` keeps my future-week pairings and
+gains the current-week refresh; `player_research`'s TTL refresh already
+covers future weeks (`week >= currentWeek`), so lookahead projections are
+refreshed on demand between daily runs; `defense_vs_position` needs no
+refresh (finalized rows only). My migration was renumbered
+`0005_stats_team_opponent` — production had already applied main's
+`0004_proj_season_week_idx` — and its snapshot regenerated on top of
+main's. Also fixed a duplicated heading main carried in this log. Full
+suite green after the merge (636 tests).
+
 SPEC updated: §5.3 (stored team/opponent), §5.4 (three-week window), §6
 (`player_week_stats` columns), §8.4 (`get_matchup`, `get_player_stats`,
 `player_research` rows). Tests: future-pairings and unscheduled-week shapes,
@@ -86,6 +97,150 @@ SPEC updated: §5.3 (stored team/opponent), §5.4 (three-week window), §6
 aggregation/rank/position-filter/not-found, ingest keeps `team`/`opponent`
 and nulls without them, `projectionWeeks` cap. Full suite green
 (shared 13, engine 171, data 24, agent 161, web 234).
+## 2026-08-30 — Review round on the on-demand refreshers: 1 blocker + 6 should-fixes, all fixed
+
+A fresh-context reviewer took the branch diff against SPEC. Findings and
+what changed (this supersedes details in the two entries below):
+
+1. **Blocker — "never throws" only covered the fetch.** A failing upsert or
+   TTL read would have propagated out of `ensureFresh*`, failed whole
+   sessions at snapshot build, and (worse) bypassed the miss cache so every
+   read re-downloaded and re-threw. Both refreshers now wrap their entire
+   body; any failure degrades to "serve what is stored" and is remembered
+   like a fetch miss. Tested with a proxy DB whose transaction throws.
+2. **`rosterPayload` read the roster (with injury status) before the
+   refresh**, so get_my_team returned pre-refresh injuries on the very call
+   that refreshed. The refresh now runs before any read, with a test that
+   pins the ordering. Same test added for the context snapshot.
+3. **Clock consistency.** TTL checks compare against `Clock.now()`, but rows
+   were stamped with wall-clock `new Date()` — divergent under a simulation
+   clock override. `upsertProjections` now takes `now` (the refresher passes
+   Clock time), and player-feed freshness moved off the fetch-time
+   `sleeper.players` health row onto a new `players.applied` health row that
+   `upsertPlayers` stamps with Clock time inside its own transaction. That
+   also fixes a subtler conflation the reviewer's finding exposed: "a fetch
+   succeeded" is not "the data landed", so a failed write can no longer
+   masquerade as freshness.
+4. **SPEC amended** (§5.1, §5.4, §8.4 player_research row, §15.1 item 11,
+   §13's injury paragraph): the on-demand TTL refresh is now in the spec;
+   "makes no outbound request" became "never a per-agent request — the only
+   outbound path is the shared TTL-guarded refresh".
+5. **The player-feed diff now also compares `position` and
+   `fantasy_positions`** (eligibility changes are lineup-relevant).
+6. **Hot-path performance.** `upsertProjections` is batched (chunked
+   multi-row INSERT ... ON CONFLICT with excluded, deduped by player) —
+   the season board is ~1,700 rows and previously did one round trip each.
+   `player_week_proj` gained a `(season, week)` index (migration 0004) so
+   the TTL probe stops scanning the table. The player-feed refresher caps
+   its on-demand write at 500 changed rows ("deferred": a delta that large
+   is roster-cut day, the hourly job's work; suppressed like a miss so it
+   does not re-download back-to-back).
+7. **Draft clock.** The draft workflow now pre-warms both feeds before each
+   pick session starts, so a stale moment costs the fetch outside the model
+   loop and in-session reads hit the fresh path. `get_player_stats` also
+   refreshes the player feed (it reports injury status; previously the one
+   injury-showing read tool without freshness).
+
+Reviewer concerns checked and found unfounded: duplicate injury.changed
+across concurrent refreshes (deduped by `injurySessionKey` +
+onConflictDoNothing), information parity, secrets, engine-write rule.
+
+**Round 2 (fresh context): nothing new, nothing blocking.** Five nits, all
+accepted as-is: the inflight dedupe ignores per-call opts (production only
+uses defaults); the scheduled projections job still stamps wall time
+(deliberate — noted in the upsert's comment); on a roster-cut day a warm
+process re-downloads the feed every 5 minutes until the hourly job lands
+the >500-row delta (bounded, operational note); the draft pre-warm spends
+up to one feed fetch of the first pick's clock (the design chosen in round
+1); the `tx as EngineDb` cast in the applied-stamp matches the file's
+existing style. Loop closed; merging.
+
+## 2026-08-30 — Player feed (injuries) refreshes on demand too (§5.1)
+
+Jake's follow-up to the projections change: agents also need pre-kickoff
+injury news, not the hourly ingest's last snapshot. Same pattern, second
+feed: `ensureFreshPlayerFeed(db, clock)` in `@league/data`
+(`ingest/players.ts`), wired as `ToolContext.refreshPlayerFeed`.
+
+The feed is one ~5MB document of ~11k players, so this differs from the
+projections refresher in three ways:
+
+- Freshness reads the `sleeper.players` health row (which every successful
+  fetch of that feed already records), so the hourly job and the on-demand
+  path share one clock; TTL 15 minutes. Within TTL a read costs one SELECT.
+- It diffs against the stored table and writes only players whose
+  lineup-relevant fields moved (injury status/body part, roster status,
+  NFL team, active, depth-chart order) plus never-seen players — a full
+  upsert from inside a tool call would take minutes. The write goes through
+  `upsertPlayers`, so a starter going Out emits `injury.changed` and books
+  the injury_response session exactly as the hourly job would, just sooner.
+- An empty players table is a bootstrap and stays the job's: the refresher
+  reports unavailable rather than writing 11k rows mid-session.
+
+Call sites: roster tools and matchup (current/future week, alongside the
+projections refresh), free agents, `player_research kind:injuries`
+(trending stays hourly — it is a 24-hour window by definition), the draft
+board, and the session-start snapshot (moved before the roster read so the
+snapshot itself is fresh). Same choice as before on parity: the refresh
+updates the shared table; all twelve agents read the same rows.
+
+Considered and rejected: having agents call the Sleeper API directly per
+tool call with no store. It breaks information parity (two agents in the
+same minute could read different answers), loses the injury.changed event
+stream (which is driven by observing *changes* against stored state), and
+makes transcripts unreproducible for the benchmark. The TTL store gives the
+same freshness with one shared view of the world.
+
+Suites green: shared 13, engine 171, data 36 (6 new), agent 165 (1 new,
+1 extended), web 234. Lint and typecheck clean.
+
+## 2026-08-30 — Projections refresh on demand when agents read them (§5.4), week 0 feeds the draft board
+
+Found while answering "can agents see projected stats": `player_week_proj`
+was empty in production. The daily `ingest.projections` job fetches the
+per-week endpoint with `currentWeek` (0 in preseason, which Sleeper does not
+serve), and the rankings ingest computes tiers from the season feed's
+`pts_ppr` but discarded the numbers — so `get_available_players.proj_points`
+and every lineup-tool `proj_pts_ppr` were null.
+
+Fix: `ensureFreshProjections(db, clock, {season, week})` in
+`@league/data` (`ingest/projections.ts`). Reads `max(updated_at)` for the
+week; within a 1-hour TTL it is a no-op, otherwise it pulls the feed
+(single attempt, 10 s timeout — the daily job stays the patient path with
+retries) and upserts. Week 0 pulls the *season* projection endpoint (§5.7's
+feed), weeks 1–18 the per-week one. Failures never throw; an empty or
+failed pull is remembered in-process for 5 minutes so a session with five
+projection reads pays for one attempt. Concurrent callers share one pull.
+
+Wiring: a new optional `ToolContext.refreshProjections`, passed through
+`RunSessionDeps` and wired in `apps/web` (`runSession.ts`, `lib/draft.ts`).
+Call sites: `get_my_team`/`get_team_roster` (current or future week),
+`get_matchup` (current week only — finished weeks are history),
+`get_free_agents`, `player_research kind:projections` (asked week when
+current/future, plus week 0), `get_available_players` (week 0), and the
+context snapshot at session start. Unit tests never wire it, so tools stay
+offline in CI; production always does.
+
+Choices made without asking (closest to spec, §5.4 marked optional):
+
+- Information parity (§2) holds by construction: the refresh updates the
+  shared table and every agent reads the same rows — it changes *when* the
+  shared rows update, not *who* sees what. The player_research header
+  comment now says so, since it previously claimed "no outbound request".
+- TTL 1 hour / miss-TTL 5 minutes are constants, not settings. Sleeper's
+  feed is unauthenticated with no quota; the worst case is one pull per
+  serverless instance per hour per week key.
+- Past weeks are never refetched — their projections are historical record.
+- Twelve concurrent lambdas can still race one pull each; the upsert is
+  idempotent so the race is waste, not corruption. Not worth an advisory
+  lock at this traffic.
+- The autopick fallback path (`availableDraftPlayers` called from the
+  draft workflow, no ToolContext) still reads whatever is stored, but any
+  agent opening the board via `get_available_players` will have populated
+  week 0 moments earlier.
+
+All suites green: shared, engine (171), data (30, 7 new), agent (164,
+6 new), web (234). Lint and typecheck clean.
 
 ## 2026-08-29 — $0 BYOK steps: root-caused as already fixed in code; historical rows backfilled
 

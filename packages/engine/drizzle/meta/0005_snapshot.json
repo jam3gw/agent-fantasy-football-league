@@ -1,6 +1,6 @@
 {
-  "id": "c28772ee-b55e-45ea-b49c-471e85f1edca",
-  "prevId": "b1819485-a3d4-4cec-aea8-1d05338d86f9",
+  "id": "ad100dfc-602b-4424-8d72-283cbc4facc0",
+  "prevId": "c28772ee-b55e-45ea-b49c-471e85f1edca",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -1389,6 +1389,18 @@
           "type": "integer",
           "primaryKey": false,
           "notNull": true
+        },
+        "nfl_team": {
+          "name": "nfl_team",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
+        },
+        "opponent": {
+          "name": "opponent",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false
         },
         "stats": {
           "name": "stats",

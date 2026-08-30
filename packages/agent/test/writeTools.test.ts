@@ -2,7 +2,7 @@
  * Write tools (§8.4 table 2) and draft tools (§8.4 table 4) against a real
  * PGlite database with the production migrations applied.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
@@ -676,6 +676,24 @@ describe("get_available_players", () => {
 
     const res = await getAvailablePlayersTool.execute({}, ctxFor({ teamId: teamIds[0]!, kind: "draft_pick" }));
     expect((res.items as Array<{ player_id: string }>).map((p) => p.player_id)).not.toContain(ids[2]);
+  });
+
+  it("refreshes the week-0 season projections before reading the board (§5.4)", async () => {
+    await seedLeague(db, { phase: "drafting" });
+    const teamIds = await seedTeams(db);
+    await startDraft(teamIds, 1);
+    const ids = await seedBoard();
+    const refresh = vi.fn(async (season: number, week: number) => {
+      await db.insert(playerWeekProj).values({ playerId: ids[0]!, season, week, projPtsPpr: 287.5 });
+    });
+
+    const res = await getAvailablePlayersTool.execute(
+      {},
+      ctxFor({ teamId: teamIds[0]!, kind: "draft_pick", refreshProjections: refresh }),
+    );
+    expect(refresh).toHaveBeenCalledExactlyOnceWith(SEASON, 0);
+    const items = res.items as Array<{ player_id: string; proj_points: number | null }>;
+    expect(items.find((p) => p.player_id === ids[0])!.proj_points).toBe(287.5);
   });
 });
 

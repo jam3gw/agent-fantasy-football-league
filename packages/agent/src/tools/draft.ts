@@ -504,6 +504,9 @@ export const getAvailablePlayersTool = defineTool({
   schema: getAvailablePlayersSchema,
   execute: async (args, ctx) => {
     const settings = await getSettings(ctx.db);
+    // Week 0 is the season-long projection board behind `proj_points` (§10.3);
+    // the player feed carries the injury column next to it.
+    await Promise.all([ctx.refreshProjections?.(settings.season, 0), ctx.refreshPlayerFeed?.()]);
     let pool = await availableDraftPlayers(ctx.db, settings.season);
 
     if (args.position) {

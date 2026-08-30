@@ -49,6 +49,8 @@ export interface SleeperStatsEntry {
 export interface SleeperClientOptions {
   db?: EngineDb;
   timeoutMs?: number;
+  /** Retry count for fetchWithRetry; the on-demand refreshers pass 0. */
+  retries?: number;
 }
 
 export async function fetchNflState(opts: SleeperClientOptions = {}): Promise<Record<string, unknown>> {

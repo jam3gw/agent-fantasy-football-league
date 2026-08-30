@@ -36,6 +36,7 @@ import {
   toolsForKind,
 } from "@league/agent";
 import { formatEt } from "@league/shared";
+import { ensureFreshPlayerFeed, ensureFreshProjections } from "@league/data";
 import { db, leagueClock } from "./db";
 import { env } from "./env";
 import { readBrief } from "./briefs";
@@ -187,6 +188,14 @@ async function runDraftPick(
   const team = (await database.select().from(teams).where(eq(teams.id, pick.teamId)))[0];
   if (!team) throw new Error(`team ${pick.teamId} not found`);
 
+  // Pre-warm the on-demand feeds before the model loop starts: a stale
+  // moment costs one fetch here rather than mid-session, so the pick's tool
+  // calls hit the fresh path (one SELECT). Both never throw.
+  await Promise.all([
+    ensureFreshProjections(database, clock, { season: settings.season, week: 0 }),
+    ensureFreshPlayerFeed(database, clock),
+  ]);
+
   {
     const sessionId = await claimPickSession(database, settings, clock, pick, team);
 
@@ -199,6 +208,14 @@ async function runDraftPick(
         clock,
         tools: toolsForKind("draft_pick"),
         toolConfig: env.toolConfig,
+        // §5.4 / §5.1 on-demand: week 0 keeps `proj_points` on the board
+        // current; the player feed keeps draft-day injury news current.
+        refreshProjections: async (season, week) => {
+          await ensureFreshProjections(database, clock, { season, week });
+        },
+        refreshPlayerFeed: async () => {
+          await ensureFreshPlayerFeed(database, clock);
+        },
         modelStep,
         buildSystemPrompt: async () =>
           buildSystemPrompt({

@@ -316,10 +316,18 @@ async function rosterPayload(
   const team = idx.get(teamId);
   if (!team) return toolFailure("not_found", `team ${teamId} does not exist`);
 
+  const season = settings.season;
+  // Lineup decisions deserve live numbers: pull the projection and player
+  // feeds for the current (or a future) week BEFORE any read — the roster
+  // read below carries injury status, so refreshing after it would return
+  // pre-refresh injuries on the very call that refreshed. Past weeks never
+  // move.
+  if (week >= settings.currentWeek) {
+    await Promise.all([ctx.refreshProjections?.(season, week), ctx.refreshPlayerFeed?.()]);
+  }
   const roster = await getRoster(db, teamId);
   const ids = roster.map((r) => r.playerId);
   const now = ctx.clock.now();
-  const season = settings.season;
   const [{ byTeam }, byes, slots, pts, seasonPts, proj, locked] = await Promise.all([
     weekGames(db, season, week, now),
     byeWeeks(db, season),
@@ -683,6 +691,11 @@ export const getMatchupTool = readTool(
     const db = ctx.db;
     const settings = await getSettings(db);
     const week = args.week ?? settings.currentWeek;
+    // The current week's projections and injuries still move; finished weeks
+    // are history and future weeks return pairings only, with neither shown.
+    if (week === settings.currentWeek) {
+      await Promise.all([ctx.refreshProjections?.(settings.season, week), ctx.refreshPlayerFeed?.()]);
+    }
     const idx = await teamIndex(db);
     const rows = await db.select().from(matchups).where(eq(matchups.week, week));
     if (rows.length === 0) {
@@ -787,6 +800,9 @@ export const getPlayerStatsTool = readTool(
     const season = settings.season;
     const week = settings.currentWeek;
     const ids = [...new Set(args.player_ids)];
+    // Researching specific players is a pre-kickoff question too: the result
+    // carries injury status, so it gets the same freshness as get_my_team.
+    await ctx.refreshPlayerFeed?.();
     const rows = await db.select().from(players).where(inArray(players.playerId, ids));
     if (rows.length === 0) return toolFailure("not_found", "no player matched those ids", "use search_players first");
 
@@ -963,6 +979,9 @@ export const getFreeAgentsTool = readTool(
     const lastWeek = week > 1 ? week - 1 : 1;
     const position = args.position?.toUpperCase();
     const sort = args.sort ?? "trending";
+    // A pickup is judged on this week's projection and current injury news —
+    // refresh both before reading.
+    await Promise.all([ctx.refreshProjections?.(season, week), ctx.refreshPlayerFeed?.()]);
 
     // Correlated sub-selects keep the scan in the database; ::float8 so numeric
     // columns come back as numbers, not strings.
@@ -1692,10 +1711,12 @@ export const webSearchTool = readTool(
  * Replaced `fantasypros_lookup` on 2026-08-29. Every field below is already in
  * our own tables — rankings from the Sleeper ADP ingest (§5.7), projections
  * from the weekly projection ingest, injury and trending data from the hourly
- * player feed — so this tool makes no outbound request, needs no key, and has
- * no daily allowance to spend. It also makes "same information for all twelve
- * agents" true by construction rather than by convention: every agent reads the
- * same rows at the same moment.
+ * player feed — so this tool needs no key and has no daily allowance to spend.
+ * The one outbound path is `ctx.refreshProjections` (§5.4 on-demand): before a
+ * `projections` read for the current week or later, the shared table is
+ * refreshed from the feed when stale. That keeps "same information for all
+ * twelve agents" true by construction: every agent reads the same rows, the
+ * refresh only changes when those shared rows update.
  *
  * There is no `news` kind. Sleeper carries no news feed, and `web_search`
  * already covers it.
@@ -1796,6 +1817,8 @@ export const playerResearchTool = readTool(
     }
 
     if (args.kind === "projections") {
+      // Week 0 is the season-long board; current and future weeks still move.
+      if (week === 0 || week >= settings.currentWeek) await ctx.refreshProjections?.(season, week);
       const rows = await db
         .select({
           playerId: playerWeekProj.playerId,
@@ -1919,7 +1942,10 @@ export const playerResearchTool = readTool(
       });
     }
 
-    // trending and injuries both read the hourly player feed.
+    // trending and injuries both read the player feed; an injuries read is a
+    // pre-kickoff question, so it re-pulls the feed when stale (§5.1 on the
+    // §5.4 on-demand pattern). Trending is a 24-hour window — hourly is fine.
+    if (args.kind === "injuries") await ctx.refreshPlayerFeed?.();
     const base = await db
       .select({
         playerId: players.playerId,
