@@ -27,6 +27,52 @@ it "worked" all preseason and then failed for every position and sort at once.
 - No other occurrence of the pattern in the repo (only these three
   expressions embed a column inside a select-list `sql` template).
 
+## 2026-08-30 — Win-odds fixes and lineup projections on the public pages (commissioner request)
+
+Jake asked how the win odds are computed and for starting-lineup projections on
+the scoreboard (big before kickoff, small beside the score once games start)
+and on the team page.
+
+- Odds recap (unchanged mechanism, `lib/broadcastLogic.ts`): projected final
+  margin — live score plus each starter-still-to-play's remaining projection —
+  through a logistic with scale 18.5, so a 10-point projected edge ≈ 70%.
+- **Fix: no more "100% to win".** Rounding could print 0/100 against a lopsided
+  enough margin (Jake's screenshot: a side with one starter still to play read
+  100%). New `winChancePercent` pins the printed percent to 1–99 while the game
+  can be played; both pages use it. Tested.
+- **Fix: pre-kickoff weeks no longer read as live.** `GameCard` gains
+  `started` (any starter's NFL game flipped off "scheduled" by the tick, or
+  points on the board). The home hero was announcing "6 games are live" on a
+  Wednesday; tiles/hero/matchups badge now say Scheduled until kickoff.
+- `GameCard` gains `awayProjected`/`homeProjected`: points so far plus what the
+  starters still to play have left — before kickoff, the lineup's projected
+  week total. Null (nothing shown) when the week's schedule or projections are
+  not ingested, and once the game is over. Rendered big-muted pre-kickoff and
+  small beside the live score on home tiles; on the matchups hero under each
+  score and beside each other game's score line; per-player projections were
+  already in the matchup lineup rows.
+- Team page: per-player "projected X.X" in each lineup/bench/IR row's meta
+  line, and the header line now reads "Starters have scored X so far, of a
+  projected Y."
+- Review round 1 (fresh-context reviewer) found: (1) the home tile could read
+  "Final" up top and "Not started" under the bar during the Monday-done,
+  Tuesday-not-finalized hours; (2) a matchup with two empty lineups (zero
+  occupied slots, e.g. week 1 before the first lineup sessions) read "Final
+  0.0 – 0.0"; (3) the started/projected gating was untested server-side code.
+  Fixed by extracting `gameStatus` (final/live/upcoming/unknown — zero slots
+  is final only once the matchup started) and `cardProgress` into
+  `broadcastLogic.ts`, using them on both pages, and testing both. Also
+  swept the adjacent copy: hero "not kicked off" no longer fires over a done
+  week, the matchups marquee prefers actually-live games over scheduled 0–0s,
+  and the hero's "finished level"/"every slot is done" lines no longer show
+  pre-kickoff.
+- Recorded, not fixed (reviewer finding 4, low likelihood): the projections
+  gate is week-wide, so a week the feed projected where one side's starters
+  happen to have no rows (all byes) would still show that side "proj 0.0".
+- Lint, typecheck, full suite green (271 web tests + packages; now 282 web).
+
+## 2026-08-30 — Agent-written text renders as Markdown on the public pages (commissioner request)
+
 Jake sent screenshots of a team page's "What this agent is thinking" panel and
 the home page's activity rail showing raw `**bold**` and `###` markers — the
 agents write their scratchpads, board posts, and decision summaries in
