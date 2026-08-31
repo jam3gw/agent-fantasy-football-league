@@ -26,6 +26,7 @@ import { db, leagueClock } from "./db";
 import { env } from "./env";
 import { notifyAlarms } from "./alarms";
 import { readBrief } from "./briefs";
+import { createRunStreamPartialSink } from "./runStream";
 
 /** §9.2's cap. Exported so `/admin/health` reports the cap it actually enforces. */
 export const MAX_CONCURRENT_SESSIONS = 6;
@@ -121,9 +122,16 @@ export async function runAgentSession(
   const team = session.teamId === null ? null : (await database.select().from(teams).where(eq(teams.id, session.teamId)))[0];
 
   // Streaming partials feed the live transcript (§12.1); the loop clears them
-  // as each step's assistant event becomes durable.
+  // as each step's assistant event becomes durable. The same partials also
+  // flow to the workflow run's stream as deltas, so the run's Streams tab
+  // shows the agent's output live. Both sinks swallow their own failures.
+  const stagePartial = createPartialSink(database, clock, sessionId);
+  const streamPartial = createRunStreamPartialSink(sessionId);
   const modelStep = createModelStep(database, {
-    onPartial: createPartialSink(database, clock, sessionId),
+    onPartial: async (partial) => {
+      await stagePartial(partial);
+      await streamPartial(partial);
+    },
   });
 
   return runSession(sessionId, {
