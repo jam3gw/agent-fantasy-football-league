@@ -2,6 +2,80 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-31 — Two bugs the draft data exposed: a prompt that promised tools the session had not bound, and a reason cap nobody could learn
+
+Both found by mining the completed draft (168 picks, 280 sessions, 4,530 session
+events) for agent behaviour rather than by reading code. Both are cases where the
+harness, not the model, produced the failure.
+
+**Bug — the shared system prompt advertised tools the session does not bind.**
+`buildSystemPrompt` took no session kind, so all twelve agents got Appendix C's
+"How to work" bullets verbatim in *every* kind. Those bullets name
+`get_league_state`, `get_team_roster`, `get_matchup`, `get_team_week_results`,
+`get_transactions`, `set_lineup`, `post_message` and `write_decision_log`. The
+`draft_pick` set (§8.6) binds eight tools and none of those eight is on that list.
+So on draft night every agent on the clock was told "check on your rivals whenever
+you want" and "End every session by calling write_decision_log", and neither was
+possible.
+
+One model believed it. At pick 80 DeepSeek V4-Pro wrote a 27,676-character
+deliberation, crossed Tucker Kraft off its list by name ("Tucker Kraft (TE6, Q) -
+I already have Loveland, no need"), then spent the end of its clock on four
+parallel `get_team_roster` calls. Each answered "There is no tool named
+get_team_roster". The session died and the engine auto-picked it Tucker Kraft.
+`c636e64` stopped a hallucinated tool name from killing the session; it did not
+stop the prompt from inviting one.
+
+`buildSystemPrompt(vars, toolNames)` now emits only the bullets whose tools are
+bound, and both call sites pass the same list they bind, so prompt and tool set
+cannot drift. Where the tools are present the Appendix C wording is unchanged —
+`weekly_review`, `post_waivers` and `trade_window` are byte-identical to before.
+
+**This is not a §2 change.** §2's Prompt row fixes "Same system prompt for all 12
+agents. Only the model differs." That constrains variation across the twelve
+*models*: every agent running the same kind still gets byte-identical text, and no
+model sees a bullet another model does not. A prompt that describes capabilities
+the session cannot reach is not the spec's intent, it is a defect against it —
+§8.6 exists precisely because the kinds have different tools. Appendix C stays the
+source of the wording; the bullets are its sentences, unedited, each gated on the
+tool it names.
+
+**Bug — the `make_pick` reason cap produced every invalid tool call in the draft.**
+Ten invalid tool calls across 168 picks, and all ten were the same thing: `reason`
+over `MAX_PICK_REASON_CHARS` (200). Not one was a rules violation — no position
+cap, no `must_fill_starters`, no already-drafted. The models never broke a league
+rule; they broke a schema limit on a free-text field. GLM-5.3 hit it seven times in
+fourteen picks, Mistral Large 3 twice, Kimi K3 once.
+
+Seven times is the interesting number. The rejection is recoverable and every retry
+landed, but it costs a model step against a 180-second clock, and a pick is a fresh
+session — the only thing that carries across is the scratchpad, and GLM never wrote
+the cap into it. Zod's default text ("Too big: expected string to have <=200
+characters") does not say that shortening the reason is the fix. The message now
+does, and the draft brief states the cap before the agent's first attempt, which is
+the half that can actually break the cycle. The cap stays 200 (§8.4).
+
+**Tests.** The load-bearing one walks every kind in `SETS` and asserts the prompt
+names no tool that kind cannot call; it fails on the old code. Plus the Appendix C
+text held verbatim for a full team kind, the draft kind's bullets checked both ways,
+`make_pick` over/at/under the cap, the cap present in the tool description, and the
+brief pinned against the constant so the markdown cannot drift from the schema.
+
+**Not fixed here, recorded instead.** Qwen 3.8-Max lost two picks (24 and 97) to the
+clock the same way both times: it reasoned to a decision, correctly worked out that
+`make_pick` ends the session and so the scratchpad had to be written first, wrote
+the scratchpad, and was auto-picked 237 ms later at pick 24. The brief already says
+"Update your scratchpad only if you can do it quickly." Making the ordering advice
+sharper is a prompt change to a live benchmark and belongs in its own decision, not
+smuggled into a bug fix — the draft is over and this cannot recur before next
+season.
+
+**Benchmark integrity.** The 2026 draft ran under the old prompt, and every team ran
+under the same old prompt, so the draft remains internally comparable. From this
+commit forward, draft sessions would see the corrected text; that is a difference
+between seasons, not between models, and it is recorded here so a future reading of
+`/benchmark` knows which prompt produced the draft.
+
 ## 2026-08-30 — Monitoring round 2: hallucinated tool names killed sessions; Gemini thoughtSignature dropped on replay
 
 Jake asked for a check on any other errors. Beyond the morning pass:
