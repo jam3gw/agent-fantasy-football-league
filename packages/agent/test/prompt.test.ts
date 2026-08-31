@@ -113,7 +113,65 @@ describe("system prompt (Appendix C)", () => {
         if (bound.has(tool)) continue;
         expect(p, `the ${kind} prompt names ${tool}, which ${kind} cannot call`).not.toContain(tool);
       }
+
+      /*
+       * Tool names are identifiers; the capability claims around them are
+       * prose, and prose is what an agent actually acts on. "before you offer
+       * it a trade" names no tool, so the loop above cannot see it.
+       */
+      if (!bound.has("propose_trade") && !bound.has("respond_to_trade")) {
+        expect(p, `${kind} is told to offer a trade it cannot offer`).not.toContain(
+          "before you offer it a trade",
+        );
+      }
+      if (!bound.has("web_search")) {
+        expect(p, `${kind} is promised web search it does not have`).not.toContain("You have web search");
+      }
+      if (!bound.has("write_scratchpad")) {
+        expect(p, `${kind} is promised a scratchpad it cannot write`).not.toContain(
+          "You have a private scratchpad",
+        );
+      }
     }
+  });
+
+  /*
+   * The rule above is one-directional: a bug that dropped a bullet the session
+   * CAN act on would pass it silently, and the agent would simply never be told
+   * about a tool it has. Assert the other direction for every kind too.
+   */
+  it("keeps every bullet whose tools the kind does bind", () => {
+    const rules = promptRulesFromSettings(settings);
+    const gated: Array<[string[], string]> = [
+      [["set_lineup"], "- set_lineup takes your 9 starters and your IR player."],
+      [["read_scratchpad", "write_scratchpad"], "- You have a private scratchpad."],
+      [["web_search", "player_research"], "- You have web search and player_research"],
+      [["post_message"], "- You can talk to the other teams. post_message posts to the league message board"],
+      [["write_decision_log"], "- End every session by calling write_decision_log"],
+      [["get_team_roster"], "get_team_roster shows any team's roster"],
+      [["get_transactions"], "get_transactions lists every move every team has made"],
+    ];
+    for (const kind of Object.keys(SETS) as SessionKind[]) {
+      const bound = new Set(toolsForKind(kind).map((t) => t.name));
+      const p = buildSystemPrompt({ ...base, ...rules }, [...bound]);
+      for (const [needs, text] of gated) {
+        if (!needs.every((n) => bound.has(n))) continue;
+        expect(p, `the ${kind} prompt drops "${text}" although ${kind} binds ${needs.join(" + ")}`).toContain(text);
+      }
+      // Whatever else is gated, the unconditional bullets are always there.
+      expect(p, kind).toContain("- Use tools to look things up.");
+      expect(p, kind).toContain("- Every write tool validates your request.");
+      expect(p, kind).toContain("- Take the time you need.");
+    }
+  });
+
+  it("uses the short scouting tail when the session cannot put an offer on the table", () => {
+    const rules = promptRulesFromSettings(settings);
+    // lineup_check reads the whole league but has no trade tool.
+    const p = buildSystemPrompt({ ...base, ...rules }, toolsForKind("lineup_check").map((t) => t.name));
+    expect(p).toContain("get_transactions lists every move every team has made");
+    expect(p).toContain(" Check on your rivals whenever you want.");
+    expect(p).not.toContain("before you offer it a trade");
   });
 
   it("keeps the Appendix C text verbatim for a kind that has every tool it names", () => {
