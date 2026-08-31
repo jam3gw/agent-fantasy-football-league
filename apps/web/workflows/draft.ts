@@ -8,6 +8,7 @@
  * recorded, so a run that dies mid-draft simply carries on from the board.
  */
 import { runDraftPickStep, type DraftRunResult } from "../lib/draft";
+import { emitRunChunk } from "../lib/runStream";
 
 export async function draftWorkflow() {
   "use workflow";
@@ -26,5 +27,16 @@ export async function draftWorkflow() {
 
 async function runOnePick(): Promise<DraftRunResult> {
   "use step";
-  return runDraftPickStep();
+  // Model-output deltas stream from inside runDraftPickStep (see draft.ts's
+  // partial sink pairing); this chunk marks the pick's outcome on the run
+  // stream. Stream writes must happen inside a step, not the workflow loop.
+  const result = await runDraftPickStep();
+  await emitRunChunk({
+    kind: "draft_pick",
+    picksMade: result.picksMade,
+    autoPicks: result.autoPicks,
+    completed: result.completed,
+    pausedAt: result.pausedAt,
+  });
+  return result;
 }
