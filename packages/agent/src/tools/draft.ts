@@ -550,8 +550,10 @@ export const getAvailablePlayersTool = defineTool({
 const makePickSchema = z.object({
   player_id: z.string().min(1),
   /*
-   * The limit is stated three times on purpose — here, in the tool
-   * description, and in the draft brief. Every invalid tool call in the 2026
+   * The limit is stated three times — here, in the tool description (where it
+   * already was, all through the draft, without preventing this) and in the
+   * draft brief. The restatements are cheap; the message below is the part
+   * that is actually new, because it names the remedy. Every invalid tool call in the 2026
    * draft was this one field and nothing else: ten rejections, no rule
    * violations. GLM-5.3 hit it seven times in fourteen picks, and could not
    * learn from any of them, because a pick is a fresh session and the only

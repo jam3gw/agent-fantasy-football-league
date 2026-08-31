@@ -1,7 +1,12 @@
 /**
- * The shared system prompt (SPEC Appendix C). Identical text for all twelve
- * agents and the reporter — only the model, team name, id, date, phase, and
- * week differ (§2: "Same system prompt for all 12 agents").
+ * The shared system prompt (SPEC Appendix C).
+ *
+ * §2's "Same system prompt for all 12 agents" is a rule about the twelve
+ * *models*: within one session kind the text is identical for every agent and
+ * differs only in model, team name, id, date, phase and week. Across kinds it
+ * does differ, because the "How to work" bullets are gated on the tools §8.6
+ * binds for the kind — a session is never told about a tool it cannot call.
+ * See `buildSystemPrompt` below and the gating table in Appendix C.
  */
 
 /**
@@ -86,7 +91,7 @@ function joinClauses(parts: string[]): string {
  * whenever you want", called `get_team_roster` four times in parallel, got
  * "There is no tool named get_team_roster" four times, and lost pick 80 to the
  * clock; the engine auto-picked the tight end it had just written off. The
- * draft set (§8.6) binds eight tools, and the shared text was advertising five
+ * draft set (§8.6) binds nine tools, and the shared text was advertising five
  * league-visibility tools, `set_lineup`, `post_message` and `write_decision_log`
  * on top of them.
  *
