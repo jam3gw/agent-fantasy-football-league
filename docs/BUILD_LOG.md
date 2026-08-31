@@ -2,6 +2,45 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-08-30 — Monitoring round 2: hallucinated tool names killed sessions; Gemini thoughtSignature dropped on replay
+
+Jake asked for a check on any other errors. Beyond the morning pass:
+
+**Bug — a hallucinated tool name killed the session (draft pick 1014).**
+deepseek called `get_team_roster`, which does not exist; the next step died
+with `AI_InvalidPromptError: messages do not match the ModelMessage[] schema`
+and the pick went to auto-pick. Root cause in `modelStep.ts`: the replayed
+assistant message was built from `result.content` — the SDK's *output* parts,
+where an unknown or unparsable call is a dynamic part carrying
+`invalid`/`error`/`dynamic` fields the ModelMessage schema rejects. Now built
+from `result.responseMessages`, the SDK's own sanitized replay form. The same
+change fixes the **Gemini thoughtSignature warnings** (~145 in the Vercel
+runtime log): output parts carry `providerMetadata`, replay needs
+`providerOptions`, and `toResponseMessages` maps one to the other — the
+gateway had been injecting `skip_thought_signature_validator` to keep Gemini
+requests from 400ing. Regression test drives the real `createModelStep`
+through the real `streamText` against a mock model that hallucinates a tool
+name; it fails on the old code. `messageShape.test.ts`'s own header explains
+why the stubbed tests could not see this.
+
+**Checked, no action:**
+- `get_free_agents` tool errors (69 in 24h): the drizzle correlation fix
+  (ea81525) deployed ~23:00 UTC; zero occurrences since. Confirmed resolved.
+- A 2-hour `password authentication failed` (28P01) stream in the Vercel
+  runtime errors, 19:24–21:28 UTC, every public page: it is the `mock-draft`
+  branch's *preview* deployment, whose baked `DATABASE_URL` points at the
+  temporary Neon branch deleted after the mock draft. One visitor on the
+  stale preview URL. Production was never affected.
+- Draft-night session failures besides 1014: one gateway 500 after three
+  retries and two 180-second-clock timeouts — provider weather, auto-pick
+  covered them, nothing to fix.
+- The rest of the Vercel "runtime errors" are AI SDK reasoning-part warnings
+  (Grok/OpenAI/Anthropic reasoning metadata skips) — log noise, left alone
+  deliberately: silencing `AI_SDK_LOG_WARNINGS` would also hide real
+  warnings like the thoughtSignature one this round acted on.
+
+Full check green: lint, typecheck, 689 tests.
+
 ## 2026-08-30 — Log/health monitoring pass: two production bugs found and fixed
 
 Routine monitoring sweep (Jake asked for it as a one-off plus a recurring
