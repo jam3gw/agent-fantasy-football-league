@@ -197,6 +197,10 @@ async function runDraftPick(
     ensureFreshPlayerFeed(database, clock),
   ]);
 
+  // The draft set (§8.6), bound once and reused for the prompt: the system
+  // prompt may only describe tools this session actually has.
+  const draftTools = toolsForKind("draft_pick");
+
   {
     const sessionId = await claimPickSession(database, settings, clock, pick, team);
 
@@ -214,7 +218,7 @@ async function runDraftPick(
       await runSession(sessionId, {
         db: database,
         clock,
-        tools: toolsForKind("draft_pick"),
+        tools: draftTools,
         toolConfig: env.toolConfig,
         // §5.4 / §5.1 on-demand: week 0 keeps `proj_points` on the board
         // current; the player feed keeps draft-day injury news current.
@@ -226,15 +230,18 @@ async function runDraftPick(
         },
         modelStep,
         buildSystemPrompt: async () =>
-          buildSystemPrompt({
-            modelLabel: team.modelLabel,
-            teamName: team.name ?? "(unnamed)",
-            teamId: team.id,
-            datetimeEt: formatEt(clock.now()),
-            phase: "drafting",
-            week: settings.currentWeek,
-            ...promptRulesFromSettings(settings),
-          }),
+          buildSystemPrompt(
+            {
+              modelLabel: team.modelLabel,
+              teamName: team.name ?? "(unnamed)",
+              teamId: team.id,
+              datetimeEt: formatEt(clock.now()),
+              phase: "drafting",
+              week: settings.currentWeek,
+              ...promptRulesFromSettings(settings),
+            },
+            draftTools.map((t) => t.name),
+          ),
         buildContext: async (ctx) => ({
           brief: await readBrief("draft_pick", ctx.sessionContext),
           snapshot: await buildContextSnapshot(ctx),

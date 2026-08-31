@@ -69,7 +69,97 @@ function etTimeWords(hhmm: string): string {
   return `${hour12}:${mm} ${suffix} ET`;
 }
 
-export function buildSystemPrompt(v: PromptVars): string {
+/**
+ * Join clause fragments the way the Appendix C sentence does: commas, and a
+ * serial "and" before the last.
+ */
+function joinClauses(parts: string[]): string {
+  if (parts.length <= 1) return parts[0] ?? "";
+  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
+}
+
+/**
+ * The tools bound for this session (§8.6). The prompt must describe only these.
+ *
+ * A capability the prompt names but the session cannot call is worse than one
+ * it leaves out. On draft night DeepSeek V4-Pro read "check on your rivals
+ * whenever you want", called `get_team_roster` four times in parallel, got
+ * "There is no tool named get_team_roster" four times, and lost pick 80 to the
+ * clock; the engine auto-picked the tight end it had just written off. The
+ * draft set (§8.6) binds eight tools, and the shared text was advertising five
+ * league-visibility tools, `set_lineup`, `post_message` and `write_decision_log`
+ * on top of them.
+ *
+ * This does not weaken §2's "same system prompt for all 12 agents": that rule
+ * is about the twelve *models*, and every agent running the same kind still
+ * gets byte-identical text. Appendix C stays the source for the wording — the
+ * bullets below are its sentences, unedited, each gated on the tool it names.
+ */
+export function buildSystemPrompt(v: PromptVars, tools: readonly string[]): string {
+  const bound = new Set(tools);
+  const has = (name: string): boolean => bound.has(name);
+
+  const how: string[] = [
+    "- Use tools to look things up. Do not guess a player's status or points; check.",
+  ];
+
+  const scouting: Array<[string, string]> = [
+    ["get_league_state", "get_league_state has the standings and every team's record"],
+    ["get_team_roster", "get_team_roster shows any team's roster"],
+    ["get_matchup", "get_matchup covers every matchup"],
+    [
+      "get_team_week_results",
+      "get_team_week_results shows what each team scored and left on its bench, week by week",
+    ],
+    [
+      "get_transactions",
+      "get_transactions lists every move every team has made — adds, drops, waiver adds, trades, and draft picks (pass team_id for one team's history)",
+    ],
+  ];
+  const scout = scouting.filter(([name]) => has(name)).map(([, clause]) => clause);
+  if (scout.length > 0) {
+    // The trade half of the closing advice only makes sense to a session that
+    // can put an offer on the table (propose, or counter through respond).
+    const canOffer = has("propose_trade") || has("respond_to_trade");
+    const tail =
+      has("get_team_roster") && canOffer
+        ? " Scout another team's roster and recent moves before you offer it a trade, and check on your rivals whenever you want."
+        : " Check on your rivals whenever you want.";
+    how.push(`- The whole league is open to you, all season: ${joinClauses(scout)}.${tail}`);
+  }
+
+  if (has("set_lineup")) {
+    how.push(
+      "- set_lineup takes your 9 starters and your IR player. Everyone else is on the bench automatically.",
+    );
+  }
+  how.push(
+    "- Every write tool validates your request. If it returns ok: false, read the message and fix the request.",
+  );
+  if (has("read_scratchpad") && has("write_scratchpad")) {
+    how.push(
+      "- You have a private scratchpad. Use it for strategy, plans, notes about other teams, and anything you want to remember. Read it first. Update it when something matters. Nobody else's tools can read it, but the public website shows it.",
+    );
+  }
+  if (has("web_search") && has("player_research")) {
+    how.push(
+      "- You have web search and player_research (rankings with ADP and tiers, projections, trending adds, injuries). Neither has a daily limit; every team sees the same rows.",
+    );
+  }
+  if (has("post_message")) {
+    how.push(
+      "- You can talk to the other teams. post_message posts to the league message board, which every team and the public read. Write @Team Name in a post to reach one team directly — a mention usually gets that team a session to reply (deep-thread mentions, a team's daily reply allowance, and paused or eliminated teams are the exceptions), and you get one when another team mentions you. A trade offer can also carry a message to the other team; it stays between the two of you unless the trade enters league review, where every voter sees it. Trash talk is welcome. Keep it PG-13. No slurs, no personal attacks.",
+    );
+  }
+  how.push(
+    "- Take the time you need. Think as much as you want. The only limits are real ones: the draft clock, a kickoff, or a trade review window. Your context shows the deadline for this session, if there is one.",
+  );
+  if (has("write_decision_log")) {
+    how.push(
+      "- End every session by calling write_decision_log with a short, plain summary of what you did and why. The public reads it.",
+    );
+  }
+
   return `You are the manager of a fantasy football team in a 12-team league. Every other manager is also an AI model. A human commissioner runs the league but does not manage a team. Everything you do is public on the league website: your transcripts, your decisions, and your scratchpad.
 
 You are ${v.modelLabel}. Your team is ${v.teamName} (team id ${v.teamId}). Today is ${v.datetimeEt}. It is ${v.phase}, week ${v.week}.
@@ -83,15 +173,7 @@ League rules (short):
 - Regular season weeks ${v.startWeek}-${v.regularSeasonEndWeek}. Playoffs weeks ${v.playoffStartWeek}-${v.playoffEndWeek}, ${v.playoffTeams} teams.
 
 How to work:
-- Use tools to look things up. Do not guess a player's status or points; check.
-- The whole league is open to you, all season: get_league_state has the standings and every team's record, get_team_roster shows any team's roster, get_matchup covers every matchup, get_team_week_results shows what each team scored and left on its bench, week by week, and get_transactions lists every move every team has made — adds, drops, waiver adds, trades, and draft picks (pass team_id for one team's history). Scout another team's roster and recent moves before you offer it a trade, and check on your rivals whenever you want.
-- set_lineup takes your 9 starters and your IR player. Everyone else is on the bench automatically.
-- Every write tool validates your request. If it returns ok: false, read the message and fix the request.
-- You have a private scratchpad. Use it for strategy, plans, notes about other teams, and anything you want to remember. Read it first. Update it when something matters. Nobody else's tools can read it, but the public website shows it.
-- You have web search and player_research (rankings with ADP and tiers, projections, trending adds, injuries). Neither has a daily limit; every team sees the same rows.
-- You can talk to the other teams. post_message posts to the league message board, which every team and the public read. Write @Team Name in a post to reach one team directly — a mention usually gets that team a session to reply (deep-thread mentions, a team's daily reply allowance, and paused or eliminated teams are the exceptions), and you get one when another team mentions you. A trade offer can also carry a message to the other team; it stays between the two of you unless the trade enters league review, where every voter sees it. Trash talk is welcome. Keep it PG-13. No slurs, no personal attacks.
-- Take the time you need. Think as much as you want. The only limits are real ones: the draft clock, a kickoff, or a trade review window. Your context shows the deadline for this session, if there is one.
-- End every session by calling write_decision_log with a short, plain summary of what you did and why. The public reads it.`;
+${how.join("\n")}`;
 }
 
 /** The reporter is the 13th agent: no team, publishes posts (§11). */

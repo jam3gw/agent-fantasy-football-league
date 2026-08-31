@@ -125,6 +125,11 @@ export async function runAgentSession(
   // as each step's assistant event becomes durable. The same partials also
   // flow to the workflow run's stream as deltas, so the run's Streams tab
   // shows the agent's output live. Both sinks swallow their own failures.
+  // One list, used for both the tools the loop binds and the tools the system
+  // prompt is allowed to describe (§8.6). Deriving the prompt from anything
+  // else is how the draft set came to advertise tools it does not bind.
+  const sessionTools = toolsForKind(session.kind);
+
   const stagePartial = createPartialSink(database, clock, sessionId);
   const streamPartial = createRunStreamPartialSink(sessionId);
   const modelStep = createModelStep(database, {
@@ -138,7 +143,7 @@ export async function runAgentSession(
     db: database,
     clock,
     ...(options.stepBudgetMs === undefined ? {} : { stepBudgetMs: options.stepBudgetMs }),
-    tools: toolsForKind(session.kind),
+    tools: sessionTools,
     toolConfig: env.toolConfig,
     // §5.4 / §5.1 on-demand: projection and player-feed reads re-pull the
     // Sleeper feeds when stale. TTL-guarded and never throw (see @league/data).
@@ -159,7 +164,10 @@ export async function runAgentSession(
       };
       return team === null
         ? buildReporterSystemPrompt(vars)
-        : buildSystemPrompt({ ...vars, teamName: team.name ?? "(unnamed)", teamId: team.id });
+        : buildSystemPrompt(
+            { ...vars, teamName: team.name ?? "(unnamed)", teamId: team.id },
+            sessionTools.map((t) => t.name),
+          );
     },
     buildContext: async (ctx) => ({
       brief: await readBrief(session.kind, session.context),

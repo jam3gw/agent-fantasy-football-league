@@ -7,6 +7,14 @@
  */
 import { describe, expect, it } from "vitest";
 import { buildReporterSystemPrompt, buildSystemPrompt, promptRulesFromSettings } from "../src/prompt.ts";
+import { DRAFT_TOOLS, READ_TOOLS, REPORTER_TOOLS, SETS, WRITE_TOOLS, toolsForKind } from "../src/toolsets.ts";
+import type { SessionKind } from "@league/engine";
+
+/** The fullest team set: what the Appendix C text assumes it may describe. */
+const FULL = toolsForKind("weekly_review").map((t) => t.name);
+
+/** Every tool the league defines, for the "names nothing it cannot call" check. */
+const EVERY_TOOL = [...READ_TOOLS, ...WRITE_TOOLS, ...DRAFT_TOOLS, ...REPORTER_TOOLS].map((t) => t.name);
 
 const settings = {
   startWeek: 1,
@@ -31,7 +39,7 @@ const base = {
 
 describe("system prompt (Appendix C)", () => {
   it("states the league defaults in words", () => {
-    const p = buildSystemPrompt({ ...base, ...promptRulesFromSettings(settings) });
+    const p = buildSystemPrompt({ ...base, ...promptRulesFromSettings(settings) }, FULL);
     expect(p).toContain("4:30 AM ET");
     expect(p).toContain("24-hour review");
     expect(p).toContain("7 vetoes cancel a trade");
@@ -43,7 +51,7 @@ describe("system prompt (Appendix C)", () => {
   });
 
   it("tells every agent how to scout other teams and how to reach them", () => {
-    const p = buildSystemPrompt({ ...base, ...promptRulesFromSettings(settings) });
+    const p = buildSystemPrompt({ ...base, ...promptRulesFromSettings(settings) }, FULL);
     // Scouting: other rosters, the standings, and every team's weekly numbers.
     expect(p).toContain("get_team_roster");
     expect(p).toContain("standings");
@@ -69,7 +77,7 @@ describe("system prompt (Appendix C)", () => {
       playoffTeams: 4,
     });
     for (const p of [
-      buildSystemPrompt({ ...base, ...changed }),
+      buildSystemPrompt({ ...base, ...changed }, FULL),
       buildReporterSystemPrompt({ ...base, ...changed }),
     ]) {
       expect(p).toContain("1:15 PM ET");
@@ -87,10 +95,57 @@ describe("system prompt (Appendix C)", () => {
     }
   });
 
+  /*
+   * The bug this pins: `buildSystemPrompt` took no session kind, so every
+   * draft_pick session was told "get_team_roster shows any team's roster ...
+   * check on your rivals whenever you want" and "End every session by calling
+   * write_decision_log" — neither of which the draft set (§8.6) binds. On
+   * draft night DeepSeek V4-Pro believed it and spent the end of its pick-80
+   * clock on four parallel get_team_roster calls that could only ever answer
+   * "There is no tool named get_team_roster". It was auto-picked.
+   */
+  it("names no tool the session cannot call, for every kind", () => {
+    const rules = promptRulesFromSettings(settings);
+    for (const kind of Object.keys(SETS) as SessionKind[]) {
+      const bound = new Set(toolsForKind(kind).map((t) => t.name));
+      const p = buildSystemPrompt({ ...base, ...rules }, [...bound]);
+      for (const tool of EVERY_TOOL) {
+        if (bound.has(tool)) continue;
+        expect(p, `the ${kind} prompt names ${tool}, which ${kind} cannot call`).not.toContain(tool);
+      }
+    }
+  });
+
+  it("keeps the Appendix C text verbatim for a kind that has every tool it names", () => {
+    const rules = promptRulesFromSettings(settings);
+    const p = buildSystemPrompt({ ...base, ...rules }, FULL);
+    expect(p).toContain(
+      "- The whole league is open to you, all season: get_league_state has the standings and every team's record, get_team_roster shows any team's roster, get_matchup covers every matchup, get_team_week_results shows what each team scored and left on its bench, week by week, and get_transactions lists every move every team has made — adds, drops, waiver adds, trades, and draft picks (pass team_id for one team's history). Scout another team's roster and recent moves before you offer it a trade, and check on your rivals whenever you want.",
+    );
+    expect(p).toContain("- set_lineup takes your 9 starters and your IR player.");
+    expect(p).toContain("- End every session by calling write_decision_log");
+  });
+
+  it("drops the bullets the draft set cannot act on, and keeps the ones it can", () => {
+    const rules = promptRulesFromSettings(settings);
+    const draft = toolsForKind("draft_pick").map((t) => t.name);
+    const p = buildSystemPrompt({ ...base, ...rules }, draft);
+    // Gone: league visibility, the lineup, the board, the decision log.
+    expect(p).not.toContain("The whole league is open to you");
+    expect(p).not.toContain("set_lineup");
+    expect(p).not.toContain("post_message");
+    expect(p).not.toContain("write_decision_log");
+    // Kept: the scratchpad and the research tools, which the draft set binds.
+    expect(p).toContain("You have a private scratchpad.");
+    expect(p).toContain("player_research");
+    // And the rules half is untouched — a drafting agent still needs them.
+    expect(p).toContain("Regular season weeks 1-14");
+  });
+
   it("differs between two agents only in model, team, date, phase and week", () => {
     const rules = promptRulesFromSettings(settings);
-    const a = buildSystemPrompt({ ...base, ...rules, modelLabel: "A", teamName: "Alpha", teamId: 1 });
-    const b = buildSystemPrompt({ ...base, ...rules, modelLabel: "B", teamName: "Beta", teamId: 2 });
+    const a = buildSystemPrompt({ ...base, ...rules, modelLabel: "A", teamName: "Alpha", teamId: 1 }, FULL);
+    const b = buildSystemPrompt({ ...base, ...rules, modelLabel: "B", teamName: "Beta", teamId: 2 }, FULL);
     const strip = (s: string) => s.split("\n").filter((l) => !l.startsWith("You are ")).join("\n");
     expect(strip(a)).toBe(strip(b));
   });
