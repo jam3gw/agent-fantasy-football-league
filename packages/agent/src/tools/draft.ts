@@ -549,7 +549,25 @@ export const getAvailablePlayersTool = defineTool({
 
 const makePickSchema = z.object({
   player_id: z.string().min(1),
-  reason: z.string().min(1).max(MAX_PICK_REASON_CHARS),
+  /*
+   * The limit is stated three times on purpose — here, in the tool
+   * description, and in the draft brief. Every invalid tool call in the 2026
+   * draft was this one field and nothing else: ten rejections, no rule
+   * violations. GLM-5.3 hit it seven times in fourteen picks, and could not
+   * learn from any of them, because a pick is a fresh session and the only
+   * thing that carries across is the scratchpad. Zod's default text ("Too big:
+   * expected string to have <=200 characters") does not say which field, how
+   * long the reason actually was, or that resubmitting a shorter one is the
+   * fix; on a 180-second clock the retry costs a model step the agent may not
+   * have.
+   */
+  reason: z
+    .string()
+    .min(1)
+    .max(
+      MAX_PICK_REASON_CHARS,
+      `the reason must be at most ${MAX_PICK_REASON_CHARS} characters; shorten it to one line and call make_pick again`,
+    ),
 });
 
 /**

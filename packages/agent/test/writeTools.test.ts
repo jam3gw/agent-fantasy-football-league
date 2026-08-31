@@ -30,6 +30,7 @@ import {
   autoPickCandidate,
   getAvailablePlayersTool,
   getDraftStateTool,
+  MAX_PICK_REASON_CHARS,
   makePickTool,
   snakePosition,
   unfilledStartingSlots,
@@ -383,6 +384,51 @@ describe("make_pick", () => {
     const lineup = await db.select().from(lineupEntries);
     expect(lineup).toHaveLength(1);
     expect(lineup[0]).toMatchObject({ teamId: teamIds[0], playerId: pid, slot: "RB1", week: 1 });
+  });
+
+  /*
+   * All ten invalid tool calls of the 2026 draft were this one field: a reason
+   * over the cap. Not one was a rules violation. The rejection is recoverable —
+   * every retry landed — but it costs a model step against a 180-second clock,
+   * and a pick is a fresh session, so an agent cannot learn the cap from having
+   * hit it last round. The message has to carry the fix.
+   */
+  it("says which field, what the cap is, and what to do when the reason is too long", async () => {
+    await seedLeague(db, { phase: "drafting" });
+    const teamIds = await seedTeams(db);
+    await startDraft(teamIds, 1);
+    const pid = await makePlayer(db, { playerId: "verbose", position: "RB" });
+
+    const res = (await makePickTool.execute(
+      { player_id: pid, reason: "x".repeat(MAX_PICK_REASON_CHARS + 1) },
+      ctxFor({ teamId: teamIds[0]!, kind: "draft_pick", sessionContext: { pick_no: 1 } }),
+    )) as { ok: false; error: string; message: string };
+
+    expect(res.ok).toBe(false);
+    expect(res.error).toBe("invalid_args");
+    expect(res.message).toContain("reason");
+    expect(res.message).toContain(String(MAX_PICK_REASON_CHARS));
+    expect(res.message).toContain("shorten");
+    // Zod's default text named neither the field nor the remedy.
+    expect(res.message).not.toContain("Too big");
+    expect(await db.select().from(draftPicks)).toHaveLength(0);
+  });
+
+  it("takes a reason of exactly the cap", async () => {
+    await seedLeague(db, { phase: "drafting" });
+    const teamIds = await seedTeams(db);
+    await startDraft(teamIds, 1);
+    const pid = await makePlayer(db, { playerId: "atcap", position: "RB" });
+
+    const res = await makePickTool.execute(
+      { player_id: pid, reason: "y".repeat(MAX_PICK_REASON_CHARS) },
+      ctxFor({ teamId: teamIds[0]!, kind: "draft_pick", sessionContext: { pick_no: 1 } }),
+    );
+    expect(res).toMatchObject({ ok: true, pick_no: 1 });
+  });
+
+  it("states the cap in the tool description the model reads", () => {
+    expect(makePickTool.description).toContain(String(MAX_PICK_REASON_CHARS));
   });
 
   it("rejects a second pick of the same player with already_drafted", async () => {
