@@ -310,6 +310,13 @@ export function createModelStep(
       // providerMetadata to providerOptions — what carries Gemini's
       // thoughtSignature back on replay, whose absence the gateway warned
       // about on every Gemini step.
+      //
+      // Taking the last assistant message is safe only while tools carry no
+      // `execute` and stopWhen stays at its one-step default: under those,
+      // responseMessages holds at most one assistant message, plus possibly
+      // a tool message answering an invalid call — which must be dropped,
+      // because the session loop answers every call itself and a duplicate
+      // tool result fails at the provider.
       assistantMessage:
         [...responseMessages].reverse().find((m) => m.role === "assistant") ??
         ({ role: "assistant", content: text ?? "" } as ModelMessage),
