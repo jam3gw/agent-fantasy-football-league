@@ -1347,7 +1347,7 @@ Which bullet is gated on what:
 | "Take the time you need…" | always |
 | "End every session by calling write_decision_log…" | `write_decision_log` |
 
-So a `draft_pick` session (eight tools, Section 8.6) gets neither the
+So a `draft_pick` session (nine tools, Section 8.6) gets neither the
 league-visibility bullet nor `set_lineup`, `post_message` or `write_decision_log`; it
 keeps the scratchpad and research bullets, which it can act on. Before this was
 enforced (2026-08-31) every drafting agent was told to scout its rivals and to end

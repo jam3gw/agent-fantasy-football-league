@@ -41,6 +41,16 @@ describe("tool sets (§8.6)", () => {
     }
   });
 
+  /*
+   * The count is quoted in prose in SPEC Appendix C and in prompt.ts as the
+   * evidence for how narrow the draft set is, and it was wrong once already:
+   * §8.6's table writes the two scratchpad tools as one row, so counting the
+   * table gives eight. Pin it to the code.
+   */
+  it("binds nine tools for draft_pick, the number Appendix C quotes", () => {
+    expect(toolsForKind("draft_pick")).toHaveLength(9);
+  });
+
   it("draft_pick has make_pick and no write_decision_log (the pick reason is the log)", () => {
     const n = names("draft_pick");
     expect(n).toContain("make_pick");

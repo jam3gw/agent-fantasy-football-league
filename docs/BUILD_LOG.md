@@ -13,7 +13,7 @@ harness, not the model, produced the failure.
 "How to work" bullets verbatim in *every* kind. Those bullets name
 `get_league_state`, `get_team_roster`, `get_matchup`, `get_team_week_results`,
 `get_transactions`, `set_lineup`, `post_message` and `write_decision_log`. The
-`draft_pick` set (§8.6) binds eight tools and none of those eight is on that list.
+`draft_pick` set (§8.6) binds nine tools and none of those nine is on that list.
 So on draft night every agent on the clock was told "check on your rivals whenever
 you want" and "End every session by calling write_decision_log", and neither was
 possible.
@@ -53,9 +53,18 @@ session — the only thing that carries across is the scratchpad, and GLM never 
 the cap into it. The old rejection did name the field and the cap (the runner
 prefixes the Zod issue path, so the model read "make_pick: reason Too big: expected
 string to have <=200 characters"); what it never said is that resubmitting a shorter
-reason is the fix. The message now says so, and the draft brief states the cap before
-the agent's first attempt, which is the half that can actually break the cycle. The
-cap stays 200 (§8.4).
+reason is the fix. The message now says so. That is the one genuinely new lever here,
+and it is worth being precise about why:
+
+**Stating the cap up front has already been tried, and it failed.** `make_pick`'s tool
+description read "Give a one-line reason (at most 200 characters)" throughout the
+draft, transmitted with the schema on every model step of every one of the 168 picks.
+GLM-5.3 had that sentence in front of it on all fourteen of its picks and blew the cap
+on seven. So the brief now stating the cap too is a *second* bet on a mechanism with a
+losing record, not the fix — it costs nothing and may help a model that weights the
+brief above the schema, but it should not be credited in advance. If reasons overflow
+again next draft, the question to ask is whether a fourth restatement helps at all,
+not where to put the third. The cap stays 200 (§8.4).
 
 **Tests.** The load-bearing one walks every kind in `SETS` and asserts the prompt
 names no tool that kind cannot call; it fails on the old code. Plus the Appendix C
@@ -98,6 +107,36 @@ old rejection *did* name the field — the runner prefixes the Zod issue path, s
 model read "make_pick: reason Too big: expected string to have <=200 characters". The
 code comment and the entry above overstated that; both corrected. The remedy was
 still missing, which is the part that mattered.
+
+**Review round 2 (three lenses over the full change; the loop's stopping condition
+is a reviewer finding nothing new).** Twelve findings raised, three confirmed. The
+reviewer's ship verdict was merge, no blockers.
+
+- *"Eight tools" was nine.* `toolsForKind("draft_pick")` returns nine —
+  §8.6's table writes the two scratchpad tools as one row, and counting the table
+  gives eight. The wrong number reached SPEC, `prompt.ts` and this log, in each case
+  as the evidence for how narrow the draft set is. Corrected in all three, and pinned
+  by a test so prose and code cannot drift again.
+- *An efficacy claim contradicted by the same paragraph.* This entry credited the
+  brief's new statement of the cap as "the half that can actually break the cycle".
+  But `make_pick`'s tool description already read "at most 200 characters",
+  transmitted with the schema on every model step of all 168 picks — GLM-5.3 had it
+  in front of it fourteen times and blew the cap seven. Stating the cap up front is a
+  mechanism with a losing record, not the fix. Rewritten to say so, and the schema
+  comment with it. The remedy sentence in the rejection is the only new lever.
+- Two stale headers of the same class round 1 caught in SPEC: `prompt.ts` still said
+  the text is "identical for all twelve agents … only the model, team name, id, date,
+  phase and week differ", and `toolsets.ts` still said "only the kind changes which
+  tools are on the table". Both now describe the gating. (The verifiers dismissed
+  these; they were wrong to — the round-1 finding was precisely that a doc left
+  describing the old behaviour gives a future session a case for reverting.)
+
+Nine findings were dismissed on verification, including two worth naming because they
+are real gaps that are simply not this change's to close: `buildReporterSystemPrompt`
+has no gating check of its own (the reporter kinds do bind everything its text names,
+checked by hand), and the new cap test exercises `defineTool`'s formatter rather than
+the runner path production hits first — the custom message is on the schema, so it is
+identical down both, but only one is covered.
 
 **Benchmark integrity.** The 2026 draft ran under the old prompt, and every team ran
 under the same old prompt, so the draft remains internally comparable. From this

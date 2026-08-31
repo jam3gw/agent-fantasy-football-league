@@ -1,7 +1,9 @@
 /**
- * Tool sets per session kind (SPEC §8.6). Every model gets the same tools,
- * the same schemas, and the same prompt text (§2) — only the kind changes
- * which tools are on the table.
+ * Tool sets per session kind (SPEC §8.6). Every model gets the same tools, the
+ * same schemas and the same prompt text (§2); the kind changes which tools are
+ * on the table, and through them which "How to work" bullets the system prompt
+ * carries — `buildSystemPrompt` takes the bound names from this same list so a
+ * session is never told about a tool it cannot call.
  */
 import type { SessionKind } from "@league/engine";
 import type { LeagueTool } from "./tools/types.ts";
