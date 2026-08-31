@@ -555,11 +555,11 @@ const makePickSchema = z.object({
    * draft was this one field and nothing else: ten rejections, no rule
    * violations. GLM-5.3 hit it seven times in fourteen picks, and could not
    * learn from any of them, because a pick is a fresh session and the only
-   * thing that carries across is the scratchpad. Zod's default text ("Too big:
-   * expected string to have <=200 characters") does not say which field, how
-   * long the reason actually was, or that resubmitting a shorter one is the
-   * fix; on a 180-second clock the retry costs a model step the agent may not
-   * have.
+   * thing that carries across is the scratchpad. The default rejection did name
+   * the field — the runner prefixes the Zod issue path, so the model read
+   * "make_pick: reason Too big: expected string to have <=200 characters" — but
+   * it never said that resubmitting a shorter reason is the fix, and on a
+   * 180-second clock the retry costs a model step the agent may not have.
    */
   reason: z
     .string()

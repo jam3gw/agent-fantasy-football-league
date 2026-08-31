@@ -50,10 +50,12 @@ fourteen picks, Mistral Large 3 twice, Kimi K3 once.
 Seven times is the interesting number. The rejection is recoverable and every retry
 landed, but it costs a model step against a 180-second clock, and a pick is a fresh
 session — the only thing that carries across is the scratchpad, and GLM never wrote
-the cap into it. Zod's default text ("Too big: expected string to have <=200
-characters") does not say that shortening the reason is the fix. The message now
-does, and the draft brief states the cap before the agent's first attempt, which is
-the half that can actually break the cycle. The cap stays 200 (§8.4).
+the cap into it. The old rejection did name the field and the cap (the runner
+prefixes the Zod issue path, so the model read "make_pick: reason Too big: expected
+string to have <=200 characters"); what it never said is that resubmitting a shorter
+reason is the fix. The message now says so, and the draft brief states the cap before
+the agent's first attempt, which is the half that can actually break the cycle. The
+cap stays 200 (§8.4).
 
 **Tests.** The load-bearing one walks every kind in `SETS` and asserts the prompt
 names no tool that kind cannot call; it fails on the old code. Plus the Appendix C
@@ -69,6 +71,33 @@ the scratchpad, and was auto-picked 237 ms later at pick 24. The brief already s
 sharper is a prompt change to a live benchmark and belongs in its own decision, not
 smuggled into a bug fix — the draft is over and this cannot recur before next
 season.
+
+**Review round 1 (fresh-context reviewer, four lenses, findings adversarially
+verified).** Nineteen findings raised, five confirmed real, all should-fix or nit:
+
+- *SPEC left stale* (three lenses found it independently, and they were right). The
+  change altered emitted prompt text but touched no spec file, so Appendix C and §8.2
+  still described the exact prompt the fix removed. CLAUDE.md names SPEC the source of
+  truth, and the repo precedent is explicit (`prompt.ts` + Appendix C kept in sync,
+  2026-08-29). A future session reconciling code to the spec would have had spec text
+  on its side for reverting this. Fixed: Appendix C now scopes "identical for all
+  models" to the twelve models within a kind, carries a table of which bullet is gated
+  on which tool, and names `buildSystemPrompt` as the authority; §8.2's "system prompt
+  (Appendix C)" is qualified.
+- *The new rule was one-directional.* It asserted the prompt names no tool the kind
+  cannot call, so a bug that dropped a bullet the kind CAN act on would have passed
+  silently. Added the positive direction for every kind, plus the unconditional
+  bullets. Verified load-bearing: stubbing the `set_lineup` gate to false fails it.
+- *Prose capability claims were uncovered.* The rule matched tool identifiers, but an
+  agent acts on sentences — "before you offer it a trade" names no tool. Added prose
+  assertions and a test pinning the short scouting tail for `lineup_check`.
+
+Fourteen findings were dismissed on verification. One of them was half right and is
+worth recording: the claim that the recorded root cause for the cap was wrong. The
+old rejection *did* name the field — the runner prefixes the Zod issue path, so the
+model read "make_pick: reason Too big: expected string to have <=200 characters". The
+code comment and the entry above overstated that; both corrected. The remedy was
+still missing, which is the part that mattered.
 
 **Benchmark integrity.** The 2026 draft ran under the old prompt, and every team ran
 under the same old prompt, so the draft remains internally comparable. From this
