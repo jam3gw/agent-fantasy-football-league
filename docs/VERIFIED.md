@@ -283,3 +283,12 @@ Read from the bundled docs at `node_modules/next/dist/docs/` before writing any 
 - **`next lint` was removed** and `next build` no longer lints — CI runs ESLint directly, which this repo already does.
 - **Route handlers are not cached by default**, which is what the public JSON API and `/api/draft/state` need (§12.1 asks for `no-store` on draft state). Page-level `export const revalidate = N` still applies for the 30 s live / 5 min default rendering rule.
 - Node 20.9+ and TypeScript 5.1+ minimums; the Vercel project is Node 24.x, so this is satisfied.
+
+## 2026-08-31 — Vercel Speed Insights on mobile (dashboard showed "No data available")
+
+Checked after the Speed Insights dashboard's Mobile tab showed "No data available. Make sure you are using the latest @vercel/speed-insights package." Setup verified correct end to end; no change was needed:
+
+- `@vercel/speed-insights` **2.0.0** installed (pnpm-lock resolves 2.0.0), which is the latest on npm today. Imported from the `/next` entry and mounted exactly once inside `<body>` in `apps/web/app/layout.tsx` — both enforced by `apps/web/test/speedInsights.test.ts`.
+- Commit `9fd4824` (2026-08-29) is on `main`; the current READY production deployment (`dpl_EyCCWyGkzxHBp7MKRZaiyT3DH8dB`, built from `98e9524`) includes it.
+- Production serves the tracker: the client chunk on `league.jake-moses.com` contains the v2 tracker (references `/_vercel/speed-insights/script.js` + `speed-insights/vitals` beacon), and `GET /_vercel/speed-insights/script.js` returns 200. The component injects its script client-side, so its absence from the SSR HTML is expected.
+- The dashboard's own Routes table already shows mobile data ("/" at RES 100); the empty 7-day chart is because the range (Aug 24–30) mostly predates the Aug 29 deploy. Data accrues as mobile visitors arrive — device type is set by the visitor's browser, not by configuration, so nothing mobile-specific exists to enable.
