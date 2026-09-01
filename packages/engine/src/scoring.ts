@@ -112,7 +112,7 @@ export interface FinalizeResult {
 const WEEK_COMPLETE_GAME_MS = 4.5 * 3600_000;
 
 export type WeekCompletion =
-  | { complete: true }
+  | { complete: true; lastGameEndsAt?: Date }
   | { complete: false; reason: "games_pending"; lastGameEndsAt: Date }
   | { complete: false; reason: "no_games_recorded" };
 
@@ -146,7 +146,7 @@ export async function weekGamesComplete(db: EngineDb, clock: Clock, week: number
   if (clock.now().getTime() < lastEnd.getTime()) {
     return { complete: false, reason: "games_pending", lastGameEndsAt: lastEnd };
   }
-  return { complete: true };
+  return { complete: true, lastGameEndsAt: lastEnd };
 }
 
 export async function finalizeWeekCore(

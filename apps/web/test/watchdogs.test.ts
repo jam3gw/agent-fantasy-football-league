@@ -114,6 +114,42 @@ describe("the season-stall watchdog (§13.4)", () => {
     expect(retries).toHaveLength(0);
   });
 
+  it("ignores a deferred job once the week completes — the next Tuesday's run owns it", async () => {
+    // The deferred job goes "overdue" the instant the week's games end; the
+    // watchdog must not re-book finalization then, hours before the fixed
+    // Tuesday 4:00 AM ET run that is already scheduled.
+    await bookFinalize(10, "done"); // due 08:00Z, deferred at the time
+    await db.insert(teams).values([
+      { slug: "da", name: "DA", modelId: "m/a", modelLabel: "A", provider: "t", tiebreakRand: 0.3 },
+      { slug: "db", name: "DB", modelId: "m/b", modelLabel: "B", provider: "t", tiebreakRand: 0.4 },
+    ]);
+    const ids = (await db.select({ id: teams.id }).from(teams)).map((t) => t.id);
+    await db.insert(matchups).values({ week: 10, homeTeamId: ids[0]!, awayTeamId: ids[1]! });
+    await db.insert(nflGames).values({
+      gameId: "w10-done-after-due",
+      season: 2026,
+      week: 10,
+      kickoffAt: new Date("2026-09-15T09:00:00Z"), // ends 13:30Z — after the job's 08:00Z due, before the 16:00Z clock
+      home: "SEA",
+      away: "SF",
+      status: "final",
+    });
+
+    expect(await checkFinalizationStall(db, clock)).toBe(false);
+
+    // But a job due AFTER the games ended that still has not advanced the
+    // week is the real stall, and it still fires.
+    await db.insert(scheduledJobs).values({
+      type: "stats.finalize",
+      dueAt: new Date("2026-09-15T13:45:00Z"), // past the 13:30Z game end, 2h15 before the clock… not yet 3h overdue
+      payload: { week: 10 },
+      status: "done",
+      idempotencyKey: "job:stats.finalize:10:after-games",
+    });
+    clock.set(new Date("2026-09-15T17:00:00Z")); // now 3h15 overdue
+    expect(await checkFinalizationStall(db, clock)).toBe(true);
+  });
+
   it("holds its fire inside the three-hour grace period", async () => {
     await bookFinalize(10);
     clock.set(new Date("2026-09-15T10:00:00Z")); // two hours after the 4:00 AM run
