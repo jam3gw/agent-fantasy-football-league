@@ -114,6 +114,21 @@ describe("the season-stall watchdog (§13.4)", () => {
     expect(retries).toHaveLength(0);
   });
 
+  it("still stalls on a week with matchups but no schedule — that fault must not hide", async () => {
+    // games_pending is a healthy deferral; a missing schedule is not. The
+    // finalize deferral raises the health error, and the watchdog keeps
+    // escalating so the season cannot quietly sit behind a dead feed.
+    await bookFinalize(10);
+    await db.insert(teams).values([
+      { slug: "na", name: "NA", modelId: "m/a", modelLabel: "A", provider: "t", tiebreakRand: 0.5 },
+      { slug: "nb", name: "NB", modelId: "m/b", modelLabel: "B", provider: "t", tiebreakRand: 0.6 },
+    ]);
+    const nids = (await db.select({ id: teams.id }).from(teams)).map((t) => t.id);
+    await db.insert(matchups).values({ week: 10, homeTeamId: nids[0]!, awayTeamId: nids[1]! });
+    // No nfl_games rows for week 10 at all.
+    expect(await checkFinalizationStall(db, clock)).toBe(true);
+  });
+
   it("ignores a deferred job once the week completes — the next Tuesday's run owns it", async () => {
     // The deferred job goes "overdue" the instant the week's games end; the
     // watchdog must not re-book finalization then, hours before the fixed

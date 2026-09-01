@@ -57,25 +57,20 @@ export async function finalizeWeek(db: EngineDb, clock: Clock, week: number): Pr
   // deferred week is retried on the first Tuesday after its games.
   const completion = await weekGamesComplete(db, clock, week);
   if (!completion.complete) {
+    // A pending week is a healthy deferral: stamp success and clear any old
+    // error. A missing schedule is a fault: raise the error WITHOUT stamping
+    // success, so monitoring keyed on success staleness still sees it.
     const fault = completion.reason === "no_games_recorded";
+    const stamp = fault
+      ? {
+          lastError: `week ${week} cannot finalize: no NFL games recorded — is the schedule ingested?`,
+          lastErrorAt: clock.now(),
+        }
+      : { lastSuccessAt: clock.now(), lastError: null, lastErrorAt: null };
     await db
       .insert(health)
-      .values({
-        key: "stats.finalize",
-        lastSuccessAt: clock.now(),
-        ...(fault
-          ? { lastError: `week ${week} cannot finalize: no NFL games recorded — is the schedule ingested?`, lastErrorAt: clock.now() }
-          : {}),
-      })
-      .onConflictDoUpdate({
-        target: health.key,
-        set: {
-          lastSuccessAt: clock.now(),
-          ...(fault
-            ? { lastError: `week ${week} cannot finalize: no NFL games recorded — is the schedule ingested?`, lastErrorAt: clock.now() }
-            : {}),
-        },
-      });
+      .values({ key: "stats.finalize", ...stamp })
+      .onConflictDoUpdate({ target: health.key, set: stamp });
     return {
       week,
       source: "none",
@@ -135,17 +130,21 @@ export async function finalizeWeek(db: EngineDb, clock: Clock, week: number): Pr
   const weekSources = { ...((extra.weekScoringSources as Record<string, string>) ?? {}), [String(week)]: source };
   await updateSettings(db, { extra: { ...extra, weekScoringSources: weekSources } });
 
+  // One shape for insert and conflict alike: a clean finalization clears any
+  // standing error (it used to linger on /admin/health for good), and the
+  // no-source flag survives the upsert (the conflict path used to drop it).
+  const finalizeStamp =
+    source === "none"
+      ? {
+          lastSuccessAt: clock.now(),
+          lastError: `week ${week} finalized with no stats source`,
+          lastErrorAt: clock.now(),
+        }
+      : { lastSuccessAt: clock.now(), lastError: null, lastErrorAt: null };
   await db
     .insert(health)
-    .values({
-      key: "stats.finalize",
-      lastSuccessAt: clock.now(),
-      ...(source === "none" ? { lastError: `week ${week} finalized with no stats source`, lastErrorAt: clock.now() } : {}),
-    })
-    .onConflictDoUpdate({
-      target: health.key,
-      set: { lastSuccessAt: clock.now() },
-    });
+    .values({ key: "stats.finalize", ...finalizeStamp })
+    .onConflictDoUpdate({ target: health.key, set: finalizeStamp });
 
   // §13.3 step: audit the week against nflverse. It never changes a score —
   // the week is already final — it only records where the two disagree.

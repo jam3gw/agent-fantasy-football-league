@@ -129,7 +129,11 @@ export type WeekCompletion =
  * - Matchups but no `nfl_games` rows → NOT complete: the schedule feed is
  *   missing, and finalizing blind would repeat the incident.
  * - Otherwise → complete once every game's kickoff is `WEEK_COMPLETE_GAME_MS`
- *   in the past.
+ *   in the past. Known limit: this trusts whatever rows the schedule ingest
+ *   captured — a week where only its early games made it into `nfl_games`
+ *   reads complete once those end. The daily `ingest.schedule` keeps the
+ *   table whole in practice; the guard is against unplayed weeks, not a
+ *   partially ingested one.
  */
 export async function weekGamesComplete(db: EngineDb, clock: Clock, week: number): Promise<WeekCompletion> {
   const settings = await getSettings(db);
