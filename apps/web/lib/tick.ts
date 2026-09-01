@@ -441,6 +441,15 @@ export async function checkFinalizationStall(database: EngineDb, clock: Clock): 
   // genuine stall to raise.
   const completion = await weekGamesComplete(database, clock, bookedWeek);
   if (!completion.complete && completion.reason === "games_pending") return false;
+  // A job that came due before the week's games ended was correctly deferred,
+  // not stalled — the operative finalization is the one booked for the first
+  // Tuesday after the games, and it is not late yet. Without this, the
+  // deferred job goes "overdue" the moment the week completes, and the
+  // watchdog would re-book — and run — finalization hours before the fixed
+  // Tuesday 4:00 AM ET, cutting off the overnight stat corrections.
+  if (completion.complete && completion.lastGameEndsAt && job.dueAt.getTime() < completion.lastGameEndsAt.getTime()) {
+    return false;
+  }
 
   const hoursLate = Math.floor((now.getTime() - job.dueAt.getTime()) / 3600_000);
   const message =
