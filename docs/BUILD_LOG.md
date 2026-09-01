@@ -2,6 +2,57 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-01 — INCIDENT: week 1 finalized 0–0 nine days before kickoff; guard added, data repaired
+
+Caught by the 08:15 UTC monitoring sweep: `stats.finalize` at Tuesday 4:00 AM
+ET (the first Tuesday of the regular phase) finalized week 1 as six 0.00–0.00
+matchups and advanced `current_week` to 2 — week 1's games start September 10.
+The ladder found no stats anywhere (Sleeper empty for the unplayed week;
+nflverse `player_stats_2026.csv` does not exist yet, HTTP 404), flagged
+"finalized with no stats source", and finalized anyway. Left alone, every
+Tuesday would finalize another empty week and the fantasy calendar would
+desync from the NFL season entirely.
+
+**Root cause.** `bookRecurringJobs` books `stats.finalize` for every next
+Tuesday by the calendar, and nothing anywhere checked that the week's games
+had been played. §7.4's "for a week with no matchups finalization is a no-op
+that still advances" covers only matchup-less weeks; week 1 has matchups, so
+the full finalization ran. (§7.4 also says the job runs "from the Tuesday
+before Week 1 (September 8)" — the Sept 1 booking predates even that, but a
+date-based booking gate would not have survived the Sept 8 run anyway; the
+real invariant is games-complete.)
+
+**Fix.** New engine `weekGamesComplete` (scoring.ts): a week may finalize
+when it has no matchups (the spec'd no-op), or when every `nfl_games` kickoff
+for it is 4.5 hours past (elapsed time, the same backstop as §13.2 — never
+`status`, which only advances while the tick polls). Matchups with *no*
+games rows is a missing schedule: defer and raise `stats.finalize` health
+error rather than finalize blind. `finalizeWeek` returns `deferred` and
+touches nothing; the workflow skips the next-week plan; §13.4's "never
+skipped, never waits for a person" now reads as intended — finalization
+waits for games, only for games. `checkFinalizationStall` treats an
+unplayed week as deferred, not stalled — without that, the watchdog would
+have re-booked finalization every half hour after the repair below and
+re-corrupted the data. Regression tests for all three (fail on the old
+code); full suite 708 green.
+
+**Production data repair, with backups per the standing rules** (tables
+`repair_20260901_*` on the production branch): reverted the six week-1
+matchups to unplayed (`final=false`, points and winner null), deleted the
+twelve premature `team_week_results` week-1 rows, deleted the week-2
+`lineup_entries` the premature carry-over wrote (they would have made the
+real September carry-over skip every team, freezing week-2 lineups at
+September 1st's state), set `current_week` back to 1, and removed
+`weekScoringSources["1"]`. The week-2 lineup-check sessions the premature
+plan booked are left in place: their idempotency keys match what the real
+week-2 plan will book, and their due times are correct for week 2's games
+either way. Cleared the `stats.finalize` health error after the repair.
+
+**Sequencing note**: the guard was merged and deployed *before* the data
+repair, because reverting `current_week` under the old code would have armed
+the stall watchdog (3 hours after the 08:00 UTC due time) to re-book — and
+re-run — the same premature finalization every half hour.
+
 ## 2026-08-31 — Two bugs the draft data exposed: a prompt that promised tools the session had not bound, and a reason cap nobody could learn
 
 Both found by mining the completed draft (168 picks, 280 sessions, 4,530 session

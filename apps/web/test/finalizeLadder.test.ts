@@ -19,6 +19,7 @@ import {
   initLeagueSettings,
   lineupEntries,
   matchups,
+  nflGames,
   players,
   playerWeekStats,
   rosterEntries,
@@ -78,6 +79,17 @@ async function seedWeek(): Promise<{ teamIds: number[]; playerIds: string[] }> {
     week: 1,
     homeTeamId: teamIds[0]!,
     awayTeamId: teamIds[1]!,
+  });
+  // Week 1's games are over: the clock is Tuesday Sept 15, the last kickoff
+  // was Sunday. Finalization only runs for a played week.
+  await db.insert(nflGames).values({
+    gameId: "w1-sea-sf",
+    season: SEASON,
+    week: 1,
+    kickoffAt: new Date("2026-09-13T20:25:00Z"),
+    home: "SEA",
+    away: "SF",
+    status: "final",
   });
   return { teamIds, playerIds };
 }
@@ -169,6 +181,58 @@ describe("§13.4 — the week scores itself when Sleeper is down", () => {
 
     const rows = await db.select().from(health).where(eq(health.key, "stats.finalize"));
     expect(rows[0]!.lastError).toContain("no stats source");
+  });
+});
+
+describe("§7.4 — finalization waits for games, only for games", () => {
+  it("defers a week whose games have not been played, touching nothing", async () => {
+    // The 2026-09-01 incident: the first Tuesday of the regular phase fell
+    // nine days before kickoff, and the calendar-booked finalization scored
+    // week 1 as six 0.00–0.00 matchups and advanced `current_week`.
+    await seedWeek();
+    await db
+      .update(nflGames)
+      .set({ kickoffAt: new Date("2026-09-20T17:00:00Z"), status: "scheduled" })
+      .where(eq(nflGames.gameId, "w1-sea-sf"));
+    stubNetwork({ sleeperPoints: 12.5 }); // even a live stats feed must not tempt it
+
+    const result = await finalizeWeek(db, clock, 1);
+
+    expect(result.deferred).toBe(true);
+    expect(result.matchupsFinalized).toBe(0);
+    const [matchup] = await db.select().from(matchups);
+    expect(matchup!.final).toBe(false);
+    expect(matchup!.homePoints).toBeNull();
+    expect((await getSettings(db)).currentWeek).toBe(1);
+    expect(await weekScoringSource(db, 1)).toBeNull();
+    // The deferral is healthy, not an error.
+    const rows = await db.select().from(health).where(eq(health.key, "stats.finalize"));
+    expect(rows[0]!.lastError).toBeNull();
+  });
+
+  it("defers and raises the fault when the week has matchups but no schedule", async () => {
+    // No nfl_games rows for a week that has matchups means the schedule feed
+    // is missing — finalizing blind is how an unplayed week gets scored 0–0.
+    await seedWeek();
+    await db.delete(nflGames).where(eq(nflGames.gameId, "w1-sea-sf"));
+    stubNetwork({ sleeperPoints: 12.5 });
+
+    const result = await finalizeWeek(db, clock, 1);
+
+    expect(result.deferred).toBe(true);
+    expect((await getSettings(db)).currentWeek).toBe(1);
+    const rows = await db.select().from(health).where(eq(health.key, "stats.finalize"));
+    expect(rows[0]!.lastError).toContain("no NFL games recorded");
+  });
+
+  it("still no-op advances a week with no matchups at all", async () => {
+    // §7.4: before start_week there is nothing to score, and finalization is
+    // a no-op that still advances the week.
+    stubNetwork({});
+    const result = await finalizeWeek(db, clock, 1);
+    expect(result.deferred).toBeUndefined();
+    expect(result.matchupsFinalized).toBe(0);
+    expect((await getSettings(db)).currentWeek).toBe(2);
   });
 });
 
