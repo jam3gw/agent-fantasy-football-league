@@ -9,6 +9,7 @@ import type { EngineDb } from "./db/index.ts";
 import {
   lineupEntries,
   matchups,
+  nflGames,
   playerWeekStats,
   rosterEntries,
   teamWeekResults,
@@ -103,6 +104,51 @@ export interface FinalizeResult {
  * before start_week) is a no-op that still advances the week (§4.3).
  * Stats for the week must already be in `player_week_stats` (M6 fetches them).
  */
+/**
+ * A game is over, by elapsed time alone, this long after kickoff — the same
+ * backstop §13.2's live poll uses. Time, not `status`, because status is only
+ * advanced while the tick is polling and must not gate finalization.
+ */
+const WEEK_COMPLETE_GAME_MS = 4.5 * 3600_000;
+
+export type WeekCompletion =
+  | { complete: true }
+  | { complete: false; reason: "games_pending"; lastGameEndsAt: Date }
+  | { complete: false; reason: "no_games_recorded" };
+
+/**
+ * Whether week `week`'s NFL games have all been played, i.e. whether the week
+ * may finalize (§7.4). The 2026-09-01 incident: `stats.finalize` is booked
+ * for every Tuesday 4:00 AM ET by the calendar, and the first Tuesday of the
+ * "regular" phase fell nine days before week 1's first kickoff — the ladder
+ * found no stats anywhere and finalized six 0.00–0.00 matchups, advancing
+ * `current_week` past a week nobody had played. §7.4's "no-op that still
+ * advances" is only for a week with no matchups at all.
+ *
+ * - No matchups for the week → complete (finalization is the spec'd no-op).
+ * - Matchups but no `nfl_games` rows → NOT complete: the schedule feed is
+ *   missing, and finalizing blind would repeat the incident.
+ * - Otherwise → complete once every game's kickoff is `WEEK_COMPLETE_GAME_MS`
+ *   in the past.
+ */
+export async function weekGamesComplete(db: EngineDb, clock: Clock, week: number): Promise<WeekCompletion> {
+  const settings = await getSettings(db);
+  const hasMatchups = await db.select({ id: matchups.id }).from(matchups).where(eq(matchups.week, week)).limit(1);
+  if (hasMatchups.length === 0) return { complete: true };
+
+  const games = await db
+    .select({ kickoffAt: nflGames.kickoffAt })
+    .from(nflGames)
+    .where(and(eq(nflGames.season, settings.season), eq(nflGames.week, week)));
+  if (games.length === 0) return { complete: false, reason: "no_games_recorded" };
+
+  const lastEnd = new Date(Math.max(...games.map((g) => g.kickoffAt.getTime())) + WEEK_COMPLETE_GAME_MS);
+  if (clock.now().getTime() < lastEnd.getTime()) {
+    return { complete: false, reason: "games_pending", lastGameEndsAt: lastEnd };
+  }
+  return { complete: true };
+}
+
 export async function finalizeWeekCore(
   db: EngineDb,
   clock: Clock,

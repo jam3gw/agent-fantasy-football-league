@@ -14,6 +14,7 @@ import {
   health,
   playerWeekStats,
   updateSettings,
+  weekGamesComplete,
 } from "@league/engine";
 import { fetchWeekStats, upsertWeekStats } from "@league/data";
 import type { SleeperStatsEntry } from "@league/data";
@@ -30,6 +31,12 @@ export interface FinalizeResult {
   /** §5.6: players compared against nflverse, and how many differed by > 0.5. */
   audited: number;
   auditDiscrepancies: number;
+  /**
+   * True when the week's games have not been played yet, so nothing was
+   * finalized and `current_week` did not move. The workflow skips the
+   * next-week plan on a deferred result.
+   */
+  deferred?: boolean;
 }
 
 /**
@@ -40,6 +47,48 @@ export interface FinalizeResult {
 export async function finalizeWeek(db: EngineDb, clock: Clock, week: number): Promise<FinalizeResult> {
   const settings = await getSettings(db);
   const season = settings.season;
+
+  // A week whose games have not been played does not finalize — the calendar
+  // booked this run, not the season. §13.4's "never skipped, never waits for
+  // a person" is about stats sources being down after the games happened;
+  // finalization waits for games, only for games. (2026-09-01: the first
+  // Tuesday of the regular phase fell nine days before kickoff and week 1
+  // finalized as six 0–0s.) The booking chain re-books every Tuesday, so a
+  // deferred week is retried on the first Tuesday after its games.
+  const completion = await weekGamesComplete(db, clock, week);
+  if (!completion.complete) {
+    const fault = completion.reason === "no_games_recorded";
+    await db
+      .insert(health)
+      .values({
+        key: "stats.finalize",
+        lastSuccessAt: clock.now(),
+        ...(fault
+          ? { lastError: `week ${week} cannot finalize: no NFL games recorded — is the schedule ingested?`, lastErrorAt: clock.now() }
+          : {}),
+      })
+      .onConflictDoUpdate({
+        target: health.key,
+        set: {
+          lastSuccessAt: clock.now(),
+          ...(fault
+            ? { lastError: `week ${week} cannot finalize: no NFL games recorded — is the schedule ingested?`, lastErrorAt: clock.now() }
+            : {}),
+        },
+      });
+    return {
+      week,
+      source: "none",
+      playersScored: 0,
+      matchupsFinalized: 0,
+      currentWeek: settings.currentWeek,
+      degraded: false,
+      audited: 0,
+      auditDiscrepancies: 0,
+      deferred: true,
+    };
+  }
+
   let source: ScoringSource | "none" = "none";
   let playersScored = 0;
 

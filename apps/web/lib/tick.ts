@@ -27,6 +27,7 @@ import {
   sessions,
   teams,
   tstz,
+  weekGamesComplete,
 } from "@league/engine";
 import { db, leagueClock } from "./db";
 import { detectModelOutages, requeueFailedSessions, teamsForModels } from "./retry";
@@ -431,6 +432,15 @@ export async function checkFinalizationStall(database: EngineDb, clock: Clock): 
   const bookedWeek = Number((job.payload as { week?: unknown }).week ?? 0);
   // The week advanced past the one this finalization was for: all is well.
   if (!bookedWeek || settings.currentWeek > bookedWeek) return false;
+
+  // A week whose games have not been played yet is deferred, not stalled:
+  // finalization is refusing to run early, exactly as it should, and
+  // re-booking it here would only produce more deferrals (or, before the
+  // guard existed, re-finalize an unplayed week every half hour). The
+  // no-games-recorded case stays: that is a missing schedule, which is a
+  // genuine stall to raise.
+  const completion = await weekGamesComplete(database, clock, bookedWeek);
+  if (!completion.complete && completion.reason === "games_pending") return false;
 
   const hoursLate = Math.floor((now.getTime() - job.dueAt.getTime()) / 3600_000);
   const message =
