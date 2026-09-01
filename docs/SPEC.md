@@ -1153,7 +1153,7 @@ Scoring sources, in order. The engine moves down the list on its own and records
 Rules:
 
 - Live: if the Sleeper feed fails for 10 minutes during games, the site shows "Live scores delayed" and keeps the last data; retry with backoff. There is no live fallback; live scoring simply pauses.
-- Final: at Tuesday 4:00 AM ET, if the Sleeper fetch fails after retries (or returns no rows for the week), finalization uses source 2; if that fails, source 3. Finalization is never skipped and never waits for a person — it waits only for the week's games to have been played (Section 4.3): a run before then defers and retries the next Tuesday, automatically. The health page and the matchup page show which source scored the week.
+- Final: at Tuesday 4:00 AM ET, if the Sleeper fetch fails after retries (or returns no rows for the week), finalization uses source 2 (the ladder has been two-deep since the FantasyPros removal, 2026-08-29). Finalization is never skipped and never waits for a person — it waits only for the week's games to have been played (Section 4.3): a run before then defers and retries the next Tuesday, automatically. The health page and the matchup page show which source scored the week.
 - The commissioner can re-run finalization from a chosen source on `/admin/scores` if a feed recovers later the same day, before Tuesday 9:00 AM (the first agent sessions). After that the week stays as scored.
 - Document all of this in `docs/RUNBOOK.md`.
 

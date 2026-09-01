@@ -94,7 +94,9 @@ the watchdog knows a deferral is not a stall. A week with matchups but no
 `/admin/health` — that is the schedule feed missing, not a played week with
 dead stats sources, and it must not be scored blind. (Both guards exist
 because 2026-09-01, the first Tuesday of the regular phase, finalized the
-unplayed week 1 as six 0–0s.) Everything downstream depends on that: the next week's plan, the lineup carry-over, and Tuesday 9:00's `sessions.book` — whose idempotency keys include the week, so if the week does not advance it recomputes last week's keys and creates *nothing*. The league would keep looking alive while every team fielded a stale lineup and the standings stopped moving.
+unplayed week 1 as six 0–0s.)
+
+Everything downstream depends on the week advancing: the next week's plan, the lineup carry-over, and Tuesday 9:00's `sessions.book` — whose idempotency keys include the week, so if the week does not advance it recomputes last week's keys and creates *nothing*. The league would keep looking alive while every team fielded a stale lineup and the standings stopped moving.
 
 Three hours after a scheduled finalization, if `current_week` is still the week that finalization was for, the tick:
 
