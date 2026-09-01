@@ -9,7 +9,10 @@ import { db, leagueClock } from "../lib/db";
 export async function finalizeWeekWorkflow(week: number) {
   "use workflow";
   const result = await finalizeStep(week);
-  await planNextWeekStep(result.currentWeek);
+  // A deferred week (its games have not been played yet) did not advance
+  // `current_week`; planning the "next" week would plan the current one and
+  // carry lineups over a week that never happened.
+  if (!result.deferred) await planNextWeekStep(result.currentWeek);
   return result;
 }
 

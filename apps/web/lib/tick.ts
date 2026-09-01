@@ -7,7 +7,7 @@ import "server-only";
  *  4. injury changes (handled inside the players ingest)
  *  5. expire stale offers and resolve trades whose review window ended
  */
-import { and, asc, desc, eq, inArray, lte, not, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, not, or, sql } from "drizzle-orm";
 import { formatEt, parseDate } from "@league/shared";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
@@ -27,6 +27,7 @@ import {
   sessions,
   teams,
   tstz,
+  weekGamesComplete,
 } from "@league/engine";
 import { db, leagueClock } from "./db";
 import { detectModelOutages, requeueFailedSessions, teamsForModels } from "./retry";
@@ -431,6 +432,41 @@ export async function checkFinalizationStall(database: EngineDb, clock: Clock): 
   const bookedWeek = Number((job.payload as { week?: unknown }).week ?? 0);
   // The week advanced past the one this finalization was for: all is well.
   if (!bookedWeek || settings.currentWeek > bookedWeek) return false;
+
+  // A week whose games have not been played yet is deferred, not stalled:
+  // finalization is refusing to run early, exactly as it should, and
+  // re-booking it here would only produce more deferrals (or, before the
+  // guard existed, re-finalize an unplayed week every half hour). The
+  // no-games-recorded case stays: that is a missing schedule, which is a
+  // genuine stall to raise.
+  const completion = await weekGamesComplete(database, clock, bookedWeek);
+  if (!completion.complete && completion.reason === "games_pending") return false;
+  // A job that came due before the week's games ended was correctly deferred,
+  // not stalled — the operative finalization is the one booked for the first
+  // Tuesday after the games, and it is not late yet. Without this, the
+  // deferred job goes "overdue" the moment the week completes, and the
+  // watchdog would re-book — and run — finalization hours before the fixed
+  // Tuesday 4:00 AM ET, cutting off the overnight stat corrections.
+  //
+  // But only while that operative booking actually exists: if the booking
+  // chain died during the week (`book_daily_jobs` failing every prime), no
+  // job due after the games will ever appear, and standing down here would
+  // silence the one emailed alarm on this path for good. With no future
+  // booking, fall through — the stall path's re-book IS the finalization.
+  if (completion.complete && completion.lastGameEndsAt && job.dueAt.getTime() < completion.lastGameEndsAt.getTime()) {
+    const upcoming = await database
+      .select({ id: scheduledJobs.id })
+      .from(scheduledJobs)
+      .where(
+        and(
+          eq(scheduledJobs.type, "stats.finalize"),
+          inArray(scheduledJobs.status, ["due", "claimed"]),
+          gte(scheduledJobs.dueAt, completion.lastGameEndsAt),
+        ),
+      )
+      .limit(1);
+    if (upcoming.length > 0) return false;
+  }
 
   const hoursLate = Math.floor((now.getTime() - job.dueAt.getTime()) / 3600_000);
   const message =

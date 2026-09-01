@@ -85,7 +85,18 @@ Jobs are idempotent by design; running one twice is safe.
 
 This is the failure that would end a season quietly, so it has its own watchdog.
 
-Finalization (Tuesday 4:00 AM ET) advances `current_week`. Everything downstream depends on that: the next week's plan, the lineup carry-over, and Tuesday 9:00's `sessions.book` — whose idempotency keys include the week, so if the week does not advance it recomputes last week's keys and creates *nothing*. The league would keep looking alive while every team fielded a stale lineup and the standings stopped moving.
+Finalization (Tuesday 4:00 AM ET) advances `current_week`. It runs **only for
+a week whose games have been played** — every kickoff at least 4.5 hours past.
+A Tuesday that falls before the week's games (the pre-season gap, a postponed
+Monday game) defers without touching anything and retries the next Tuesday;
+the watchdog knows a deferral is not a stall. A week with matchups but no
+`nfl_games` rows at all defers too and raises `stats.finalize` on
+`/admin/health` — that is the schedule feed missing, not a played week with
+dead stats sources, and it must not be scored blind. (Both guards exist
+because 2026-09-01, the first Tuesday of the regular phase, finalized the
+unplayed week 1 as six 0–0s.)
+
+Everything downstream depends on the week advancing: the next week's plan, the lineup carry-over, and Tuesday 9:00's `sessions.book` — whose idempotency keys include the week, so if the week does not advance it recomputes last week's keys and creates *nothing*. The league would keep looking alive while every team fielded a stale lineup and the standings stopped moving.
 
 Three hours after a scheduled finalization, if `current_week` is still the week that finalization was for, the tick:
 
