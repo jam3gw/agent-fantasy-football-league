@@ -149,8 +149,24 @@ describe("the season-stall watchdog (§13.4)", () => {
       away: "SF",
       status: "final",
     });
+    // The operative finalization: booked for the next Tuesday, not yet due.
+    await db.insert(scheduledJobs).values({
+      type: "stats.finalize",
+      dueAt: new Date("2026-09-22T08:00:00Z"),
+      payload: { week: 10 },
+      status: "due",
+      idempotencyKey: "job:stats.finalize:10:next-tuesday",
+    });
 
     expect(await checkFinalizationStall(db, clock)).toBe(false);
+
+    // With the booking chain dead — no due or claimed finalization after the
+    // games — standing down would silence the season's one emailed alarm for
+    // good, so the deferred job stalls after all and the re-book recovers.
+    await db.delete(scheduledJobs).where(eq(scheduledJobs.idempotencyKey, "job:stats.finalize:10:next-tuesday"));
+    expect(await checkFinalizationStall(db, clock)).toBe(true);
+    await db.delete(scheduledJobs).where(eq(scheduledJobs.status, "due")); // drop the re-book before the next scene
+    await db.update(health).set({ lastError: null, lastErrorAt: null }).where(eq(health.key, "stats.finalize"));
 
     // But a job due AFTER the games ended that still has not advanced the
     // week is the real stall, and it still fires.

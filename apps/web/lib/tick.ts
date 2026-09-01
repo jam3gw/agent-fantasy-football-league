@@ -7,7 +7,7 @@ import "server-only";
  *  4. injury changes (handled inside the players ingest)
  *  5. expire stale offers and resolve trades whose review window ended
  */
-import { and, asc, desc, eq, inArray, lte, not, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, not, or, sql } from "drizzle-orm";
 import { formatEt, parseDate } from "@league/shared";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "@league/engine";
@@ -447,8 +447,25 @@ export async function checkFinalizationStall(database: EngineDb, clock: Clock): 
   // deferred job goes "overdue" the moment the week completes, and the
   // watchdog would re-book — and run — finalization hours before the fixed
   // Tuesday 4:00 AM ET, cutting off the overnight stat corrections.
+  //
+  // But only while that operative booking actually exists: if the booking
+  // chain died during the week (`book_daily_jobs` failing every prime), no
+  // job due after the games will ever appear, and standing down here would
+  // silence the one emailed alarm on this path for good. With no future
+  // booking, fall through — the stall path's re-book IS the finalization.
   if (completion.complete && completion.lastGameEndsAt && job.dueAt.getTime() < completion.lastGameEndsAt.getTime()) {
-    return false;
+    const upcoming = await database
+      .select({ id: scheduledJobs.id })
+      .from(scheduledJobs)
+      .where(
+        and(
+          eq(scheduledJobs.type, "stats.finalize"),
+          inArray(scheduledJobs.status, ["due", "claimed"]),
+          gte(scheduledJobs.dueAt, completion.lastGameEndsAt),
+        ),
+      )
+      .limit(1);
+    if (upcoming.length > 0) return false;
   }
 
   const hoursLate = Math.floor((now.getTime() - job.dueAt.getTime()) / 3600_000);
