@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
-import { health, initLeagueSettings, scheduledJobs, updateSettings } from "@league/engine";
+import { health, initLeagueSettings, matchups, nflGames, scheduledJobs, teams, updateSettings } from "@league/engine";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
 import { checkFinalizationStall } from "../lib/tick";
 
@@ -85,6 +85,33 @@ describe("the season-stall watchdog (§13.4)", () => {
     clock.set(new Date(clock.now().getTime() + 31 * 60_000));
     await checkFinalizationStall(db, clock);
     expect((await db.select().from(scheduledJobs)).filter((j) => j.idempotencyKey.includes(":retry:"))).toHaveLength(2);
+  });
+
+  it("treats an unplayed week as deferred, not stalled", async () => {
+    // The 2026-09-01 incident's second act: after the premature finalization
+    // was reverted, the watchdog saw an overdue `stats.finalize` for the
+    // still-current week and would have re-booked it every half hour —
+    // re-finalizing an unplayed week each time, before the guard existed.
+    await bookFinalize(10, "done");
+    await db.insert(teams).values([
+      { slug: "wa", name: "WA", modelId: "m/a", modelLabel: "A", provider: "t", tiebreakRand: 0.1 },
+      { slug: "wb", name: "WB", modelId: "m/b", modelLabel: "B", provider: "t", tiebreakRand: 0.2 },
+    ]);
+    const ids = (await db.select({ id: teams.id }).from(teams)).map((t) => t.id);
+    await db.insert(matchups).values({ week: 10, homeTeamId: ids[0]!, awayTeamId: ids[1]! });
+    await db.insert(nflGames).values({
+      gameId: "w10-future",
+      season: 2026,
+      week: 10,
+      kickoffAt: new Date("2026-09-20T17:00:00Z"), // after the test clock
+      home: "SEA",
+      away: "SF",
+    });
+
+    expect(await checkFinalizationStall(db, clock)).toBe(false);
+    expect(await finalizeHealth()).toBeUndefined();
+    const retries = (await db.select().from(scheduledJobs)).filter((j) => j.idempotencyKey.includes(":retry:"));
+    expect(retries).toHaveLength(0);
   });
 
   it("holds its fire inside the three-hour grace period", async () => {
