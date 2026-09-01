@@ -53,6 +53,23 @@ repair, because reverting `current_week` under the old code would have armed
 the stall watchdog (3 hours after the 08:00 UTC due time) to re-book — and
 re-run — the same premature finalization every half hour.
 
+**Repair executed 09:12 UTC, after the deploy, before the 9:00 AM ET
+session bookings.** Also deleted: the twelve `carried_over` lineup
+`transactions` rows the premature carry-over recorded (reviewer finding —
+they would have shown a phantom Sept-1 carry-over and duplicated on Sept
+15). Verified before touching anything: all twelve teams were carried and
+zero pre-existing week-2 or week-3 lineup entries existed, so no agent
+decision was destroyed; the 4:30 AM waiver run processed zero claims (no
+ghost cleanup needed); zero sessions ran under the corrupted settings.
+Decisions recorded: the already-booked Sept-8 `stats.finalize` job keeps
+its stale `{week: 2}` payload (its idempotency key is due-time-only so it
+cannot be corrected in place; it produces one harmless week-2 deferral,
+traced safe under the new watchdog logic). Today's 9:00 AM ET
+`weekly_review` booking now runs with week-1 keys (`…:2026:1:1`), which
+means Sept 8's identical booking dedupes to nothing — one preseason
+review set instead of two, accepted. The Tuesday 11:30 digest will report
+an empty "week 1" today; noise, not damage.
+
 ## 2026-08-31 — Two bugs the draft data exposed: a prompt that promised tools the session had not bound, and a reason cap nobody could learn
 
 Both found by mining the completed draft (168 picks, 280 sessions, 4,530 session
