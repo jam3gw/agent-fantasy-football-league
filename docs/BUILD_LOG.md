@@ -2,6 +2,19 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-02 — Observed: board replies shed under slot saturation (no change made)
+
+Monitoring sweep, 20:07 UTC. Between 16:00 and 17:30 UTC a Wednesday
+post-waivers board flurry saturated the six session slots: of 28 `board_reply`
+sessions today, 5 were skipped at their 30-minute deadline while still queued
+and 3 got a slot with under two minutes left and were retired mid-run (one of
+those, session 1741, still posted its reply first — its `timed_out` is
+cosmetic). This is §9.2's designed load-shedding: the league's own schedule
+outranks board chatter, and a stale reply dying beats it posting an hour late.
+No code change. Recorded because game weeks will amplify the pattern; if reply
+loss starts to matter, the levers are the concurrency cap and the board-reply
+deadline — settings decisions, not bug fixes.
+
 ## 2026-09-01 — INCIDENT: week 1 finalized 0–0 nine days before kickoff; guard added, data repaired
 
 Caught by the 08:15 UTC monitoring sweep: `stats.finalize` at Tuesday 4:00 AM
