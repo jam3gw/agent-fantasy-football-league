@@ -600,10 +600,18 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
           const parsed = tool.schema.safeParse(call.args);
           if (!parsed.success) {
             invalidToolCalls++;
+            // A length-cap rejection names the remedy, not just the rule:
+            // the scratchpad's "use mode=replace" hint recovers in one retry
+            // while the bare zod text cost a board reply two (session 1922,
+            // whose second attempt trimmed to the wrong number). Same lesson
+            // as make_pick's reason cap on draft night.
+            const overLimit = parsed.error.issues.some((i) => i.message.startsWith("Too big"));
             out = toolFailure(
               "invalid_args",
               `${call.toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`,
-              "Read the tool schema and try again.",
+              overLimit
+                ? "Shorten the named field to the stated limit and call the tool again."
+                : "Read the tool schema and try again.",
             );
           } else {
             toolCalls++;

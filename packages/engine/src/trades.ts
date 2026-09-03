@@ -10,7 +10,7 @@ import type { SQL } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import type { EngineDb } from "./db/index.ts";
 import type { TradeStatus } from "./db/schema.ts";
-import { lineupEntries, rosterEntries, teams, trades, tradeVotes } from "./db/schema.ts";
+import { lineupEntries, rosterEntries, sessions, teams, trades, tradeVotes } from "./db/schema.ts";
 import type { EngineErrorCode, EngineFailure, EngineResult } from "./errors.ts";
 import { fail, ok } from "./errors.ts";
 import { handleEvent } from "./events.ts";
@@ -602,6 +602,7 @@ async function markFailed(
     .where(eq(trades.id, tradeId));
   // Freeze and reservation are computed from open trades, so 'failed' unfreezes
   // by itself (§7.5 "unfreeze players": nothing to store).
+  await retireQueuedVoteSessions(tx, clock, tradeId);
   await handleEvent(tx, clock, { type: "trade.failed", tradeId, reason });
   return { status: "failed", reason };
 }
@@ -610,7 +611,38 @@ async function markFailed(
 async function vetoTrade(tx: EngineDb, clock: Clock, tradeId: number): Promise<void> {
   const now = clock.now();
   await tx.update(trades).set({ status: "vetoed", resolvedAt: now, updatedAt: now }).where(eq(trades.id, tradeId));
+  await retireQueuedVoteSessions(tx, clock, tradeId);
   await handleEvent(tx, clock, { type: "trade.vetoed", tradeId });
+}
+
+/**
+ * Retire the still-queued `trade_vote` sessions for a trade that just left
+ * review. §3.5 executes a trade the moment allow votes reach the threshold —
+ * hours before the 24-hour `reviewEndsAt` the sessions were booked with as
+ * their deadline — and nothing else ever lowers that deadline, so the unrun
+ * sessions each burned a full session discovering there was nothing left to
+ * vote on (18 of them, ~$1.53, across three trades in one 48h stretch;
+ * found 2026-09-03). A session already `running` is left to finish: it may
+ * be mid-vote, and interrupting a live run is not this function's business.
+ *
+ * Retired rows carry `MOOT_VOTE_REASON` and no `ended_by`: they are not a
+ * loop guard and not a failure, and the digest keys on the reason to keep
+ * nine healthy no-ops per trade out of its failed-sessions table.
+ */
+export const MOOT_VOTE_REASON = "trade resolved before this vote was needed";
+
+async function retireQueuedVoteSessions(tx: EngineDb, clock: Clock, tradeId: number): Promise<void> {
+  const now = clock.now();
+  await tx
+    .update(sessions)
+    .set({ status: "skipped", endedBy: null, error: MOOT_VOTE_REASON, endedAt: now, updatedAt: now })
+    .where(
+      and(
+        eq(sessions.kind, "trade_vote"),
+        eq(sessions.status, "queued"),
+        sql`${sessions.context} ->> 'trade_id' = ${String(tradeId)}`,
+      ),
+    );
 }
 
 /**
@@ -684,6 +716,7 @@ async function executeTrade(
     },
   });
   await tx.update(trades).set({ status: "executed", resolvedAt: now, updatedAt: now }).where(eq(trades.id, trade.id));
+  await retireQueuedVoteSessions(tx, clock, trade.id);
   await handleEvent(tx, clock, { type: "trade.executed", tradeId: trade.id });
   return { status: "executed" };
 }
