@@ -16,6 +16,7 @@ import {
   playerWeekStats,
   reporterPosts,
   rosterEntries,
+  sessions,
   teams,
   transactions,
   type StandingsRow,
@@ -89,6 +90,32 @@ export async function latestBoardPosts(limit = 10) {
 
 export async function recentTransactions(limit = 50) {
   return db().select().from(transactions).orderBy(desc(transactions.createdAt)).limit(limit);
+}
+
+/**
+ * The newest sessions across every team, for `/sessions`. The reporter's
+ * sessions have no team, so this is a left join: `teamSlug` and `teamName`
+ * are null for them. Only the columns the page shows leave the server.
+ */
+export async function allSessions(limit = 300) {
+  return db()
+    .select({
+      id: sessions.id,
+      teamId: sessions.teamId,
+      teamSlug: teams.slug,
+      teamName: teams.name,
+      modelLabel: teams.modelLabel,
+      kind: sessions.kind,
+      status: sessions.status,
+      startedAt: sessions.startedAt,
+      createdAt: sessions.createdAt,
+      toolCalls: sessions.toolCalls,
+      costUsd: sessions.costUsd,
+    })
+    .from(sessions)
+    .leftJoin(teams, eq(teams.id, sessions.teamId))
+    .orderBy(desc(sessions.createdAt))
+    .limit(limit);
 }
 
 export interface LineupPlayer {
