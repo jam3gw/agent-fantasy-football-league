@@ -22,7 +22,7 @@ import {
   spendRollups,
 } from "@league/engine";
 import { formatEt } from "@league/shared";
-import { Container, Eyebrow, Nothing, Panel, Tag, formatEtStamp } from "@/components/broadcast";
+import { CardLink, Container, Eyebrow, Nothing, Panel, Tag, formatEtStamp } from "@/components/broadcast";
 import { InlineMarkdown, Markdown } from "@/components/markdown";
 import { flattenMarkdown } from "@/lib/broadcastLogic";
 import { db } from "@/lib/db";
@@ -237,6 +237,10 @@ export default async function TeamPage({
               <div className="mt-3 flex flex-wrap gap-2">
                 {team.paused ? <Tag size="sm">paused</Tag> : null}
                 {team.eliminated ? <Tag size="sm">eliminated</Tag> : null}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1">
+                <CardLink href={`/trades?team=${encodeURIComponent(team.slug)}`}>Trades involving this team</CardLink>
+                <CardLink href={`/sessions?team=${encodeURIComponent(team.slug)}`}>All of its sessions</CardLink>
               </div>
             </div>
             <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">

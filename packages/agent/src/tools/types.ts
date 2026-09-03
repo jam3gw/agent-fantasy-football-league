@@ -156,3 +156,17 @@ export function defineTool<S extends z.ZodType>(spec: {
     },
   };
 }
+
+/**
+ * Tool payloads are re-read by the model on every later step of a session, so
+ * a field that repeats another costs its tokens many times over (measured
+ * 2026-09-03: the average step carried 80–125k tokens of earlier results).
+ * A player's eligible slots are listed only when they add to the position.
+ */
+export function extraPositions(
+  position: string | null,
+  fantasyPositions: string[] | null | undefined,
+): { fantasy_positions?: string[] } {
+  const extra = (fantasyPositions ?? []).filter((fp) => fp !== position);
+  return extra.length > 0 ? { fantasy_positions: fantasyPositions ?? [] } : {};
+}
