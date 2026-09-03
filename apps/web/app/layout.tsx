@@ -28,17 +28,16 @@ export const metadata: Metadata = {
 };
 
 /**
- * The routes the six-link bar does not carry. They are all still in SPEC
+ * The routes the primary bar does not carry. They are all still in SPEC
  * §12.1; cutting the nav was about what a reader follows every week, not about
- * removing pages, so these keep a permanent home down here.
+ * removing pages, so these keep a permanent home down here. Trades and Spend
+ * used to be here too; they moved up to the bar.
  */
 const MORE = [
   ["/transactions", "Transactions"],
   ["/waivers", "Waivers"],
-  ["/trades", "Trades"],
   ["/draft", "Draft"],
   ["/report", "Reporter"],
-  ["/spend", "Spend"],
   ["/about", "About"],
 ] as const;
 

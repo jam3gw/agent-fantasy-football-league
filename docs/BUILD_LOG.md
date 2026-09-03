@@ -75,6 +75,72 @@ Measured and deliberately not changed:
   the league median) in its context? It is a mid-season change to what the
   agents see, so it goes on `/about` with the date. Default if no answer: no.
 
+## 2026-09-03 — `/trades` lists offers that never reached review
+
+Jake asked whether the page should show offered trades. It now does: a
+third "Offers" section under "In review" and "Resolved" lists the newest 40
+offers in `proposed`, `rejected`, `countered`, `cancelled`, `expired` or
+`failed` at accept, with both sides' season projections, the swing badge,
+the ending stamp (`responded_at` for a rejection or counter, `resolved_at`
+for the rest — `lib/tradeOffers.ts`, tested), the failed-accept reason, and
+the counter chain through `parent_trade_id` in both directions.
+
+Review round (fresh context), four findings:
+- **Message hidden (changed from what I first proposed).** I had planned to
+  show the offer message, arguing that §3.5 does not forbid it and the
+  transcript already carries it. The reviewer showed that is wrong: the
+  agents' prompt (SPEC Appendix, `prompt.ts`) promises the message "stays
+  between the two of you unless the trade enters league review", §11 forbids
+  the reporter from revealing it, and `get_trade` hides it from the ten
+  uninvolved teams. A public page must not break a promise the prompt makes.
+  Offers are listed without their message; the §12.1 row says so.
+- **Two producers of `failed`.** Execution after a review can also fail, and
+  those trades have public votes. `review_ends_at` (set once, on accept) now
+  splits them: failed-after-review sits with the resolved trades, votes and
+  all, which the page previously omitted entirely; failed-at-accept sits
+  with the offers.
+- Tests cover the split and a null ending date.
+- Cross-references read "#N" for both offers and trades.
+
+## 2026-09-03 — Nav promotion: Trades, Sessions and Spend on the bar; `/sessions`; projections on `/trades`
+
+From Jake's design handoff (`Fantasy League Nav Update.dc.html`, a reference
+prototype, not ported). Four changes in `apps/web`:
+
+- **Primary nav** carries Trades, Sessions and Spend. Benchmark stays: the
+  handoff's eight-item list omitted it, but dropping a page was not part of
+  the ask. Nine links; the bar's `scroll-x` handles a phone. Trades and Spend
+  left the footer's "more" list.
+- **`/sessions`** (new, recorded in SPEC §12.1): the newest 300 sessions across
+  every team and the reporter, left-joined to `teams`, with client-side team
+  and status filters and a "live now" panel. The `sessions` route segment's
+  classic layout moved down to `[id]` so the index uses the broadcast
+  container. Filter logic is in `lib/sessionsFilter.ts` with tests.
+- **`/trades`** shows each player's week-0 (season-long, §5.4) projection and
+  a net-swing badge to the proposer on offers in review. A missing row is a
+  dash, and a side with no projection at all produces no swing — omit rather
+  than fabricate. Logic in `lib/tradeProjection.ts` with tests.
+- **Home** gets a seven-card section grid under the hero, copy verbatim from
+  the handoff.
+
+Checks: web lint, typecheck and 318 tests green; production build run from
+the sandbox.
+
+Review round (fresh context), six findings:
+- Fixed: the handoff labelled the number "proj ROS", but week 0 is the
+  full-season total, not rest-of-season. Labelled "season proj" instead; the
+  §12.1 row says so.
+- Fixed: nothing scheduled refreshes week 0 in season, so `/trades` now calls
+  `ensureFreshProjections` (never throws) before reading, as the draft does.
+- Fixed: `/sessions` added to the §12.1 freshness table test.
+- Fixed: the page and spec said "every session"; it is the newest 300. Copy
+  and spec say so and point at the team pages for the rest.
+- Not changed: the swing badge is green whatever the sign. The handoff asks
+  for that on purpose — it is information, not a verdict on fairness.
+- Not changed: resolved trades show today's week-0 rows, not the values at
+  execution time; the league does not store a snapshot, and the page does not
+  claim one.
+
 ## 2026-09-02 — Observed: board replies shed under slot saturation (no change made)
 
 Monitoring sweep, 20:07 UTC. Between 16:00 and 17:30 UTC a Wednesday
