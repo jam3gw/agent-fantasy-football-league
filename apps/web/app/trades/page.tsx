@@ -26,7 +26,7 @@
  * ten voters. The week-0 rows refresh on demand (§5.4), so the page asks for
  * a fresh set before reading them.
  */
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm";
 import { leagueSettings, playerWeekProj, players, teams, tradeVotes, trades } from "@league/engine";
 import { ensureFreshProjections } from "@league/data";
 import { db, leagueClock } from "../../lib/db";
@@ -34,7 +34,7 @@ import { Badge, Card, Empty, PageTitle, TeamLabel } from "../../components/ui";
 import { InlineMarkdown } from "../../components/markdown";
 import { flattenMarkdown } from "../../lib/broadcastLogic";
 import { formatProjection, sumProjections, swingLabel } from "../../lib/tradeProjection";
-import { OFFER_STATUSES, enteredReview, offerEnding, offerExpiresAt, offerTone } from "../../lib/tradeOffers";
+import { OFFER_STATUSES, offerEnding, offerExpiresAt, offerTone } from "../../lib/tradeOffers";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 300s stale.
@@ -138,23 +138,21 @@ async function TradesPageInner() {
     .from(trades)
     .where(eq(trades.status, "accepted"))
     .orderBy(desc(trades.reviewEndsAt));
-  const resolved = (
-    await db()
-      .select()
-      .from(trades)
-      .where(inArray(trades.status, ["executed", "vetoed", "failed"]))
-      .orderBy(desc(trades.resolvedAt))
-      .limit(RESOLVED_LIMIT)
-  ).filter(enteredReview);
+  // `review_ends_at` is set once, on accept, so it is the marker for a trade
+  // that entered review — which is what splits the two producers of `failed`.
+  const resolved = await db()
+    .select()
+    .from(trades)
+    .where(and(inArray(trades.status, ["executed", "vetoed", "failed"]), isNotNull(trades.reviewEndsAt)))
+    .orderBy(desc(trades.resolvedAt))
+    .limit(RESOLVED_LIMIT);
 
-  const offers = (
-    await db()
-      .select()
-      .from(trades)
-      .where(inArray(trades.status, [...OFFER_STATUSES]))
-      .orderBy(desc(trades.proposedAt))
-      .limit(OFFERS_LIMIT)
-  ).filter((t) => !enteredReview(t));
+  const offers = await db()
+    .select()
+    .from(trades)
+    .where(and(inArray(trades.status, [...OFFER_STATUSES]), isNull(trades.reviewEndsAt)))
+    .orderBy(desc(trades.proposedAt))
+    .limit(OFFERS_LIMIT);
   // The counter each countered offer produced, which may be older than this
   // page's cut. One query by parent id rather than a self-join.
   const offerIds = offers.map((t) => t.id);
@@ -411,8 +409,8 @@ async function TradesPageInner() {
 
       <p className="mt-3 text-xs text-muted">
         An offer&apos;s message stays between the two teams unless the trade enters league review, where the
-        voters see it (§3.5, §11). An open offer expires after {settings?.tradeOfferExpiryHours ?? 48} hours
-        with no response.
+        voters see it (the agent prompt and §11). An open offer expires after{" "}
+        {settings?.tradeOfferExpiryHours ?? 48} hours with no response (§3.5).
       </p>
     </>
   );
