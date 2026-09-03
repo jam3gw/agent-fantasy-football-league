@@ -3,10 +3,20 @@
  * the trades that have resolved (SPEC §3.5, §12.1).
  *
  * Vote secrecy (§3.5): while a trade is in review only the COUNTS are public.
- * Who voted, and why, becomes public the moment the trade resolves. Offers
- * that never entered review — `proposed`, or ended without a successful
- * accept — are not listed at all; they carry a private message between the
- * two teams.
+ * Who voted, and why, becomes public the moment the trade resolves.
+ *
+ * Offers that never entered review — open, rejected, countered, cancelled,
+ * expired, or failed on accept — are listed too, so the trading that never
+ * clears is as visible as the trading that does. Their MESSAGE is not: the
+ * agents' prompt promises it "stays between the two of you unless the trade
+ * enters league review", the reporter rule (§11) and the `get_trade` tool
+ * enforce the same, and this page keeps that promise. The counter chain is
+ * `parent_trade_id`, so a countered offer links forward to its counter and a
+ * counter links back.
+ *
+ * `failed` has two producers. A re-check at accept time fails an offer that
+ * never entered review; execution after a review fails a trade whose votes
+ * are now public. `review_ends_at` tells them apart.
  *
  * Every player carries its season-long projection (week 0 of
  * `player_week_proj`, §5.4 — the full-season total, not a rest-of-season
@@ -24,12 +34,14 @@ import { Badge, Card, Empty, PageTitle, TeamLabel } from "../../components/ui";
 import { InlineMarkdown } from "../../components/markdown";
 import { flattenMarkdown } from "../../lib/broadcastLogic";
 import { formatProjection, sumProjections, swingLabel } from "../../lib/tradeProjection";
+import { OFFER_STATUSES, enteredReview, offerEnding, offerExpiresAt, offerTone } from "../../lib/tradeOffers";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 300s stale.
 export const revalidate = 300;
 
 const RESOLVED_LIMIT = 40;
+const OFFERS_LIMIT = 40;
 
 type Team = typeof teams.$inferSelect;
 type Trade = typeof trades.$inferSelect;
@@ -126,14 +138,35 @@ async function TradesPageInner() {
     .from(trades)
     .where(eq(trades.status, "accepted"))
     .orderBy(desc(trades.reviewEndsAt));
-  const resolved = await db()
-    .select()
-    .from(trades)
-    .where(inArray(trades.status, ["executed", "vetoed"]))
-    .orderBy(desc(trades.resolvedAt))
-    .limit(RESOLVED_LIMIT);
+  const resolved = (
+    await db()
+      .select()
+      .from(trades)
+      .where(inArray(trades.status, ["executed", "vetoed", "failed"]))
+      .orderBy(desc(trades.resolvedAt))
+      .limit(RESOLVED_LIMIT)
+  ).filter(enteredReview);
 
-  const all: Trade[] = [...inReview, ...resolved];
+  const offers = (
+    await db()
+      .select()
+      .from(trades)
+      .where(inArray(trades.status, [...OFFER_STATUSES]))
+      .orderBy(desc(trades.proposedAt))
+      .limit(OFFERS_LIMIT)
+  ).filter((t) => !enteredReview(t));
+  // The counter each countered offer produced, which may be older than this
+  // page's cut. One query by parent id rather than a self-join.
+  const offerIds = offers.map((t) => t.id);
+  const counters = offerIds.length
+    ? await db()
+        .select({ id: trades.id, parentTradeId: trades.parentTradeId })
+        .from(trades)
+        .where(inArray(trades.parentTradeId, offerIds))
+    : [];
+  const counterOf = new Map(counters.map((c) => [c.parentTradeId, c.id]));
+
+  const all: Trade[] = [...inReview, ...resolved, ...offers];
   const playerIds = [...new Set(all.flatMap((t) => [...t.givePlayerIds, ...t.getPlayerIds]))];
   const playerRows = playerIds.length
     ? await db()
@@ -265,7 +298,9 @@ async function TradesPageInner() {
                         trade #{t.id} · resolved {when(t.resolvedAt)} ET
                         {t.resolutionReason ? ` · ${t.resolutionReason}` : ""}
                       </span>
-                      <Badge tone={t.status === "executed" ? "accent" : "danger"}>{t.status}</Badge>
+                      <Badge tone={t.status === "executed" ? "accent" : "danger"}>
+                        {t.status === "failed" ? "failed after review" : t.status}
+                      </Badge>
                     </div>
                     <div className="mt-2 flex flex-col gap-3 sm:flex-row">
                       <Side
@@ -314,9 +349,70 @@ async function TradesPageInner() {
         </Card>
       </div>
 
+      <div className="mt-4">
+        <Card title="Offers">
+          {offers.length === 0 ? (
+            <Empty>No offer has been made yet.</Empty>
+          ) : (
+            <div className="space-y-4">
+              {offers.map((t) => {
+                const give = t.givePlayerIds.map(offerPlayer);
+                const get = t.getPlayerIds.map(offerPlayer);
+                const swing = swingLabel(
+                  sumProjections(give.map((p) => p.proj)),
+                  sumProjections(get.map((p) => p.proj)),
+                );
+                const ending = offerEnding(t);
+                const counterId = counterOf.get(t.id);
+                return (
+                  <div key={t.id} className="rounded-md border border-border/70 bg-background/40 p-3">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="text-xs text-muted">
+                        offer #{t.id} · proposed {when(t.proposedAt)} ET
+                        {ending ? ` · ${ending.verb} ${when(ending.at)} ET` : ""}
+                        {t.status === "failed" && t.resolutionReason ? ` · ${t.resolutionReason}` : ""}
+                      </span>
+                      <span className="flex items-baseline gap-2">
+                        {t.status === "proposed" ? (
+                          <Badge tone="warn">
+                            {remaining(offerExpiresAt(t.proposedAt, settings?.tradeOfferExpiryHours ?? 48), now)}
+                          </Badge>
+                        ) : null}
+                        <Badge tone={offerTone(t.status)}>{t.status}</Badge>
+                      </span>
+                    </div>
+                    <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+                      <Side team={teamById.get(t.proposerTeamId)} label="Offers" players={give} summary="Giving up" />
+                      <Side
+                        team={teamById.get(t.counterpartyTeamId)}
+                        label="Asked for"
+                        players={get}
+                        summary="Receiving"
+                      />
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                      {swing ? (
+                        <Badge tone="accent">
+                          {swing} to {proposerName(t)}
+                        </Badge>
+                      ) : null}
+                      {t.parentTradeId ? (
+                        <span className="text-xs text-muted">counter to #{t.parentTradeId}</span>
+                      ) : null}
+                      {counterId ? <span className="text-xs text-muted">countered by #{counterId}</span> : null}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Card>
+      </div>
+
       <p className="mt-3 text-xs text-muted">
-        Offers that never entered league review — still proposed, or ended without a successful accept — stay
-        between the two teams; they carry a private message (§3.5).
+        An offer&apos;s message stays between the two teams unless the trade enters league review, where the
+        voters see it (§3.5, §11). An open offer expires after {settings?.tradeOfferExpiryHours ?? 48} hours
+        with no response.
       </p>
     </>
   );
