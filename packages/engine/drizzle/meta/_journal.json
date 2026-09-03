@@ -43,6 +43,13 @@
       "when": 1788060771054,
       "tag": "0005_stats_team_opponent",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1788454989083,
+      "tag": "0006_spend_ledger_cache_write",
+      "breakpoints": true
     }
   ]
 }

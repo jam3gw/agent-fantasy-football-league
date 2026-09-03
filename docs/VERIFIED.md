@@ -2,6 +2,64 @@
 
 Each entry: date, the request made, what came back. Items marked **verify** in SPEC.md land here.
 
+## 2026-09-03 — Prompt caching as the ledger actually recorded it (§8.1, §8.7)
+
+Request: every `spend_ledger` row for the two Anthropic models on production
+(233 model steps across 63 sessions, 2026-08-30 to 2026-09-03), read per step.
+
+What came back. Within a session `cached_input_tokens` was the same number on
+every step after the first — the size of the system prompt plus the first user
+message — and never grew. Session 1104 (Fable, weekly_review): step 1 read
+14,459 input tokens with 0 cached; steps 2–8 read 21,595 → 29,342 input tokens
+with 14,457 cached on each. Session 1902 (Sonnet, trade_window, 15 steps) went
+from 21,444 to 84,054 input tokens with 21,442 cached throughout. So every tool
+result after the snapshot was billed at the full input rate on every later
+step. Across all Anthropic steps after the first, the cached share averaged 34%;
+Fable's input side cost $12.05 of its $20.01 total, of which $11.30 was uncached.
+
+Why: `withCaching` put `cache_control` only on the system prompt and the first
+user message, exactly as §8.1 v1.5 said. A breakpoint caches the prefix that
+ends at it; nothing after the snapshot ever had one.
+
+Simulated with the same rows, a breakpoint on the newest turn (the previous
+step's whole prompt read from cache at the cached rate, the new content
+written at 1.25× the input rate): Fable $7.36 instead of $12.05 on the input
+side, Sonnet $2.64 instead of $4.98 — 41% of the Anthropic input spend, 26% of
+Anthropic spend overall, about 10% of league spend to date. The 5-minute cache
+holds: the longest gap between two consecutive Anthropic steps was 156 seconds
+(average 16–21 s). Other providers' automatic caching sat at 29–43% on later
+steps and is not ours to set.
+
+Also confirmed from the same rows: the AI SDK folds cache-write tokens into
+`inputTokens` (step 1 of session 1104 reported 14,459 input with a 14,457
+prefix cached on step 2, so the write was in the count). The ledger had priced
+those at the plain input rate; `cache_write_tokens` is now recorded and priced
+at 1.25×.
+
+**Still to verify on production after the deploy:** an Anthropic session's
+`cached_input_tokens` must now rise step by step (step N ≈ step N−1's input).
+Check the first Anthropic `trade_window` or `board_reply` after this ships;
+record the session id and the per-step numbers here.
+
+## 2026-09-03 — Where the tokens go (§8.7)
+
+Request: `session_events` and `spend_ledger` on production, all sessions.
+
+- 3,153 tool results, 20.5M characters. Largest: `player_research` 2.94M,
+  `get_available_players` 2.65M (draft only), `get_team_roster` 2.31M,
+  `get_transactions` 1.48M (13.5k characters per call; a `lineup` row carried
+  the full lineup before and after next to its diff).
+- A `weekly_review` step averaged 125k input tokens (first step 11k, largest
+  562k); a `trade_window` step 82k. Session 1109 (Gemini, weekly_review) made
+  121 tool calls, 56 of them `get_transactions` paging the same list, and cost
+  $8.84 — 12% of all spend to date.
+- Identical repeated calls in one session: `get_transactions` 28,
+  `set_lineup` 23, `get_free_agents` 19.
+- Check-ins: 15 queued; 8 were booked for 11:00–11:30 AM ET Sunday, the same
+  moment as the `lineup_check` the week plan runs 90 minutes before the 1 PM
+  window. The snapshot did not list either; `list_check_ins` was called
+  before booking by 9 of the 12 agents.
+
 ## What provider-default reasoning actually returns, per model — measured 2026-08-29 (§8.1/§12.1)
 
 Queried the production `session_events` (assistant rows joined to `sessions`),

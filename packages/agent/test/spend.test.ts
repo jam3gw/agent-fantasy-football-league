@@ -9,6 +9,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
+import type { EngineDb } from "@league/engine";
 import {
   costAlarmRules,
   costAlarms,
@@ -331,10 +332,17 @@ describe("billing: the gateway pays unless the provider is BYOK (2026-08-29)", (
     }
   });
 
-  it("keeps Anthropic prompt caching on, and only on the stable prefix", async () => {
+  it("keeps Anthropic prompt caching on: the stable prefix and the newest turns", async () => {
     // §8.1 / CLAUDE.md: "Prompt caching on." It is the one provider option the
     // runner still sets, so removing BYOK must not have taken it with it — and
     // nothing else in the suite exercises `withCaching`.
+    //
+    // Measured 2026-09-03 (docs/VERIFIED.md): with breakpoints only on the
+    // first two messages, the cached share of a step never grew past the
+    // snapshot, so every tool result was re-sent at full price on every later
+    // step. A breakpoint on the newest turn caches the whole conversation for
+    // the next step; the one before it is kept so a hit is found even when a
+    // step adds many content blocks.
     let seen: Record<string, unknown> | null = null;
     const step = createModelStep({} as never, {
       stream: ((params: Record<string, unknown>) => {
@@ -350,7 +358,20 @@ describe("billing: the gateway pays unless the provider is BYOK (2026-08-29)", (
           { role: "system", content: "system" },
           { role: "user", content: "brief + snapshot" },
           { role: "assistant", content: "a later turn" },
-          { role: "user", content: "a later user turn" },
+          {
+            role: "tool",
+            content: [
+              { type: "tool-result", toolCallId: "1", toolName: "a", output: { type: "json", value: 1 } },
+              { type: "tool-result", toolCallId: "2", toolName: "b", output: { type: "json", value: 2 } },
+            ],
+          },
+          { role: "assistant", content: "another turn" },
+          {
+            role: "tool",
+            content: [{ type: "tool-result", toolCallId: "3", toolName: "c", output: { type: "json", value: 3 } }],
+          },
+          { role: "assistant", content: "the ceiling turn" },
+          { role: "user", content: "Tool-call ceiling reached." },
         ],
         tools: [],
       },
@@ -360,16 +381,72 @@ describe("billing: the gateway pays unless the provider is BYOK (2026-08-29)", (
     const sent = seen!.messages as Array<Record<string, unknown>>;
     const instructions = seen!.instructions as Array<Record<string, unknown>>;
     const breakpoint = { anthropic: { cacheControl: { type: "ephemeral" } } };
-    // The system prompt and the brief are the stable prefix worth caching. The
-    // system prompt now travels in `instructions`, and the breakpoint has to go
+    // The system prompt and the brief are the stable prefix. The system
+    // prompt now travels in `instructions`, and the breakpoint has to go
     // with it — passing its text alone would silently drop the caching.
     expect(instructions[0]!.providerOptions).toEqual(breakpoint);
     expect(sent[0]!.providerOptions).toEqual(breakpoint);
-    // Everything after it changes every step, so caching it would only cost.
+    // Assistant turns never carry one (Anthropic's maximum is four).
     expect(sent[1]!.providerOptions).toBeUndefined();
+    expect(sent[3]!.providerOptions).toBeUndefined();
+    expect(sent[5]!.providerOptions).toBeUndefined();
+    // The oldest tool turn is past the lookback: no breakpoint.
     expect(sent[2]!.providerOptions).toBeUndefined();
+    // The two newest user/tool turns carry it — on the message and, for a
+    // tool message, on its last part, since a provider may read either.
+    expect(sent[4]!.providerOptions).toEqual(breakpoint);
+    const parts = sent[4]!.content as Array<Record<string, unknown>>;
+    expect(parts[parts.length - 1]!.providerOptions).toEqual(breakpoint);
+    expect(sent[6]!.providerOptions).toEqual(breakpoint);
+    // Never more than four breakpoints in total.
+    const count =
+      instructions.filter((m) => m.providerOptions).length + sent.filter((m) => m.providerOptions).length;
+    expect(count).toBe(4);
     // Caching changes cost, never routing.
     expect(JSON.stringify(seen)).not.toContain("byok");
+  });
+
+  it("records cache writes from usage and prices them above the input rate (§8.7)", async () => {
+    // Anthropic reports the tokens it wrote to the cache; the SDK folds them
+    // into inputTokens and lists them under inputTokenDetails. A table-priced
+    // step (the BYOK providers) must bill them at the write rate, or the
+    // ledger under-reports exactly the steps caching makes cheaper.
+    let seen: Record<string, unknown> | null = null;
+    const step = createModelStep({} as never, {
+      stream: ((params: Record<string, unknown>) => {
+        seen = params;
+        return fakeStreamResult({
+          usage: {
+            inputTokens: 10_000,
+            outputTokens: 100,
+            inputTokenDetails: { cacheReadTokens: 6_000, cacheWriteTokens: 3_000 },
+          },
+        });
+      }) as never,
+    });
+    const result = await step(
+      { modelId: "anthropic/claude-sonnet-5", messages: [{ role: "user", content: "x" }], tools: [] },
+      0,
+    );
+    expect(seen).not.toBeNull();
+    expect(result.usage).toEqual({
+      inputTokens: 10_000,
+      outputTokens: 100,
+      reasoningTokens: 0,
+      cachedInputTokens: 6_000,
+      cacheWriteTokens: 3_000,
+    });
+
+    await db.insert(modelPrices).values({
+      modelId: "anthropic/claude-sonnet-5",
+      inputUsdPerM: 2,
+      outputUsdPerM: 10,
+      cachedInputUsdPerM: 0.2,
+      source: "test",
+    });
+    const cost = await computeStepCost(db as unknown as EngineDb, "anthropic/claude-sonnet-5", result.usage, null);
+    // 1,000 uncached at $2 + 6,000 read at $0.20 + 3,000 written at $2.50 + 100 out at $10.
+    expect(cost).toEqual({ costUsd: 0.0117, source: "price_table" });
   });
 
   it("sends the system prompt as instructions, never inside messages", async () => {

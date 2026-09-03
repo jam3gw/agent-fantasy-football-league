@@ -49,6 +49,7 @@ export default async function SpendPage() {
           output: sql<number>`coalesce(sum(${spendLedger.outputTokens}), 0)::bigint`,
           reasoning: sql<number>`coalesce(sum(${spendLedger.reasoningTokens}), 0)::bigint`,
           cached: sql<number>`coalesce(sum(${spendLedger.cachedInputTokens}), 0)::bigint`,
+          cacheWrites: sql<number>`coalesce(sum(${spendLedger.cacheWriteTokens}), 0)::bigint`,
         })
         .from(spendLedger)
         .groupBy(spendLedger.teamId)
@@ -129,6 +130,7 @@ export default async function SpendPage() {
       output: Number(agg?.output ?? 0),
       reasoning: Number(agg?.reasoning ?? 0),
       cached: Number(agg?.cached ?? 0),
+      cacheWrites: Number(agg?.cacheWrites ?? 0),
       alarms: alarms.filter((al) => al.scopeKey === a.key).length,
     };
   });
@@ -207,6 +209,7 @@ export default async function SpendPage() {
               "Out",
               "Reasoning",
               "Cached",
+              "Cache writes",
             ]}
           >
             {[...rows]
@@ -236,6 +239,7 @@ export default async function SpendPage() {
                   <Cell align="right">{r.output.toLocaleString()}</Cell>
                   <Cell align="right">{r.reasoning.toLocaleString()}</Cell>
                   <Cell align="right">{r.cached.toLocaleString()}</Cell>
+                  <Cell align="right">{r.cacheWrites.toLocaleString()}</Cell>
                 </Row>
               ))}
           </Table>

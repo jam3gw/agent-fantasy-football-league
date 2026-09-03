@@ -2,6 +2,79 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-03 — Cost: cache the whole conversation, carry each fact once, show the calendar
+
+Jake asked what would cut agent cost without touching the experiment. Spend to
+date is $73 ($37 draft day; a full regular-season week runs about $75–80 at the
+current rate, well under Appendix F's $150). The data is in `docs/VERIFIED.md`
+(two entries dated today). The short version: the cost is context size, not
+activity counts. Each step re-sends the whole conversation; a `weekly_review`
+step averages 125k input tokens against an 11k snapshot, and the Anthropic
+cache never covered anything past the snapshot.
+
+Three changes, all cost-only — no agent sees different information, and every
+agent sees the same thing:
+
+1. **Caching (`packages/agent/src/modelStep.ts`).** Anthropic breakpoints now
+   sit on the system prompt, the snapshot, and the two newest user/tool turns
+   (four is the provider's maximum; the second-newest is kept so a hit is found
+   even when a step adds more content blocks than the automatic lookback
+   covers). A tool message carries the breakpoint on the message and on its
+   last part. Simulated on the real ledger: −41% Anthropic input cost, −26%
+   Anthropic total, about −10% league-wide. The ledger gains
+   `cache_write_tokens` (migration 0006) and prices a write at 1.25× input for
+   table-priced steps, so the saving is reported honestly rather than
+   flattered; the gateway's own cost is unchanged. **Verify item open:** the
+   first Anthropic session after deploy must show `cached_input_tokens` rising
+   step by step. Recorded in VERIFIED.md as pending.
+2. **Payloads (`packages/agent/src/tools/read.ts`).** A `lineup` transaction
+   returns its `diff` only (the before/after maps repeated it), kickoffs drop
+   the UTC twin of `kickoff_et` on roster and player rows (the schedule tool
+   keeps both), `fantasy_positions` appears only when it adds a slot, and the
+   roster's team header loses `slug`, `model_id` and `paused: false`. Each is a
+   fact stated once instead of twice; nothing is removed that was not still in
+   the payload. Expected effect is modest — a few percent of context — and it
+   applies to every model equally. Spec §8.4 records the rule.
+3. **Calendar in the snapshot (`packages/agent/src/context.ts`).**
+   `scheduled_sessions` lists my pending check-ins and the league's sessions
+   for me: queued rows, plus the `lineup_check` the week plan will book 90
+   minutes before every window I have a player in, computed from the week's
+   games so it shows before the row exists. Eight of the fifteen queued
+   check-ins duplicated exactly that check. The four briefs that can book a
+   check-in (`weekly_review`, `post_waivers`, `lineup_check`,
+   `injury_response`) say where to look. `groupKickoffWindows` moved from
+   `apps/web/lib/weekPlan.ts` into the engine so both sides compute the same
+   windows; `weekPlan` re-exports it.
+
+Measured and deliberately not changed:
+
+- **Trade proposals per week.** Proposals, responses and votes cost $4.3 so far
+  (a response session is $0.14; an accepted trade's ten votes about $0.74).
+  Not where the money is.
+- **Board replies.** 50 sessions, $4.93, $0.09 each; already capped at three
+  per team per ET day and reply depth two. Not worth the experiment cost.
+- **Trade windows four → two.** Would save about $19 a week (a quarter of a
+  week) and halve trade activity. Jake's call, not a cost fix.
+- **Cost-aware prompts.** Jake asked. Not done here: it changes the experiment
+  mid-season (§8.10 explains why that makes the weeks non-comparable) and
+  turns cost-per-point into a measure of prompt compliance. If Jake wants it,
+  the least invasive form is information, not instruction: each agent's spend
+  to date and the league median in the snapshot. Same information for all,
+  and recorded on `/about`. Awaiting his decision; see "Questions for Jake".
+- **Repeated identical reads** (`get_transactions` 28 times, `set_lineup` 23,
+  `get_free_agents` 19 across all sessions) and the one Gemini session that
+  paged `get_transactions` 56 times for $8.84. A same-args short-circuit would
+  change what the model receives, so it stays a note. The ceiling did its job.
+- `session.ts` sizes the context-trim check as `inputTokens + cachedInputTokens`,
+  but the SDK's `inputTokens` already includes cached tokens, so the estimate
+  runs high and trims a little early. Harmless; noted for a later pass.
+
+### Questions for Jake
+
+- Cost-aware agents: do you want each agent to see its own spend to date (and
+  the league median) in its context? It is a mid-season change to what the
+  agents see, so it goes on `/about` with the date. Default if no answer: no.
+
 ## 2026-09-02 — Observed: board replies shed under slot saturation (no change made)
 
 Monitoring sweep, 20:07 UTC. Between 16:00 and 17:30 UTC a Wednesday

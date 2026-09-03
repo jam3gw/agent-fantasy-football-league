@@ -71,7 +71,7 @@ function declareTools(req: ModelStepRequest) {
 function usageOf(usage: {
   inputTokens?: number;
   outputTokens?: number;
-  inputTokenDetails?: { cacheReadTokens?: number };
+  inputTokenDetails?: { cacheReadTokens?: number; cacheWriteTokens?: number };
   outputTokenDetails?: { reasoningTokens?: number };
 }): UsageTokens {
   return {
@@ -79,6 +79,9 @@ function usageOf(usage: {
     outputTokens: usage.outputTokens ?? 0,
     reasoningTokens: usage.outputTokenDetails?.reasoningTokens ?? 0,
     cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens ?? 0,
+    // Anthropic bills a cache write above the input rate; the ledger needs
+    // the count to price a price-table step honestly (§8.7).
+    cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens ?? 0,
   };
 }
 
@@ -140,20 +143,44 @@ export function reasoningVisibilityOptions(
 }
 
 /**
- * Anthropic prompt caching (§8.1): mark the system prompt and the context
- * snapshot as cache breakpoints. Other providers cache prefixes on their own.
- * Caching changes cost only, never behavior.
+ * Anthropic prompt caching (§8.1): mark the system prompt, the context
+ * snapshot, and the newest turns as cache breakpoints. Other providers cache
+ * prefixes on their own. Caching changes cost only, never behavior.
+ *
+ * Why the newest turns too: a breakpoint caches everything *before* it, and
+ * Anthropic reads a hit from the longest previously cached prefix. With the
+ * breakpoints only on the first two messages, step N re-sent every tool
+ * result since the snapshot at full price — measured 2026-09-03 across 233
+ * Anthropic steps, the cached share of a step never rose above the snapshot
+ * (docs/VERIFIED.md). A breakpoint on the last message caches the whole
+ * conversation for the next step, whose new content is one assistant turn and
+ * its tool results. The previous breakpoint is kept too (four is the
+ * provider's maximum) so a hit is found even when a step adds more content
+ * blocks than the provider's automatic lookback covers.
  */
+const CACHE_BREAKPOINT = { anthropic: { cacheControl: { type: "ephemeral" } } } as const;
+
 function withCaching(messages: ModelMessage[], modelId: string): ModelMessage[] {
   if (!supportsExplicitCaching(modelId)) return messages;
+  // The two newest user/tool turns after the stable prefix.
+  const tail = new Set(
+    messages
+      .map((m, i) => ({ m, i }))
+      .filter(({ m, i }) => i > 1 && (m.role === "user" || m.role === "tool"))
+      .slice(-2)
+      .map(({ i }) => i),
+  );
   return messages.map((m, i) => {
-    // The system prompt and the first user message (brief + snapshot) are the
-    // stable prefix worth caching; later messages change every step.
-    if (i > 1 || (m.role !== "system" && m.role !== "user")) return m;
-    return {
-      ...m,
-      providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-    } as ModelMessage;
+    const stablePrefix = i <= 1 && (m.role === "system" || m.role === "user");
+    if (!stablePrefix && !tail.has(i)) return m;
+    // A tool message is a list of tool-result parts; the breakpoint goes on
+    // the last part as well as the message, since a provider may read either.
+    const content = Array.isArray(m.content)
+      ? (m.content as Array<Record<string, unknown>>).map((part, j, all) =>
+          j === all.length - 1 ? { ...part, providerOptions: CACHE_BREAKPOINT } : part,
+        )
+      : m.content;
+    return { ...m, content, providerOptions: CACHE_BREAKPOINT } as ModelMessage;
   });
 }
 
