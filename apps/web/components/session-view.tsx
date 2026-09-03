@@ -199,7 +199,13 @@ export function SessionTranscript({
               defaultOpen={outcome.anchorStep === step.n}
             />
           ))}
-          {session.error ? (
+          {session.error && session.status === "skipped" ? (
+            // A skipped session never ran: retired before its turn (a vote
+            // whose trade resolved first, a commissioner stop). Not an error.
+            <p className="rounded-xl border border-border px-4 py-3 text-[14px] text-muted">
+              This session was skipped: {session.error}
+            </p>
+          ) : session.error ? (
             <p className="rounded-xl border border-danger/40 px-4 py-3 text-[14px] text-danger">
               This session ended with an error: {session.error}
             </p>
