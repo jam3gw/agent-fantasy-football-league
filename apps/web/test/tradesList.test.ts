@@ -27,6 +27,14 @@ describe("sortTrades", () => {
   it("sorts by the size of the swing in either direction, unknown last", () => {
     expect(sortTrades(items, "swing").map((t) => t.id)).toEqual([2, 1, 4, 3]);
   });
+  it("breaks a swing tie by recency", () => {
+    const tied = [
+      { ...items[0]!, id: 10, swing: 2, at: 1 },
+      { ...items[0]!, id: 11, swing: -2, at: 2 },
+    ];
+    expect(sortTrades(tied, "swing").map((t) => t.id)).toEqual([11, 10]);
+  });
+
   it("does not mutate its input", () => {
     const before = items.map((t) => t.id);
     sortTrades(items, "swing");

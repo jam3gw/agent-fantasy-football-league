@@ -34,9 +34,19 @@ row it should not render. The pure filter and sort functions
 `sessionsFilter.ts`) carry unit tests; unknown values sort last in both
 directions.
 
+Review round (fresh context), five findings, all fixed: the spend table
+formatted numbers with the viewer's locale in a client component (a
+hydration mismatch off en-US) — fixed to a pinned locale, and the name
+tiebreak likewise; `aria-sort` sat on a button where it has no effect —
+replaced with screen-reader text; the board filter searched 40 threads and
+its empty state overstated that — now 100, and the text names the reach;
+the transactions week filter accepted weeks past the current one — bounded;
+tiebreak paths and the URL-patch rule (now the pure `patchQuery`) gained
+tests.
+
 **Not done.** Trades has no week filter: the `trades` table has no week
-column, so the period filter stands in. Board threads still cap at 40 with
-no "show more".
+column, so the period filter stands in. Board threads cap at 100 with no
+"show more".
 
 ## 2026-09-03 — `/trades` lists offers that never reached review
 

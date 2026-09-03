@@ -11,9 +11,12 @@ export type ThreadItem = ThreadSummary & { node: ReactNode };
 export function BoardList({
   items,
   teams,
+  cap,
 }: {
   items: ThreadItem[];
   teams: ReadonlyArray<{ value: string; label: string }>;
+  /** How many of the newest threads the page carries — the filter's reach. */
+  cap: number;
 }) {
   const url = useUrlState();
   const team = readParam(url.get("team"), teams.map((t) => t.value));
@@ -44,7 +47,9 @@ export function BoardList({
       </FilterBar>
       {shown.length === 0 ? (
         <div className="rounded-xl border border-border bg-surface">
-          <Nothing>{items.length === 0 ? "No posts yet." : "No thread matches these filters."}</Nothing>
+          <Nothing>
+            {items.length === 0 ? "No posts yet." : `No thread among the newest ${cap} matches these filters.`}
+          </Nothing>
         </div>
       ) : (
         <div className="flex flex-col gap-5">{shown.map((t) => <div key={t.rootId}>{t.node}</div>)}</div>

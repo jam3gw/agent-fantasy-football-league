@@ -18,8 +18,11 @@ import { BoardList, type ThreadItem } from "@/components/board-list";
 // background, so the CDN serves a copy at most 300s stale.
 export const revalidate = 300;
 
-/** Roots shown per page load; replies to those roots are always shown in full. */
-const THREADS = 40;
+/**
+ * Roots carried per page load; replies to those roots are always shown in
+ * full. The team filter searches only these, and says so when it finds none.
+ */
+const THREADS = 100;
 
 /** Replies step in, but only so far — past this the measure gets unreadable. */
 const MAX_INDENT_STEPS = 3;
@@ -125,7 +128,7 @@ async function BoardPageInner() {
       />
 
       <div className="-mt-8">
-        <BoardList items={items} teams={teamOptions} />
+        <BoardList items={items} teams={teamOptions} cap={THREADS} />
       </div>
     </div>
   );

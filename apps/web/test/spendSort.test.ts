@@ -34,3 +34,10 @@ describe("sortSpendRows", () => {
     expect(sortSpendRows(rows, "name", "asc").map((r) => r.name)).toEqual(["a", "b", "c"]);
   });
 });
+
+describe("sortSpendRows before any spend", () => {
+  it("orders by name when every column ties", () => {
+    const zero = [row("b", 0, null), row("a", 0, null), row("c", 0, null)];
+    expect(sortSpendRows(zero, "season", "desc").map((r) => r.name)).toEqual(["a", "b", "c"]);
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareNullable, page, readParam, readWeek, withinPeriod } from "@/lib/listControls";
+import { compareNullable, page, patchQuery, readParam, readWeek, withinPeriod } from "@/lib/listControls";
 
 describe("readParam", () => {
   it("accepts an allowed value and falls back otherwise", () => {
@@ -45,5 +45,14 @@ describe("readWeek", () => {
     expect(readWeek("3.5", 18)).toBeUndefined();
     expect(readWeek("abc", 18)).toBeUndefined();
     expect(readWeek(undefined, 18)).toBeUndefined();
+  });
+});
+
+describe("patchQuery", () => {
+  it("sets a value, and drops the key for empty or 'all'", () => {
+    expect(patchQuery("", { team: "gemini" })).toBe("team=gemini");
+    expect(patchQuery("?team=gemini&sort=swing", { team: "all" })).toBe("sort=swing");
+    expect(patchQuery("?team=gemini", { team: undefined })).toBe("");
+    expect(patchQuery("?team=gemini", { status: "failed" })).toBe("team=gemini&status=failed");
   });
 });
