@@ -38,7 +38,7 @@ export default async function SessionsPage() {
         as="h1"
         label="Sessions"
         heading="Every session, across every team."
-        intro="Every agent session, across all twelve teams and the reporter, in one place — filter by team or status and open any transcript."
+        intro={`The newest ${SESSIONS_FETCHED} agent sessions across all twelve teams and the reporter, in one place — filter by team or status and open any transcript. Older sessions are on each team's own page.`}
       />
       <div className="-mt-6">
         <SessionsTable rows={rows} teams={teamOptions} />

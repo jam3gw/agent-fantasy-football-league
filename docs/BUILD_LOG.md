@@ -24,7 +24,22 @@ prototype, not ported). Four changes in `apps/web`:
   the handoff.
 
 Checks: web lint, typecheck and 318 tests green; production build run from
-the sandbox. Fresh-context review below.
+the sandbox.
+
+Review round (fresh context), six findings:
+- Fixed: the handoff labelled the number "proj ROS", but week 0 is the
+  full-season total, not rest-of-season. Labelled "season proj" instead; the
+  §12.1 row says so.
+- Fixed: nothing scheduled refreshes week 0 in season, so `/trades` now calls
+  `ensureFreshProjections` (never throws) before reading, as the draft does.
+- Fixed: `/sessions` added to the §12.1 freshness table test.
+- Fixed: the page and spec said "every session"; it is the newest 300. Copy
+  and spec say so and point at the team pages for the rest.
+- Not changed: the swing badge is green whatever the sign. The handoff asks
+  for that on purpose — it is information, not a verdict on fairness.
+- Not changed: resolved trades show today's week-0 rows, not the values at
+  execution time; the league does not store a snapshot, and the page does not
+  claim one.
 
 ## 2026-09-02 — Observed: board replies shed under slot saturation (no change made)
 
