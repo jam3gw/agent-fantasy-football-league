@@ -6,6 +6,9 @@ import { useUrlState } from "@/components/list-controls";
 import { readParam } from "@/lib/listControls";
 import { SPEND_COLUMNS, SPEND_COLUMN_KEYS, sortSpendRows, type SpendRow } from "@/lib/spendSort";
 
+/** A fixed locale: this renders on the server and again in the browser, and the two must agree. */
+const count = (n: number) => n.toLocaleString("en-US");
+
 /** The per-agent spend table, sortable by any column; the sort is in the URL. */
 export function SpendTable({ rows }: { rows: SpendRow[] }) {
   const url = useUrlState();
@@ -28,10 +31,14 @@ export function SpendTable({ rows }: { rows: SpendRow[] }) {
           className={`inline-flex items-center gap-1 uppercase tracking-wide hover:text-accent ${
             key === column ? "text-accent" : ""
           }`}
-          aria-sort={key === column ? (dir === "asc" ? "ascending" : "descending") : undefined}
         >
           {label}
-          {key === column ? <span aria-hidden="true">{dir === "asc" ? "▲" : "▼"}</span> : null}
+          {key === column ? (
+            <>
+              <span aria-hidden="true">{dir === "asc" ? "▲" : "▼"}</span>
+              <span className="sr-only">{dir === "asc" ? ", sorted ascending" : ", sorted descending"}</span>
+            </>
+          ) : null}
         </button>
       ))}
     >
@@ -58,10 +65,10 @@ export function SpendTable({ rows }: { rows: SpendRow[] }) {
           <Cell align="right">{r.perSession === null ? "—" : money(r.perSession)}</Cell>
           <Cell align="right">{r.perPoint === null ? "—" : `$${r.perPoint.toFixed(3)}`}</Cell>
           <Cell align="right">{r.perWin === null ? "—" : money(r.perWin)}</Cell>
-          <Cell align="right">{r.input.toLocaleString()}</Cell>
-          <Cell align="right">{r.output.toLocaleString()}</Cell>
-          <Cell align="right">{r.reasoning.toLocaleString()}</Cell>
-          <Cell align="right">{r.cached.toLocaleString()}</Cell>
+          <Cell align="right">{count(r.input)}</Cell>
+          <Cell align="right">{count(r.output)}</Cell>
+          <Cell align="right">{count(r.reasoning)}</Cell>
+          <Cell align="right">{count(r.cached)}</Cell>
         </Row>
       ))}
     </Table>

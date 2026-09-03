@@ -46,8 +46,10 @@ export function sortSpendRows(rows: readonly SpendRow[], column: string, dir: "a
   const key = (SPEND_COLUMN_KEYS.includes(column) ? column : "season") as SpendColumn;
   const copy = [...rows];
   copy.sort((a, b) => {
-    if (key === "name") return dir === "asc" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
-    return compareNullable(a[key], b[key], dir) || a.name.localeCompare(b.name);
+    // A fixed locale: the order is computed on the server and again in the
+    // browser, and the two must agree.
+    if (key === "name") return dir === "asc" ? a.name.localeCompare(b.name, "en") : b.name.localeCompare(a.name, "en");
+    return compareNullable(a[key], b[key], dir) || a.name.localeCompare(b.name, "en");
   });
   return copy;
 }

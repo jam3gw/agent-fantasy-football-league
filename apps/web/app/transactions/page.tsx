@@ -326,7 +326,7 @@ async function TransactionsPageInner({
   const type = TYPES.includes(typeParam as TransactionType) ? (typeParam as TransactionType) : undefined;
   const settings = await getSettings(db()).catch(() => null);
   const currentWeek = Math.min(MAX_WEEK, Math.max(1, settings?.currentWeek ?? 1));
-  const week = readWeek(one(sp.week), MAX_WEEK);
+  const week = readWeek(one(sp.week), currentWeek);
   const sort = readParam(one(sp.sort), SORTS, "newest");
 
   const teamRows = await db().select().from(teams);

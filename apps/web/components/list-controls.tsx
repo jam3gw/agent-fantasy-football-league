@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { patchQuery } from "@/lib/listControls";
 
 /**
  * Filter state that lives in the URL, so a filtered view is a link.
@@ -28,14 +29,9 @@ export function useUrlState(): {
   const get = useCallback((key: string) => params.get(key) ?? "", [params]);
   const set = useCallback(
     (patch: Record<string, string | undefined>) => {
-      const next = new URLSearchParams(window.location.search);
-      for (const [key, value] of Object.entries(patch)) {
-        if (!value || value === "all") next.delete(key);
-        else next.set(key, value);
-      }
-      const query = next.toString();
+      const query = patchQuery(window.location.search, patch);
       window.history.replaceState(null, "", query ? `${window.location.pathname}?${query}` : window.location.pathname);
-      setParams(next);
+      setParams(new URLSearchParams(query));
     },
     [],
   );

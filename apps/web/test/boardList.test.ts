@@ -23,3 +23,14 @@ describe("sortThreads", () => {
     expect(sortThreads(threads, "active").map((t) => t.rootId)).toEqual([1, 3, 2]);
   });
 });
+
+describe("sortThreads tiebreak", () => {
+  it("falls back to the newer root id when times tie", () => {
+    const tied = [
+      { rootId: 5, teamSlugs: [], createdAt: t0, lastAt: t0, replies: 0 },
+      { rootId: 6, teamSlugs: [], createdAt: t0, lastAt: t0, replies: 0 },
+    ];
+    expect(sortThreads(tied, "newest").map((t) => t.rootId)).toEqual([6, 5]);
+    expect(sortThreads(tied, "active").map((t) => t.rootId)).toEqual([6, 5]);
+  });
+});

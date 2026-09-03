@@ -38,6 +38,19 @@ export function compareNullable(a: number | null, b: number | null, dir: "asc" |
   return dir === "desc" ? b - a : a - b;
 }
 
+/**
+ * The next query string after a patch: a missing, empty or "all" value drops
+ * its key, so the default state is the bare URL. Returns "" for no query.
+ */
+export function patchQuery(search: string, patch: Record<string, string | undefined>): string {
+  const next = new URLSearchParams(search);
+  for (const [key, value] of Object.entries(patch)) {
+    if (!value || value === ALL) next.delete(key);
+    else next.set(key, value);
+  }
+  return next.toString();
+}
+
 /** The first `shown` items, and whether there are more behind them. */
 export function page<T>(items: readonly T[], shown: number): { items: T[]; more: number } {
   return { items: items.slice(0, shown), more: Math.max(0, items.length - shown) };
