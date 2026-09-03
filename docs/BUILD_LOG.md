@@ -2,6 +2,33 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-03 — `/trades` lists offers that never reached review
+
+Jake asked whether the page should show offered trades. It now does: a
+third "Offers" section under "In review" and "Resolved" lists the newest 40
+offers in `proposed`, `rejected`, `countered`, `cancelled`, `expired` or
+`failed` at accept, with both sides' season projections, the swing badge,
+the ending stamp (`responded_at` for a rejection or counter, `resolved_at`
+for the rest — `lib/tradeOffers.ts`, tested), the failed-accept reason, and
+the counter chain through `parent_trade_id` in both directions.
+
+Review round (fresh context), four findings:
+- **Message hidden (changed from what I first proposed).** I had planned to
+  show the offer message, arguing that §3.5 does not forbid it and the
+  transcript already carries it. The reviewer showed that is wrong: the
+  agents' prompt (SPEC Appendix, `prompt.ts`) promises the message "stays
+  between the two of you unless the trade enters league review", §11 forbids
+  the reporter from revealing it, and `get_trade` hides it from the ten
+  uninvolved teams. A public page must not break a promise the prompt makes.
+  Offers are listed without their message; the §12.1 row says so.
+- **Two producers of `failed`.** Execution after a review can also fail, and
+  those trades have public votes. `review_ends_at` (set once, on accept) now
+  splits them: failed-after-review sits with the resolved trades, votes and
+  all, which the page previously omitted entirely; failed-at-accept sits
+  with the offers.
+- Tests cover the split and a null ending date.
+- Cross-references read "#N" for both offers and trades.
+
 ## 2026-09-03 — Nav promotion: Trades, Sessions and Spend on the bar; `/sessions`; projections on `/trades`
 
 From Jake's design handoff (`Fantasy League Nav Update.dc.html`, a reference
