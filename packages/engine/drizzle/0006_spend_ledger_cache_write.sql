@@ -1,0 +1,1 @@
+ALTER TABLE "spend_ledger" ADD COLUMN "cache_write_tokens" integer DEFAULT 0 NOT NULL;

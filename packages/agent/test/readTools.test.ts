@@ -482,6 +482,37 @@ describe("search_players", () => {
     expect(items[0]!.player_id).toBe(wr);
     expect((items[0]!.ownership as { status: string }).status).toBe("rostered");
   });
+
+  it("lists fantasy_positions only when they add a slot to the position (2026-09-03)", async () => {
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    const plain = await makePlayer(db, { fullName: "Plain Back", position: "RB", nflTeam: "KC" });
+    const dual = await makePlayer(db, {
+      fullName: "Dual Back",
+      position: "RB",
+      nflTeam: "KC",
+      fantasyPositions: ["RB", "WR"],
+    });
+    await rosterPlayer(db, a, dual);
+
+    const found = ok(await searchPlayersTool.execute({ query: "back" }, ctxFor({ teamId: a })));
+    const byId = new Map((found.items as Array<Record<string, unknown>>).map((r) => [r.player_id, r]));
+    expect(byId.get(plain)).not.toHaveProperty("fantasy_positions");
+    expect(byId.get(dual)!.fantasy_positions).toEqual(["RB", "WR"]);
+
+    // The same rule on a roster row, which also drops the UTC kickoff twin of
+    // kickoff_et and the team header's slug, model id and paused flag.
+    const team = ok(await getMyTeamTool.execute({}, ctxFor({ teamId: a })));
+    const row = (team.players as Array<Record<string, unknown>>)[0]!;
+    expect(row.fantasy_positions).toEqual(["RB", "WR"]);
+    expect(row).not.toHaveProperty("kickoff_at");
+    expect(row).toHaveProperty("kickoff_et");
+    const header = team.team as Record<string, unknown>;
+    expect(header).not.toHaveProperty("slug");
+    expect(header).not.toHaveProperty("model_id");
+    expect(header).not.toHaveProperty("paused");
+    expect(header.model).toBeTypeOf("string");
+  });
 });
 
 /* ========================================================================== */
@@ -619,6 +650,31 @@ describe("get_transactions", () => {
 
     const all = ok(await getTransactionsTool.execute({}, ctxFor({ teamId: a })));
     expect(all.total).toBe(4);
+  });
+
+  it("returns a lineup transaction as its diff, not the whole lineup twice (2026-09-03)", async () => {
+    // Every result is re-read by the model on every later step of the
+    // session, and a lineup row carried the full before and after maps next
+    // to the diff that already names each changed slot.
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    const before = { QB: "1", RB1: "2" };
+    await db.insert(transactions).values({
+      type: "lineup",
+      week: 1,
+      teamIds: [a],
+      payload: { week: 1, before, after: { QB: "1", RB1: "3" }, diff: { RB1: { from: "2", to: "3" } } },
+    });
+    await db.insert(transactions).values({ type: "add", week: 1, teamIds: [a], payload: { playerId: "9" } });
+
+    const res = ok(await getTransactionsTool.execute({}, ctxFor({ teamId: a })));
+    const items = res.items as Array<{ type: string; payload: Record<string, unknown>; at_et: string }>;
+    const lineup = items.find((t) => t.type === "lineup")!;
+    expect(lineup.payload).toEqual({ week: 1, diff: { RB1: { from: "2", to: "3" } } });
+    // Other payloads are untouched, and the time is given once, in ET.
+    expect(items.find((t) => t.type === "add")!.payload).toEqual({ playerId: "9" });
+    expect(lineup.at_et).toContain("ET");
+    expect(lineup).not.toHaveProperty("at");
   });
 });
 

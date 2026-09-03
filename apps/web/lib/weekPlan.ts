@@ -10,6 +10,8 @@ import {
   advancePlayoffs,
   createSession,
   getSettings,
+  groupKickoffWindows,
+  lineupCheckDueAt,
   nflGames,
   players,
   rosterEntries,
@@ -17,30 +19,10 @@ import {
   teams,
 } from "@league/engine";
 
-/** Games whose kickoffs are within 30 minutes of each other are one window (§9.2). */
-const WINDOW_TOLERANCE_MS = 30 * 60_000;
-const LINEUP_CHECK_LEAD_MS = 90 * 60_000;
-
-export interface GameWindow {
-  /** The earliest kickoff in the window; also the window's key. */
-  key: Date;
-  nflTeams: string[];
-}
-
-/** Group a week's kickoffs into windows. */
-export function groupKickoffWindows(games: Array<{ kickoffAt: Date; home: string; away: string }>): GameWindow[] {
-  const sorted = [...games].sort((a, b) => a.kickoffAt.getTime() - b.kickoffAt.getTime());
-  const windows: GameWindow[] = [];
-  for (const game of sorted) {
-    const current = windows[windows.length - 1];
-    if (current && game.kickoffAt.getTime() - current.key.getTime() <= WINDOW_TOLERANCE_MS) {
-      current.nflTeams.push(game.home, game.away);
-    } else {
-      windows.push({ key: game.kickoffAt, nflTeams: [game.home, game.away] });
-    }
-  }
-  return windows;
-}
+// The window grouping and the 90-minute lead live in the engine so the
+// context snapshot can tell an agent when these checks run (§8.5).
+export { groupKickoffWindows, LINEUP_CHECK_LEAD_MS } from "@league/engine";
+export type { GameWindow } from "@league/engine";
 
 /**
  * Book a `lineup_check` 90 minutes before each window, for every active team
@@ -76,7 +58,7 @@ export async function bookLineupChecks(db: EngineDb, clock: Clock, week: number)
   const now = clock.now();
   let booked = 0;
   for (const window of windows) {
-    const dueAt = new Date(window.key.getTime() - LINEUP_CHECK_LEAD_MS);
+    const dueAt = lineupCheckDueAt(window);
     if (dueAt.getTime() <= now.getTime()) continue; // window already upon us
     const windowTeams = new Set(window.nflTeams);
     // Staggered a minute apart, like the other per-team bookings (§9.1). Only

@@ -616,6 +616,7 @@ export const spendLedger = pgTable(
     outputTokens: integer("output_tokens").notNull().default(0),
     reasoningTokens: integer("reasoning_tokens").notNull().default(0),
     cachedInputTokens: integer("cached_input_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
     costUsd: numeric("cost_usd", { precision: 12, scale: 6, mode: "number" }).notNull(),
     source: text("source").$type<"gateway" | "price_table" | "tool">().notNull(),
     toolName: text("tool_name"),

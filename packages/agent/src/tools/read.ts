@@ -107,6 +107,32 @@ function et(d: Date | null | undefined): string | null {
   return d ? formatEt(d) : null;
 }
 
+/**
+ * Tool payloads are re-read by the model on every later step of a session, so
+ * a field that repeats another costs its tokens many times over (measured
+ * 2026-09-03: the average step carried 80–125k tokens of earlier results).
+ * A player's eligible slots are listed only when they add to the position.
+ */
+function extraPositions(
+  position: string | null,
+  fantasyPositions: string[] | null | undefined,
+): { fantasy_positions?: string[] } {
+  const extra = (fantasyPositions ?? []).filter((fp) => fp !== position);
+  return extra.length > 0 ? { fantasy_positions: fantasyPositions ?? [] } : {};
+}
+
+/**
+ * The same rule for a transaction's payload: a lineup transaction stores the
+ * whole lineup before and after, but the `diff` already names every slot
+ * that changed, so only the diff is returned (an empty diff is a lineup
+ * re-set to itself).
+ */
+function compactTransactionPayload(type: string, payload: unknown): unknown {
+  if (type !== "lineup" || !payload || typeof payload !== "object") return payload;
+  const { before: _before, after: _after, ...rest } = payload as Record<string, unknown>;
+  return rest;
+}
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
@@ -347,10 +373,9 @@ async function rosterPayload(
       name: p.fullName,
       slot: slots.get(p.playerId) ?? "BN",
       position: p.position,
-      fantasy_positions: p.fantasyPositions,
+      ...extraPositions(p.position, p.fantasyPositions),
       nfl_team: p.nflTeam,
       opponent: game ? `${game.home ? "vs" : "@"} ${game.opponent}` : null,
-      kickoff_at: iso(game?.kickoffAt ?? null),
       kickoff_et: et(game?.kickoffAt ?? null),
       on_bye_this_week: p.nflTeam !== null && game === undefined,
       bye_week: bye,
@@ -373,10 +398,8 @@ async function rosterPayload(
     team: {
       id: team.id,
       name: team.name,
-      slug: team.slug,
       model: team.modelLabel,
-      model_id: team.modelId,
-      paused: team.paused,
+      ...(team.paused ? { paused: true } : {}),
       waiver_priority: team.waiverPriority,
       record: record
         ? { wins: record.wins, losses: record.losses, ties: record.ties, points_for: record.pointsFor }
@@ -947,7 +970,7 @@ export const searchPlayersTool = readTool(
       player_id: r.playerId,
       name: r.fullName,
       position: r.position,
-      fantasy_positions: r.fantasyPositions,
+      ...extraPositions(r.position, r.fantasyPositions),
       nfl_team: r.nflTeam,
       status: r.status,
       injury_status: r.injuryStatus,
@@ -1036,7 +1059,7 @@ export const getFreeAgentsTool = readTool(
       player_id: r.playerId,
       name: r.fullName,
       position: r.position,
-      fantasy_positions: r.fantasyPositions,
+      ...extraPositions(r.position, r.fantasyPositions),
       nfl_team: r.nflTeam,
       status: r.status,
       injury_status: r.injuryStatus,
@@ -1132,8 +1155,7 @@ export const getTransactionsTool = readTool(
       week: t.week,
       team_ids: t.teamIds,
       teams: t.teamIds.map((id) => idx.get(id)?.name ?? null),
-      payload: t.payload,
-      at: iso(t.createdAt),
+      payload: compactTransactionPayload(t.type, t.payload),
       at_et: et(t.createdAt),
     }));
     return pageRows(items, args.offset ?? 0, args.limit ?? 25);
