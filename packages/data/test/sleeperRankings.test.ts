@@ -73,6 +73,29 @@ describe("§5.7 rankings ingest", () => {
     expect(stored[0]!.adp).toBe(1.9);
   });
 
+  it("builds the rest-of-season set from season projections, ordered by points", async () => {
+    // `player_research`'s ros_rankings kind read this set from the day the
+    // tool shipped, but nothing ingested it — every call failed with "no ros
+    // rankings are loaded" until the in-season job started building it
+    // (2026-09-03).
+    await seedPlayers([
+      ["a", "RB"],
+      ["b", "WR"],
+      ["c", "RB"],
+    ]);
+    stubFeed([row("c", "RB", 12.4, 200), row("a", "RB", 1.9, 300), row("b", "WR", 3.6, 280)]);
+
+    const result = await ingestRankings(db, clock, { season: SEASON, set: "ros", week: 3 });
+    expect(result.ranked).toBe(3);
+
+    const stored = await db.select().from(rankings).orderBy(rankings.rank);
+    // Points order (300, 280, 200), not ADP order; stored at the passed week.
+    expect(stored.map((r) => r.playerId)).toEqual(["a", "b", "c"]);
+    expect(stored.every((r) => r.set === "ros" && r.week === 3)).toBe(true);
+    // ADP belongs to the draft board alone.
+    expect(stored.every((r) => r.adp === null)).toBe(true);
+  });
+
   it("drops a player Sleeper has no ADP for rather than ranking him 999th", async () => {
     await seedPlayers([
       ["a", "RB"],
