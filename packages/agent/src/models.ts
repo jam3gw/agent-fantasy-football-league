@@ -111,3 +111,21 @@ export function billedToFor(modelId: string): BilledTo {
 export function supportsExplicitCaching(modelId: string): boolean {
   return modelId.startsWith("anthropic/");
 }
+
+/**
+ * The catalog suffix Meta uses for its Contributor pricing tier: the same
+ * model at a much lower price, in exchange for training on the inputs and
+ * outputs. The site says so wherever it names the model, so a reader knows
+ * which seat runs under that term (the league sends nothing private).
+ */
+export const CONTRIBUTOR_TIER_SUFFIX = "-contributor";
+
+export function isContributorTier(modelId: string): boolean {
+  return modelId.endsWith(CONTRIBUTOR_TIER_SUFFIX);
+}
+
+/** One sentence for the UI, or null when the model has no such term. */
+export function modelTierNote(modelId: string): string | null {
+  if (!isContributorTier(modelId)) return null;
+  return "Runs on the provider's Contributor pricing tier: the same model at a lower price, and the provider may use its inputs and outputs to train future models.";
+}
