@@ -8,13 +8,17 @@
  * accept — are not listed at all; they carry a private message between the
  * two teams.
  *
- * Every player carries its rest-of-season projection (week 0 of
- * `player_week_proj`, §5.4) and each trade in review shows the net swing to
- * the proposer, so a lopsided deal is visible before it clears review. The
- * swing is information, not a verdict: the veto stays with the ten voters.
+ * Every player carries its season-long projection (week 0 of
+ * `player_week_proj`, §5.4 — the full-season total, not a rest-of-season
+ * figure, so it is labelled "season proj") and each trade in review shows the
+ * net swing to the proposer, so a lopsided deal is visible before it clears
+ * review. The swing is information, not a verdict: the veto stays with the
+ * ten voters. The week-0 rows refresh on demand (§5.4), so the page asks for
+ * a fresh set before reading them.
  */
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { leagueSettings, playerWeekProj, players, teams, tradeVotes, trades } from "@league/engine";
+import { ensureFreshProjections } from "@league/data";
 import { db, leagueClock } from "../../lib/db";
 import { Badge, Card, Empty, PageTitle, TeamLabel } from "../../components/ui";
 import { InlineMarkdown } from "../../components/markdown";
@@ -93,7 +97,7 @@ function Side({
                 {p.detail ? <span className="ml-1.5 text-xs text-faint">{p.detail}</span> : null}
               </span>
               <span className="flex-shrink-0 whitespace-nowrap font-semibold tabular-nums">
-                {formatProjection(p.proj)} <span className="text-xs font-normal text-muted">proj ROS</span>
+                {formatProjection(p.proj)} <span className="text-xs font-normal text-muted">season proj</span>
               </span>
             </li>
           ))
@@ -101,7 +105,7 @@ function Side({
       </ul>
       {summary ? (
         <p className="mt-1.5 text-xs text-muted">
-          {summary} {total === null ? "—" : total.toFixed(1)} proj ROS pts
+          {summary} {total === null ? "—" : total.toFixed(1)} season proj pts
         </p>
       ) : null}
     </div>
@@ -138,9 +142,14 @@ async function TradesPageInner() {
         .where(inArray(players.playerId, playerIds))
     : [];
   const playerById = new Map(playerRows.map((p) => [p.playerId, p]));
-  // §5.4: week 0 is the season-long projection. A player without a row shows
-  // a dash, never 0.0 — omit rather than fabricate (§5.7).
+  // §5.4: week 0 is the season-long projection, refreshed on demand through
+  // a 1-hour TTL; the refresh never throws and a failed pull serves stored
+  // rows. A player without a row shows a dash, never 0.0 — omit rather than
+  // fabricate (§5.7).
   const season = settings?.season ?? now.getUTCFullYear();
+  if (playerIds.length) {
+    await ensureFreshProjections(db(), clock, { season, week: 0 }).catch(() => undefined);
+  }
   const projRows = playerIds.length
     ? await db()
         .select({ playerId: playerWeekProj.playerId, proj: playerWeekProj.projPtsPpr })
