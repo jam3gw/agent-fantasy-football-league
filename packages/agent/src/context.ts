@@ -404,7 +404,7 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
     roster_flags: rosterFlags,
   };
 
-  snapshot.scheduled_sessions = await scheduledSessions(ctx, teamId, roster, upcoming);
+  snapshot.scheduled_sessions = await scheduledSessions(ctx, team, roster, upcoming);
 
   snapshot.scratchpad = await readScratchpad(db, teamId);
 
@@ -421,19 +421,20 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
 }
 
 const SCHEDULED_NOTE =
-  "The league runs a lineup_check for you 90 minutes before every game window you have a player in; " +
+  "The league runs a lineup_check for you about 90 minutes before every game window you have a player in; " +
   "you do not need to book a check-in for that moment. weekly_review (Tue), post_waivers (Wed) and the " +
   "trade windows (Wed–Sat) run on their days without a booking.";
 
 /** Everything already on this team's calendar (§8.5, §8.10). */
 async function scheduledSessions(
   ctx: ToolContext,
-  teamId: number,
+  team: { id: number; paused: boolean; eliminated: boolean },
   roster: Array<{ nflTeam: string | null }>,
   weekGames: Array<{ kickoffAt: Date; home: string; away: string }>,
 ): Promise<ScheduledSessions> {
   const { db, clock } = ctx;
   const now = clock.now();
+  const teamId = team.id;
 
   const checkIns = await pendingCheckIns(db, teamId);
 
@@ -454,11 +455,13 @@ async function scheduledSessions(
   }
 
   // Lineup checks the week plan will book (§9.2): one per window this team
-  // has a player in, 90 minutes before its first kickoff. Listed even before
-  // the row exists, since the plan books them a day ahead and the agent is
-  // deciding now.
+  // has a player in, 90 minutes before its first kickoff (booked rows carry
+  // a stagger of a few minutes on top). Listed even before the row exists,
+  // since the plan books them a day ahead and the agent is deciding now. A
+  // paused or eliminated team gets none, exactly as the plan skips it.
   const myNflTeams = new Set(roster.map((r) => r.nflTeam).filter((t): t is string => t !== null));
-  for (const window of groupKickoffWindows(weekGames)) {
+  const planned = team.paused || team.eliminated ? [] : groupKickoffWindows(weekGames);
+  for (const window of planned) {
     const dueAt = lineupCheckDueAt(window);
     if (dueAt <= now) continue;
     if (bookedWindows.has(window.key.toISOString())) continue;

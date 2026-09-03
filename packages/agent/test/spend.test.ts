@@ -447,6 +447,58 @@ describe("billing: the gateway pays unless the provider is BYOK (2026-08-29)", (
     const cost = await computeStepCost(db as unknown as EngineDb, "anthropic/claude-sonnet-5", result.usage, null);
     // 1,000 uncached at $2 + 6,000 read at $0.20 + 3,000 written at $2.50 + 100 out at $10.
     expect(cost).toEqual({ costUsd: 0.0117, source: "price_table" });
+
+    // And the ledger row keeps the write count, so /spend can show it.
+    const team = await makeTeam("cw");
+    const session = await makeSession(team, "cw-1", 1);
+    await recordSpend(db as unknown as EngineDb, new FixedClock("2026-09-03T12:00:00Z"), {
+      sessionId: session,
+      teamId: team,
+      kind: "weekly_review",
+      modelId: "anthropic/claude-sonnet-5",
+      stepNo: 1,
+      usage: result.usage,
+      costUsd: cost.costUsd,
+      source: cost.source,
+      billedTo: "byok:anthropic",
+    });
+    const row = (await db.select().from(spendLedger).where(eq(spendLedger.sessionId, session)))[0]!;
+    expect(row.cacheWriteTokens).toBe(3_000);
+    expect(row.cachedInputTokens).toBe(6_000);
+  });
+
+  it("puts two breakpoints on a session's first prompt and three on its second", async () => {
+    // The first two calls of every session: [system, user] and then one
+    // assistant turn with its tool results.
+    const calls: Array<Record<string, unknown>> = [];
+    const step = createModelStep({} as never, {
+      stream: ((params: Record<string, unknown>) => {
+        calls.push(params);
+        return fakeStreamResult();
+      }) as never,
+    });
+    const first = [
+      { role: "system", content: "system" },
+      { role: "user", content: "brief + snapshot" },
+    ] as const;
+    await step({ modelId: "anthropic/claude-fable-5", messages: [...first], tools: [] }, 0);
+    await step(
+      {
+        modelId: "anthropic/claude-fable-5",
+        messages: [
+          ...first,
+          { role: "assistant", content: "turn" },
+          { role: "tool", content: [{ type: "tool-result", toolCallId: "1", toolName: "a", output: { type: "json", value: 1 } }] },
+        ],
+        tools: [],
+      },
+      1,
+    );
+    const count = (p: Record<string, unknown>) =>
+      (p.instructions as Array<Record<string, unknown>>).filter((m) => m.providerOptions).length +
+      (p.messages as Array<Record<string, unknown>>).filter((m) => m.providerOptions).length;
+    expect(count(calls[0]!)).toBe(2);
+    expect(count(calls[1]!)).toBe(3);
   });
 
   it("sends the system prompt as instructions, never inside messages", async () => {
