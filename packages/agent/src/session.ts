@@ -610,7 +610,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
               "invalid_args",
               `${call.toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`,
               overLimit
-                ? "Shorten the named field to the stated limit and call the tool again — a trimmed version posts fine."
+                ? "Shorten the named field to the stated limit and call the tool again."
                 : "Read the tool schema and try again.",
             );
           } else {

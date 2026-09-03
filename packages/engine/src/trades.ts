@@ -624,12 +624,18 @@ async function vetoTrade(tx: EngineDb, clock: Clock, tradeId: number): Promise<v
  * vote on (18 of them, ~$1.53, across three trades in one 48h stretch;
  * found 2026-09-03). A session already `running` is left to finish: it may
  * be mid-vote, and interrupting a live run is not this function's business.
+ *
+ * Retired rows carry `MOOT_VOTE_REASON` and no `ended_by`: they are not a
+ * loop guard and not a failure, and the digest keys on the reason to keep
+ * nine healthy no-ops per trade out of its failed-sessions table.
  */
+export const MOOT_VOTE_REASON = "trade resolved before this vote was needed";
+
 async function retireQueuedVoteSessions(tx: EngineDb, clock: Clock, tradeId: number): Promise<void> {
   const now = clock.now();
   await tx
     .update(sessions)
-    .set({ status: "skipped", endedBy: "deadline", endedAt: now, updatedAt: now })
+    .set({ status: "skipped", endedBy: null, error: MOOT_VOTE_REASON, endedAt: now, updatedAt: now })
     .where(
       and(
         eq(sessions.kind, "trade_vote"),
