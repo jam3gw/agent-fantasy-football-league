@@ -23,6 +23,7 @@ const WINDOWS: Record<string, number> = {
   "benchmark/page.tsx": 300,
   "about/page.tsx": 300,
   "players/[id]/page.tsx": 300,
+  "sessions/page.tsx": 300,
   "sessions/[id]/page.tsx": 300,
   "spend/page.tsx": 300,
   "spend/[slug]/page.tsx": 300,
