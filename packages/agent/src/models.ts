@@ -43,7 +43,11 @@ export const LEAGUE_MODELS: LeagueModel[] = [
   { slot: 8, modelId: "deepseek/deepseek-v4-pro", label: "DeepSeek V4-Pro", provider: "deepseek" },
   { slot: 9, modelId: "moonshotai/kimi-k3", label: "Kimi K3", provider: "moonshotai" },
   { slot: 10, modelId: "alibaba/qwen3.8-max", label: "Qwen 3.8-Max", provider: "alibaba" },
-  { slot: 11, modelId: "meta/muse-spark-1.2", label: "Muse Spark 1.2", provider: "meta" },
+  // Slot 11 ran meta/muse-spark-1.2 until 2026-09-03; moved to Meta's
+  // Contributor tier (commissioner). Same weights, same features, about 92%
+  // cheaper; in exchange Meta may train on the inputs and outputs. Nothing
+  // this league sends a model is private (§2: the whole league is public).
+  { slot: 11, modelId: "meta/muse-spark-1.2-contributor", label: "Muse Spark 1.2", provider: "meta" },
   { slot: 12, modelId: "zai/glm-5.3", label: "GLM-5.3", provider: "zai" },
 ];
 
@@ -69,7 +73,7 @@ export const MODEL_PRICE_SEED: Record<
   "deepseek/deepseek-v4-pro": { input: 0.66, output: 1.98, cachedInput: 0.022, contextWindow: 1_000_000 },
   "moonshotai/kimi-k3": { input: 3, output: 15, cachedInput: 0.3, contextWindow: 1_000_000 },
   "alibaba/qwen3.8-max": { input: 2, output: 6, cachedInput: 0.25, contextWindow: 1_000_000 },
-  "meta/muse-spark-1.2": { input: 1.25, output: 4.25, cachedInput: 0.15, contextWindow: 1_048_576 },
+  "meta/muse-spark-1.2-contributor": { input: 0.1, output: 0.2, cachedInput: 0.002, contextWindow: 1_048_576 },
   "zai/glm-5.3": { input: 1.4, output: 4.4, cachedInput: 0.14, contextWindow: 1_000_000 },
 };
 

@@ -2,6 +2,22 @@
 
 Each entry: date, the request made, what came back. Items marked **verify** in SPEC.md land here.
 
+## 2026-09-03 — AI Gateway catalog re-check for the Contributor tier (§8.1)
+
+Request: `GET https://ai-gateway.vercel.sh/v1/models` (no auth). 369 models
+returned. Slot 11 moves to Meta's Contributor pricing tier; the id is live:
+
+| Gateway ID | Ctx | $/1M in | $/1M out | Cache read $/1M | Training on data |
+|---|---|---|---|---|---|
+| `meta/muse-spark-1.2` (old) | 1,048,576 | 1.25 | 4.25 | 0.15 | no |
+| `meta/muse-spark-1.2-contributor` (new) | 1,048,576 | 0.10 | 0.20 | 0.002 | yes |
+
+Same `supported_parameters`, same tags (`reasoning`, `tool-use`,
+`implicit-caching`, `file-input`, `vision`) and the same description of the
+model on both entries; only the price and the training term differ. The
+catalog shows `max_tokens` equal to the context window for both, so nothing
+about output limits changes (§8.1 sets none).
+
 ## 2026-09-03 — Prompt caching as the ledger actually recorded it (§8.1, §8.7)
 
 Request: every `spend_ledger` row for the two Anthropic models on production
