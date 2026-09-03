@@ -240,6 +240,26 @@ describe("runSession (§8.2)", () => {
     expect(logs[0]!.summary).toBe("fine");
   });
 
+  it("a length-cap rejection tells the model to shorten the field", async () => {
+    // The scratchpad's prescriptive hint recovers in one retry; bare zod text
+    // cost a board reply two (session 1922 trimmed to the wrong number).
+    const id = await makeSession("weekly_review");
+    const result = await runSession(
+      id,
+      deps([
+        step({ toolCalls: [{ toolCallId: "long", toolName: "write_decision_log", args: { summary: "x".repeat(900) } }] }),
+        step({ toolCalls: [{ toolCallId: "ok", toolName: "write_decision_log", args: { summary: "trimmed" } }] }),
+      ]),
+    );
+    expect(result.status).toBe("succeeded");
+    const rejected = (await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id)))
+      .filter((e) => e.type === "tool_result")
+      .map((e) => e.content as { result: { ok?: boolean; message?: string; hint?: string } })
+      .find((c) => c.result.ok === false)!;
+    expect(rejected.result.message).toContain("summary Too big");
+    expect(rejected.result.hint).toContain("Shorten the named field");
+  });
+
   it("an unknown tool name is an invalid call, not a crash", async () => {
     const id = await makeSession("weekly_review");
     const result = await runSession(

@@ -15,6 +15,7 @@ import type { PlayerSpec } from "./helpers/factories.ts";
 import { makeGame, makePlayer, rosterPlayer, seedLeague, seedTeams, setLineupEntry } from "./helpers/factories.ts";
 import { lineupEntries, rosterEntries, sessions, teams, trades, transactions } from "../src/db/schema.ts";
 import {
+  MOOT_VOTE_REASON,
   cancelTrade,
   expireAllProposedAtDeadline,
   expireOffers,
@@ -449,8 +450,10 @@ describe("votes (§3.5)", () => {
 
     const after = await voteSessions();
     expect(after.filter((s) => s.status === "queued")).toHaveLength(0);
-    expect(after.filter((s) => s.status === "skipped")).toHaveLength(9);
-    expect(after.filter((s) => s.status === "skipped").every((s) => s.endedBy === "deadline")).toBe(true);
+    const retired = after.filter((s) => s.status === "skipped");
+    expect(retired).toHaveLength(9);
+    // Not a loop guard, not a failure: the reason is what the digest keys on.
+    expect(retired.every((s) => s.endedBy === null && s.error === MOOT_VOTE_REASON)).toBe(true);
     expect(after.find((s) => s.id === booked[0]!.id)!.status).toBe("running");
   });
 
