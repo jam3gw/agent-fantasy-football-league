@@ -370,7 +370,12 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
           t.status === "accepted" &&
           t.proposerTeamId !== teamId &&
           t.counterpartyTeamId !== teamId &&
-          !votedOn.has(t.id),
+          !votedOn.has(t.id) &&
+          // Same guard as get_league_state (tools/read.ts): a review whose
+          // window has elapsed but that the tick has not resolved yet is not
+          // a vote anyone still owes. The two had drifted, so the snapshot
+          // could owe a vote the tool then denied.
+          (t.reviewEndsAt === null || t.reviewEndsAt > now),
       )
       .map((t) => ({
         trade_id: t.id,

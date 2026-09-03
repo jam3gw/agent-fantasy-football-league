@@ -13,7 +13,7 @@ import { and, eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import type { PlayerSpec } from "./helpers/factories.ts";
 import { makeGame, makePlayer, rosterPlayer, seedLeague, seedTeams, setLineupEntry } from "./helpers/factories.ts";
-import { lineupEntries, rosterEntries, teams, trades, transactions } from "../src/db/schema.ts";
+import { lineupEntries, rosterEntries, sessions, teams, trades, transactions } from "../src/db/schema.ts";
 import {
   cancelTrade,
   expireAllProposedAtDeadline,
@@ -419,6 +419,39 @@ describe("votes (§3.5)", () => {
     expect((await tradeRow(tradeId)).status).toBe("executed");
     expect(await ownerOf(a)).toBe(ids[1]!);
     expect(await ownerOf(b)).toBe(ids[0]!);
+  });
+
+  it("retires the still-queued vote sessions the moment the trade resolves", async () => {
+    // §3.5 executes at the allow threshold, hours before the 24h reviewEndsAt
+    // the vote sessions were booked with as their deadline. Nothing lowered
+    // that deadline, so every unrun session started later just to discover
+    // there was nothing to vote on — six per early-resolved trade in
+    // production (2026-09-03).
+    const ids = await setup();
+    const clock = new FixedClock(T0);
+    const a = await owned(ids[0]!, "a1");
+    const b = await owned(ids[1]!, "b1");
+    const tradeId = await proposeAndAccept(clock, ids, [a], [b]);
+
+    const voteSessions = async () =>
+      (await db.select().from(sessions).where(eq(sessions.kind, "trade_vote"))).filter(
+        (s) => (s.context as { trade_id?: number }).trade_id === tradeId,
+      );
+    const booked = await voteSessions();
+    expect(booked).toHaveLength(10);
+    expect(booked.every((s) => s.status === "queued")).toBe(true);
+
+    // One is mid-run when the threshold lands: it may be mid-vote, leave it.
+    await db.update(sessions).set({ status: "running" }).where(eq(sessions.id, booked[0]!.id));
+
+    for (let i = 2; i <= 5; i++) await voteOnTrade(db, clock, ids[i]!, tradeId, "allow", "fine");
+    expect((await tradeRow(tradeId)).status).toBe("executed");
+
+    const after = await voteSessions();
+    expect(after.filter((s) => s.status === "queued")).toHaveLength(0);
+    expect(after.filter((s) => s.status === "skipped")).toHaveLength(9);
+    expect(after.filter((s) => s.status === "skipped").every((s) => s.endedBy === "deadline")).toBe(true);
+    expect(after.find((s) => s.id === booked[0]!.id)!.status).toBe("running");
   });
 
   it("executes at the end of the review window with fewer than 7 vetoes", async () => {
