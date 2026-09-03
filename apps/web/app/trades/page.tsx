@@ -7,13 +7,23 @@
  * that never entered review — `proposed`, or ended without a successful
  * accept — are not listed at all; they carry a private message between the
  * two teams.
+ *
+ * Every player carries its season-long projection (week 0 of
+ * `player_week_proj`, §5.4 — the full-season total, not a rest-of-season
+ * figure, so it is labelled "season proj") and each trade in review shows the
+ * net swing to the proposer, so a lopsided deal is visible before it clears
+ * review. The swing is information, not a verdict: the veto stays with the
+ * ten voters. The week-0 rows refresh on demand (§5.4), so the page asks for
+ * a fresh set before reading them.
  */
-import { desc, eq, inArray } from "drizzle-orm";
-import { leagueSettings, players, teams, tradeVotes, trades } from "@league/engine";
+import { and, desc, eq, inArray } from "drizzle-orm";
+import { leagueSettings, playerWeekProj, players, teams, tradeVotes, trades } from "@league/engine";
+import { ensureFreshProjections } from "@league/data";
 import { db, leagueClock } from "../../lib/db";
 import { Badge, Card, Empty, PageTitle, TeamLabel } from "../../components/ui";
 import { InlineMarkdown } from "../../components/markdown";
 import { flattenMarkdown } from "../../lib/broadcastLogic";
+import { formatProjection, sumProjections, swingLabel } from "../../lib/tradeProjection";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 300s stale.
@@ -46,28 +56,58 @@ function remaining(endsAt: Date | null, now: Date): string {
   return `${hours}h ${minutes % 60}m left`;
 }
 
+/** One player as the offer lists it: name, position and NFL team, projection. */
+interface OfferPlayer {
+  id: string;
+  name: string;
+  detail: string;
+  proj: number | null;
+}
+
 function Side({
   team,
   label,
-  playerNames,
+  players: list,
+  summary,
 }: {
   team: Team | undefined;
   label: string;
-  playerNames: string[];
+  players: OfferPlayer[];
+  /** "Giving up" or "Receiving"; the total line is shown only when set. */
+  summary?: "Giving up" | "Receiving";
 }) {
+  const total = sumProjections(list.map((p) => p.proj));
   return (
-    <div className="flex-1">
+    <div className="min-w-0 flex-1">
       <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
       <div className="mt-0.5">
         <TeamLabel slug={team?.slug} name={team?.name ?? null} model={team?.modelLabel} />
       </div>
-      <ul className="mt-1 space-y-0.5 text-sm">
-        {playerNames.length === 0 ? (
-          <li className="text-muted">nothing</li>
+      <ul className="mt-1 text-sm">
+        {list.length === 0 ? (
+          <li className="py-1 text-muted">nothing</li>
         ) : (
-          playerNames.map((n) => <li key={n}>{n}</li>)
+          list.map((p) => (
+            // The projection is `nowrap` and may not shrink: the row is a
+            // space-between flex with two text nodes, and without this the
+            // number wraps under a long name instead of holding the right edge.
+            <li key={p.id} className="flex items-baseline justify-between gap-2 border-b border-border/60 py-1.5">
+              <span className="min-w-0 truncate">
+                {p.name}
+                {p.detail ? <span className="ml-1.5 text-xs text-faint">{p.detail}</span> : null}
+              </span>
+              <span className="flex-shrink-0 whitespace-nowrap font-semibold tabular-nums">
+                {formatProjection(p.proj)} <span className="text-xs font-normal text-muted">season proj</span>
+              </span>
+            </li>
+          ))
         )}
       </ul>
+      {summary ? (
+        <p className="mt-1.5 text-xs text-muted">
+          {summary} {total === null ? "—" : total.toFixed(1)} season proj pts
+        </p>
+      ) : null}
     </div>
   );
 }
@@ -102,10 +142,35 @@ async function TradesPageInner() {
         .where(inArray(players.playerId, playerIds))
     : [];
   const playerById = new Map(playerRows.map((p) => [p.playerId, p]));
-  const nameOf = (id: string) => {
+  // §5.4: week 0 is the season-long projection, refreshed on demand through
+  // a 1-hour TTL; the refresh never throws and a failed pull serves stored
+  // rows. A player without a row shows a dash, never 0.0 — omit rather than
+  // fabricate (§5.7).
+  const season = settings?.season ?? now.getUTCFullYear();
+  if (playerIds.length) {
+    await ensureFreshProjections(db(), clock, { season, week: 0 }).catch(() => undefined);
+  }
+  const projRows = playerIds.length
+    ? await db()
+        .select({ playerId: playerWeekProj.playerId, proj: playerWeekProj.projPtsPpr })
+        .from(playerWeekProj)
+        .where(
+          and(eq(playerWeekProj.season, season), eq(playerWeekProj.week, 0), inArray(playerWeekProj.playerId, playerIds)),
+        )
+    : [];
+  const projOf = new Map(projRows.map((p) => [p.playerId, p.proj]));
+  const offerPlayer = (id: string): OfferPlayer => {
     const p = playerById.get(id);
-    if (!p) return id;
-    return [p.fullName, [p.position, p.nflTeam].filter(Boolean).join(" · ")].filter(Boolean).join(" — ");
+    return {
+      id,
+      name: p?.fullName ?? id,
+      detail: p ? [p.position, p.nflTeam].filter(Boolean).join(" · ") : "",
+      proj: projOf.get(id) ?? null,
+    };
+  };
+  const proposerName = (t: Trade) => {
+    const team = teamById.get(t.proposerTeamId);
+    return team?.name ?? team?.modelLabel ?? team?.slug ?? "the proposer";
   };
 
   const tradeIds = all.map((t) => t.id);
@@ -135,6 +200,12 @@ async function TradesPageInner() {
               const votes = votesByTrade.get(t.id) ?? [];
               const vetoes = votes.filter((v) => v.vote === "veto").length;
               const allows = votes.filter((v) => v.vote === "allow").length;
+              const give = t.givePlayerIds.map(offerPlayer);
+              const get = t.getPlayerIds.map(offerPlayer);
+              const swing = swingLabel(
+                sumProjections(give.map((p) => p.proj)),
+                sumProjections(get.map((p) => p.proj)),
+              );
               return (
                 <div key={t.id} className="rounded-md border border-border/70 bg-background/40 p-3">
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -147,18 +218,20 @@ async function TradesPageInner() {
                     </span>
                   </div>
                   <div className="mt-2 flex flex-col gap-3 sm:flex-row">
-                    <Side
-                      team={teamById.get(t.proposerTeamId)}
-                      label="Sends"
-                      playerNames={t.givePlayerIds.map(nameOf)}
-                    />
+                    <Side team={teamById.get(t.proposerTeamId)} label="Sends" players={give} summary="Giving up" />
                     <Side
                       team={teamById.get(t.counterpartyTeamId)}
                       label="Sends"
-                      playerNames={t.getPlayerIds.map(nameOf)}
+                      players={get}
+                      summary="Receiving"
                     />
                   </div>
                   <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                    {swing ? (
+                      <Badge tone="accent">
+                        {swing} to {proposerName(t)}
+                      </Badge>
+                    ) : null}
                     <Badge tone="accent">{allows} allow</Badge>
                     <Badge tone="danger">
                       {vetoes} veto / {vetoThreshold}
@@ -198,12 +271,12 @@ async function TradesPageInner() {
                       <Side
                         team={teamById.get(t.proposerTeamId)}
                         label="Sent"
-                        playerNames={t.givePlayerIds.map(nameOf)}
+                        players={t.givePlayerIds.map(offerPlayer)}
                       />
                       <Side
                         team={teamById.get(t.counterpartyTeamId)}
                         label="Sent"
-                        playerNames={t.getPlayerIds.map(nameOf)}
+                        players={t.getPlayerIds.map(offerPlayer)}
                       />
                     </div>
                     <div className="mt-3">

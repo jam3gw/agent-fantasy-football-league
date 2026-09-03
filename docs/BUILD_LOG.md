@@ -2,6 +2,45 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-03 — Nav promotion: Trades, Sessions and Spend on the bar; `/sessions`; projections on `/trades`
+
+From Jake's design handoff (`Fantasy League Nav Update.dc.html`, a reference
+prototype, not ported). Four changes in `apps/web`:
+
+- **Primary nav** carries Trades, Sessions and Spend. Benchmark stays: the
+  handoff's eight-item list omitted it, but dropping a page was not part of
+  the ask. Nine links; the bar's `scroll-x` handles a phone. Trades and Spend
+  left the footer's "more" list.
+- **`/sessions`** (new, recorded in SPEC §12.1): the newest 300 sessions across
+  every team and the reporter, left-joined to `teams`, with client-side team
+  and status filters and a "live now" panel. The `sessions` route segment's
+  classic layout moved down to `[id]` so the index uses the broadcast
+  container. Filter logic is in `lib/sessionsFilter.ts` with tests.
+- **`/trades`** shows each player's week-0 (season-long, §5.4) projection and
+  a net-swing badge to the proposer on offers in review. A missing row is a
+  dash, and a side with no projection at all produces no swing — omit rather
+  than fabricate. Logic in `lib/tradeProjection.ts` with tests.
+- **Home** gets a seven-card section grid under the hero, copy verbatim from
+  the handoff.
+
+Checks: web lint, typecheck and 318 tests green; production build run from
+the sandbox.
+
+Review round (fresh context), six findings:
+- Fixed: the handoff labelled the number "proj ROS", but week 0 is the
+  full-season total, not rest-of-season. Labelled "season proj" instead; the
+  §12.1 row says so.
+- Fixed: nothing scheduled refreshes week 0 in season, so `/trades` now calls
+  `ensureFreshProjections` (never throws) before reading, as the draft does.
+- Fixed: `/sessions` added to the §12.1 freshness table test.
+- Fixed: the page and spec said "every session"; it is the newest 300. Copy
+  and spec say so and point at the team pages for the rest.
+- Not changed: the swing badge is green whatever the sign. The handoff asks
+  for that on purpose — it is information, not a verdict on fairness.
+- Not changed: resolved trades show today's week-0 rows, not the values at
+  execution time; the league does not store a snapshot, and the page does not
+  claim one.
+
 ## 2026-09-02 — Observed: board replies shed under slot saturation (no change made)
 
 Monitoring sweep, 20:07 UTC. Between 16:00 and 17:30 UTC a Wednesday
