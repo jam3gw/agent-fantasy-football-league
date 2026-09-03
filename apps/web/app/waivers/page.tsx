@@ -10,6 +10,7 @@ import { asc, count, desc, eq, inArray } from "drizzle-orm";
 import { leagueSettings, players, teams, waiverClaims, waiverRuns } from "@league/engine";
 import { db } from "../../lib/db";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "../../components/ui";
+import { WaiverResults } from "../../components/waiver-results";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 300s stale.
@@ -138,42 +139,49 @@ async function WaiversPageInner() {
               {results.length === 0 ? (
                 <Empty>No claims were processed in that run.</Empty>
               ) : (
-                <Table head={["Team", "Add", "Drop", "Result"]}>
-                  {results.map((r) => {
+                <WaiverResults
+                  teams={[...teamRows]
+                    .sort((a, b) => a.id - b.id)
+                    .map((t) => ({ value: t.slug, label: t.name ?? t.modelLabel ?? t.slug }))}
+                  rows={results.map((r) => {
                     const add = playerById.get(r.addPlayerId);
-                    return (
-                      <Row key={r.claimId}>
-                        <Cell>
-                          <TeamLabel
-                            slug={teamById.get(r.teamId)?.slug}
-                            name={teamById.get(r.teamId)?.name ?? null}
-                          />
-                        </Cell>
-                        <Cell>
-                          <span className="font-medium">{nameOf(r.addPlayerId)}</span>
-                          {add?.position || add?.nflTeam ? (
-                            <span className="ml-1.5 text-xs text-muted">
-                              {[add?.position, add?.nflTeam].filter(Boolean).join(" · ")}
-                            </span>
-                          ) : null}
-                        </Cell>
-                        <Cell>{nameOf(r.dropPlayerId)}</Cell>
-                        <Cell>
-                          {r.status === "success" ? (
-                            <Badge tone="accent">won</Badge>
-                          ) : (
-                            <>
-                              <Badge tone="danger">failed</Badge>
-                              {r.failureReason ? (
-                                <span className="ml-2 text-xs text-muted">{r.failureReason}</span>
-                              ) : null}
-                            </>
-                          )}
-                        </Cell>
-                      </Row>
-                    );
+                    return {
+                      key: r.claimId,
+                      teamSlug: teamById.get(r.teamId)?.slug ?? null,
+                      node: (
+                        <Row key={r.claimId}>
+                          <Cell>
+                            <TeamLabel
+                              slug={teamById.get(r.teamId)?.slug}
+                              name={teamById.get(r.teamId)?.name ?? null}
+                            />
+                          </Cell>
+                          <Cell>
+                            <span className="font-medium">{nameOf(r.addPlayerId)}</span>
+                            {add?.position || add?.nflTeam ? (
+                              <span className="ml-1.5 text-xs text-muted">
+                                {[add?.position, add?.nflTeam].filter(Boolean).join(" · ")}
+                              </span>
+                            ) : null}
+                          </Cell>
+                          <Cell>{nameOf(r.dropPlayerId)}</Cell>
+                          <Cell>
+                            {r.status === "success" ? (
+                              <Badge tone="accent">won</Badge>
+                            ) : (
+                              <>
+                                <Badge tone="danger">failed</Badge>
+                                {r.failureReason ? (
+                                  <span className="ml-2 text-xs text-muted">{r.failureReason}</span>
+                                ) : null}
+                              </>
+                            )}
+                          </Cell>
+                        </Row>
+                      ),
+                    };
                   })}
-                </Table>
+                />
               )}
             </div>
           )}

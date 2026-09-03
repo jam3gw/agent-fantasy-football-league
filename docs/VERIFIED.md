@@ -47,8 +47,8 @@ per-step numbers here:
   which confirms the "folded into input" reading; if it does not hold, the
   price-table formula in `computeStepCost` under-bills the write.
 
-The simulated savings above assume both of these hold and that every step
-after the first is a full-prefix hit.
+The simulated savings above assume all three hold and that every step after
+the first is a full-prefix hit.
 
 ## 2026-09-03 — Where the tokens go (§8.7)
 

@@ -29,7 +29,7 @@ import {
   rosterEntries, autofillDraftLineupSlot } from "@league/engine";
 import type { EngineDb, LeagueSettings, StartingSlot } from "@league/engine";
 import type { LeagueTool, ToolResult } from "./types.ts";
-import { defineTool, pageRows, toolFailure } from "./types.ts";
+import { defineTool, extraPositions, pageRows, toolFailure } from "./types.ts";
 
 
 /* -------------------------------------------------------------------------- */
@@ -538,7 +538,14 @@ export const getAvailablePlayersTool = defineTool({
 
     return {
       ok: true,
-      ...pageRows(pool, args.offset ?? 0, args.limit ?? MAX_AVAILABLE_LIMIT, { sort }),
+      // The pool keeps every eligible slot for the roster rules; the payload
+      // lists fantasy_positions only when it adds to position (§8.4).
+      ...pageRows(
+        pool.map(({ fantasy_positions, ...p }) => ({ ...p, ...extraPositions(p.position, fantasy_positions) })),
+        args.offset ?? 0,
+        args.limit ?? MAX_AVAILABLE_LIMIT,
+        { sort },
+      ),
     };
   },
 });
