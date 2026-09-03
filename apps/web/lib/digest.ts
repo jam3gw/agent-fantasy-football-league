@@ -10,6 +10,7 @@ import type { Clock } from "@league/shared";
 import { formatEt } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import {
+  MOOT_VOTE_REASON,
   computeStandings,
   costAlarms,
   draftPicks,
@@ -194,7 +195,12 @@ export async function buildWeeklyDigest(
   const recentSessions = await db.select().from(sessions).where(gte(sessions.createdAt, since));
   const byKind = new Map<string, number>();
   for (const s of recentSessions) byKind.set(s.kind, (byKind.get(s.kind) ?? 0) + 1);
-  const failed = recentSessions.filter((s) => s.status === "failed" || s.status === "skipped" || s.status === "timed_out");
+  // A vote session retired because its trade resolved first is a healthy
+  // no-op, not a failure; nine of them per early-resolved trade would bury
+  // the real failures in this table.
+  const failed = recentSessions.filter(
+    (s) => (s.status === "failed" || s.status === "skipped" || s.status === "timed_out") && s.error !== MOOT_VOTE_REASON,
+  );
   const guarded = recentSessions.filter((s) => s.endedBy === "ceiling" || s.endedBy === "deadline");
 
   // 4. Spend.

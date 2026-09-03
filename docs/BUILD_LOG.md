@@ -78,6 +78,38 @@ Measured and deliberately not changed:
 - Cost-aware agents: do you want each agent to see its own spend to date (and
   the league median) in its context? It is a mid-season change to what the
   agents see, so it goes on `/about` with the date. Default if no answer: no.
+## 2026-09-03 — Tool audit from agent transcripts: dead ros_rankings, moot vote sessions, cap-rejection hints
+
+Jake asked for a check that the agents' tools all work, done by mining 48h of
+production transcripts (subagents read five sessions end to end; aggregates
+over every tool_result). Zero hard tool errors — the crash class is gone.
+Three real findings, all fixed:
+
+- **`ros_rankings` never worked.** `player_research` has offered the
+  rest-of-season kind since the FantasyPros replacement, but nothing ever
+  ingested the `ros` set — 30 calls in 48h all failed "no ros rankings are
+  loaded". The in-season `ingest.rankings` job now also builds `ros` from the
+  season projections (the ingest already supported it; only the booking was
+  missing).
+- **Six moot vote sessions per early-resolved trade.** §3.5 executes at the
+  allow threshold, hours before the 24h reviewEndsAt the ten `trade_vote`
+  sessions were booked with as their deadline; nothing lowered it. Trades 3,
+  7, 16: 18 sessions (~$1.53) ran to discover there was nothing to vote on.
+  Trade resolution now retires the still-queued vote sessions in the same
+  transaction (a running one is left to finish — it may be mid-vote). Also
+  aligned the context snapshot's `votes_owed` with `get_league_state`'s
+  reviewEndsAt guard; the two had drifted.
+- **Size-cap rejections now name the remedy.** The transcript audit found
+  100% recovery from cap rejections, but the scratchpad's prescriptive hint
+  ("use mode=replace") recovers in one retry while bare zod text cost one
+  board reply two (it trimmed to the wrong number). The generic invalid_args
+  hint now says to shorten the named field when the failure is a length cap.
+
+Left alone deliberately: `get_trade` not_visible/not_found and
+`propose_trade` roster/frozen rejections are clear, correct rule enforcement
+agents adapt to; `votes_owed` stays visible to all kinds per §8.5 (the one
+session that noticed it lacked a vote tool handled it gracefully).
+
 ## 2026-09-03 — Filters and sorts on the public pages
 
 Jake asked for filters and sort on the trades page and the others. Built in
