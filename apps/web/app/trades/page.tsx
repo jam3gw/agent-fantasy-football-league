@@ -14,6 +14,10 @@
  * `parent_trade_id`, so a countered offer links forward to its counter and a
  * counter links back.
  *
+ * Filters, sort and "show more" live in `components/trades-list.tsx`: the
+ * server renders every card and the client picks which to show, so the page
+ * keeps its 5-minute cache and a filtered view is still a link.
+ *
  * `failed` has two producers. A re-check at accept time fails an offer that
  * never entered review; execution after a review fails a trade whose votes
  * are now public. `review_ends_at` tells them apart.
@@ -31,6 +35,7 @@ import { leagueSettings, playerWeekProj, players, teams, tradeVotes, trades } fr
 import { ensureFreshProjections } from "@league/data";
 import { db, leagueClock } from "../../lib/db";
 import { Badge, Card, Empty, PageTitle, TeamLabel } from "../../components/ui";
+import { TradesList, type TradeItem } from "../../components/trades-list";
 import { InlineMarkdown } from "../../components/markdown";
 import { flattenMarkdown } from "../../lib/broadcastLogic";
 import { formatProjection, sumProjections, swingLabel } from "../../lib/tradeProjection";
@@ -40,8 +45,9 @@ import { OFFER_STATUSES, offerEnding, offerExpiresAt, offerTone } from "../../li
 // background, so the CDN serves a copy at most 300s stale.
 export const revalidate = 300;
 
-const RESOLVED_LIMIT = 40;
-const OFFERS_LIMIT = 40;
+/** How much history the page carries; the filters run over these rows. */
+const RESOLVED_LIMIT = 200;
+const OFFERS_LIMIT = 200;
 
 type Team = typeof teams.$inferSelect;
 type Trade = typeof trades.$inferSelect;
@@ -215,6 +221,188 @@ async function TradesPageInner() {
     else votesByTrade.set(v.tradeId, [v]);
   }
 
+  const swingOf = (give: OfferPlayer[], get: OfferPlayer[]) => {
+    const giveSum = sumProjections(give.map((p) => p.proj));
+    const getSum = sumProjections(get.map((p) => p.proj));
+    return { label: swingLabel(giveSum, getSum), value: giveSum === null || getSum === null ? null : getSum - giveSum };
+  };
+  const slugsOf = (t: Trade) =>
+    [teamById.get(t.proposerTeamId)?.slug, teamById.get(t.counterpartyTeamId)?.slug].filter(
+      (x): x is string => typeof x === "string",
+    );
+
+  const reviewCard = (t: Trade) => {
+    const votes = votesByTrade.get(t.id) ?? [];
+    const vetoes = votes.filter((v) => v.vote === "veto").length;
+    const allows = votes.filter((v) => v.vote === "allow").length;
+    const give = t.givePlayerIds.map(offerPlayer);
+    const get = t.getPlayerIds.map(offerPlayer);
+    const swing = swingOf(give, get);
+    return {
+      swing: swing.value,
+      card: (
+        <div className="rounded-md border border-border/70 bg-background/40 p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-xs text-muted">
+              trade #{t.id} · accepted {when(t.respondedAt)} ET
+            </span>
+            <span className="flex items-baseline gap-2">
+              <Badge tone="warn">{remaining(t.reviewEndsAt, now)}</Badge>
+              <span className="text-xs text-muted">review ends {when(t.reviewEndsAt)} ET</span>
+            </span>
+          </div>
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+            <Side team={teamById.get(t.proposerTeamId)} label="Sends" players={give} summary="Giving up" />
+            <Side team={teamById.get(t.counterpartyTeamId)} label="Sends" players={get} summary="Receiving" />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+            {swing.label ? (
+              <Badge tone="accent">
+                {swing.label} to {proposerName(t)}
+              </Badge>
+            ) : null}
+            <Badge tone="accent">{allows} allow</Badge>
+            <Badge tone="danger">
+              {vetoes} veto / {vetoThreshold}
+            </Badge>
+            <span className="text-xs text-muted">
+              {votes.length} of 10 teams have voted. Who voted and why becomes public when the trade resolves.
+            </span>
+          </div>
+        </div>
+      ),
+    };
+  };
+
+  const resolvedCard = (t: Trade) => {
+    const votes = votesByTrade.get(t.id) ?? [];
+    const vetoes = votes.filter((v) => v.vote === "veto").length;
+    const allows = votes.filter((v) => v.vote === "allow").length;
+    const give = t.givePlayerIds.map(offerPlayer);
+    const get = t.getPlayerIds.map(offerPlayer);
+    const swing = swingOf(give, get);
+    return {
+      swing: swing.value,
+      card: (
+        <div className="rounded-md border border-border/70 bg-background/40 p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-xs text-muted">
+              trade #{t.id} · resolved {when(t.resolvedAt)} ET
+              {t.resolutionReason ? ` · ${t.resolutionReason}` : ""}
+            </span>
+            <Badge tone={t.status === "executed" ? "accent" : "danger"}>
+              {t.status === "failed" ? "failed after review" : t.status}
+            </Badge>
+          </div>
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+            <Side team={teamById.get(t.proposerTeamId)} label="Sent" players={give} />
+            <Side team={teamById.get(t.counterpartyTeamId)} label="Sent" players={get} />
+          </div>
+          {swing.label ? (
+            <div className="mt-3">
+              <Badge tone="accent">
+                {swing.label} to {proposerName(t)}
+              </Badge>
+            </div>
+          ) : null}
+          <div className="mt-3">
+            <p className="text-xs uppercase tracking-wide text-muted">
+              Votes — {allows} allow, {vetoes} veto
+            </p>
+            {votes.length === 0 ? (
+              <p className="mt-1 text-sm text-muted">No team voted; no vote counts as allow (§3.5).</p>
+            ) : (
+              <ul className="mt-1 space-y-1 text-sm">
+                {votes.map((v) => (
+                  <li key={`${v.tradeId}-${v.teamId}`} className="flex flex-wrap items-baseline gap-2">
+                    <Badge tone={v.vote === "veto" ? "danger" : "accent"}>{v.vote}</Badge>
+                    <TeamLabel slug={teamById.get(v.teamId)?.slug} name={teamById.get(v.teamId)?.name ?? null} />
+                    <span className="text-muted">
+                      {v.reason ? <InlineMarkdown source={flattenMarkdown(v.reason)} id="vote" /> : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+      ),
+    };
+  };
+
+  const offerCard = (t: Trade) => {
+    const give = t.givePlayerIds.map(offerPlayer);
+    const get = t.getPlayerIds.map(offerPlayer);
+    const swing = swingOf(give, get);
+    const ending = offerEnding(t);
+    const counterId = counterOf.get(t.id);
+    return {
+      swing: swing.value,
+      card: (
+        <div className="rounded-md border border-border/70 bg-background/40 p-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-xs text-muted">
+              offer #{t.id} · proposed {when(t.proposedAt)} ET
+              {ending ? ` · ${ending.verb} ${when(ending.at)} ET` : ""}
+              {t.status === "failed" && t.resolutionReason ? ` · ${t.resolutionReason}` : ""}
+            </span>
+            <span className="flex items-baseline gap-2">
+              {t.status === "proposed" ? (
+                <Badge tone="warn">
+                  {remaining(offerExpiresAt(t.proposedAt, settings?.tradeOfferExpiryHours ?? 48), now)}
+                </Badge>
+              ) : null}
+              <Badge tone={offerTone(t.status)}>{t.status}</Badge>
+            </span>
+          </div>
+          <div className="mt-2 flex flex-col gap-3 sm:flex-row">
+            <Side team={teamById.get(t.proposerTeamId)} label="Offers" players={give} summary="Giving up" />
+            <Side team={teamById.get(t.counterpartyTeamId)} label="Asked for" players={get} summary="Receiving" />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+            {swing.label ? (
+              <Badge tone="accent">
+                {swing.label} to {proposerName(t)}
+              </Badge>
+            ) : null}
+            {t.parentTradeId ? <span className="text-xs text-muted">counter to #{t.parentTradeId}</span> : null}
+            {counterId ? <span className="text-xs text-muted">countered by #{counterId}</span> : null}
+          </div>
+        </div>
+      ),
+    };
+  };
+
+  const items: TradeItem[] = [
+    ...inReview.map((t) => ({
+      id: t.id,
+      section: "review" as const,
+      teamSlugs: slugsOf(t),
+      status: t.status,
+      at: (t.respondedAt ?? t.proposedAt).getTime(),
+      ...reviewCard(t),
+    })),
+    ...resolved.map((t) => ({
+      id: t.id,
+      section: "resolved" as const,
+      teamSlugs: slugsOf(t),
+      status: t.status,
+      at: (t.resolvedAt ?? t.proposedAt).getTime(),
+      ...resolvedCard(t),
+    })),
+    ...offers.map((t) => ({
+      id: t.id,
+      section: "offer" as const,
+      teamSlugs: slugsOf(t),
+      status: t.status,
+      at: t.proposedAt.getTime(),
+      ...offerCard(t),
+    })),
+  ];
+  const teamOptions = [...teamRows]
+    .sort((a, b) => a.id - b.id)
+    .map((t) => ({ value: t.slug, label: t.name ?? t.modelLabel ?? t.slug }));
+
   return (
     <>
       <PageTitle
@@ -222,195 +410,13 @@ async function TradesPageInner() {
         subtitle={`An accepted trade goes to the other ten teams for ${settings?.tradeReviewHours ?? 24} hours. ${vetoThreshold} vetoes kill it; 4 allows execute it immediately.`}
       />
 
-      <Card title="In review">
-        {inReview.length === 0 ? (
-          <Empty>No trade is in review.</Empty>
-        ) : (
-          <div className="space-y-4">
-            {inReview.map((t) => {
-              const votes = votesByTrade.get(t.id) ?? [];
-              const vetoes = votes.filter((v) => v.vote === "veto").length;
-              const allows = votes.filter((v) => v.vote === "allow").length;
-              const give = t.givePlayerIds.map(offerPlayer);
-              const get = t.getPlayerIds.map(offerPlayer);
-              const swing = swingLabel(
-                sumProjections(give.map((p) => p.proj)),
-                sumProjections(get.map((p) => p.proj)),
-              );
-              return (
-                <div key={t.id} className="rounded-md border border-border/70 bg-background/40 p-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="text-xs text-muted">
-                      trade #{t.id} · accepted {when(t.respondedAt)} ET
-                    </span>
-                    <span className="flex items-baseline gap-2">
-                      <Badge tone="warn">{remaining(t.reviewEndsAt, now)}</Badge>
-                      <span className="text-xs text-muted">review ends {when(t.reviewEndsAt)} ET</span>
-                    </span>
-                  </div>
-                  <div className="mt-2 flex flex-col gap-3 sm:flex-row">
-                    <Side team={teamById.get(t.proposerTeamId)} label="Sends" players={give} summary="Giving up" />
-                    <Side
-                      team={teamById.get(t.counterpartyTeamId)}
-                      label="Sends"
-                      players={get}
-                      summary="Receiving"
-                    />
-                  </div>
-                  <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-                    {swing ? (
-                      <Badge tone="accent">
-                        {swing} to {proposerName(t)}
-                      </Badge>
-                    ) : null}
-                    <Badge tone="accent">{allows} allow</Badge>
-                    <Badge tone="danger">
-                      {vetoes} veto / {vetoThreshold}
-                    </Badge>
-                    <span className="text-xs text-muted">
-                      {votes.length} of 10 teams have voted. Who voted and why becomes public when the trade
-                      resolves.
-                    </span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </Card>
-
-      <div className="mt-4">
-        <Card title="Resolved">
-          {resolved.length === 0 ? (
-            <Empty>No trade has been executed or vetoed yet.</Empty>
-          ) : (
-            <div className="space-y-4">
-              {resolved.map((t) => {
-                const votes = votesByTrade.get(t.id) ?? [];
-                const vetoes = votes.filter((v) => v.vote === "veto").length;
-                const allows = votes.filter((v) => v.vote === "allow").length;
-                return (
-                  <div key={t.id} className="rounded-md border border-border/70 bg-background/40 p-3">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <span className="text-xs text-muted">
-                        trade #{t.id} · resolved {when(t.resolvedAt)} ET
-                        {t.resolutionReason ? ` · ${t.resolutionReason}` : ""}
-                      </span>
-                      <Badge tone={t.status === "executed" ? "accent" : "danger"}>
-                        {t.status === "failed" ? "failed after review" : t.status}
-                      </Badge>
-                    </div>
-                    <div className="mt-2 flex flex-col gap-3 sm:flex-row">
-                      <Side
-                        team={teamById.get(t.proposerTeamId)}
-                        label="Sent"
-                        players={t.givePlayerIds.map(offerPlayer)}
-                      />
-                      <Side
-                        team={teamById.get(t.counterpartyTeamId)}
-                        label="Sent"
-                        players={t.getPlayerIds.map(offerPlayer)}
-                      />
-                    </div>
-                    <div className="mt-3">
-                      <p className="text-xs uppercase tracking-wide text-muted">
-                        Votes — {allows} allow, {vetoes} veto
-                      </p>
-                      {votes.length === 0 ? (
-                        <p className="mt-1 text-sm text-muted">
-                          No team voted; no vote counts as allow (§3.5).
-                        </p>
-                      ) : (
-                        <ul className="mt-1 space-y-1 text-sm">
-                          {votes.map((v) => (
-                            <li key={`${v.tradeId}-${v.teamId}`} className="flex flex-wrap items-baseline gap-2">
-                              <Badge tone={v.vote === "veto" ? "danger" : "accent"}>{v.vote}</Badge>
-                              <TeamLabel
-                                slug={teamById.get(v.teamId)?.slug}
-                                name={teamById.get(v.teamId)?.name ?? null}
-                              />
-                              <span className="text-muted">
-                                {v.reason ? (
-                                  <InlineMarkdown source={flattenMarkdown(v.reason)} id="vote" />
-                                ) : null}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      </div>
-
-      <div className="mt-4">
-        <Card title="Offers">
-          {offers.length === 0 ? (
-            <Empty>No offer has been made yet.</Empty>
-          ) : (
-            <div className="space-y-4">
-              {offers.map((t) => {
-                const give = t.givePlayerIds.map(offerPlayer);
-                const get = t.getPlayerIds.map(offerPlayer);
-                const swing = swingLabel(
-                  sumProjections(give.map((p) => p.proj)),
-                  sumProjections(get.map((p) => p.proj)),
-                );
-                const ending = offerEnding(t);
-                const counterId = counterOf.get(t.id);
-                return (
-                  <div key={t.id} className="rounded-md border border-border/70 bg-background/40 p-3">
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <span className="text-xs text-muted">
-                        offer #{t.id} · proposed {when(t.proposedAt)} ET
-                        {ending ? ` · ${ending.verb} ${when(ending.at)} ET` : ""}
-                        {t.status === "failed" && t.resolutionReason ? ` · ${t.resolutionReason}` : ""}
-                      </span>
-                      <span className="flex items-baseline gap-2">
-                        {t.status === "proposed" ? (
-                          <Badge tone="warn">
-                            {remaining(offerExpiresAt(t.proposedAt, settings?.tradeOfferExpiryHours ?? 48), now)}
-                          </Badge>
-                        ) : null}
-                        <Badge tone={offerTone(t.status)}>{t.status}</Badge>
-                      </span>
-                    </div>
-                    <div className="mt-2 flex flex-col gap-3 sm:flex-row">
-                      <Side team={teamById.get(t.proposerTeamId)} label="Offers" players={give} summary="Giving up" />
-                      <Side
-                        team={teamById.get(t.counterpartyTeamId)}
-                        label="Asked for"
-                        players={get}
-                        summary="Receiving"
-                      />
-                    </div>
-                    <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-                      {swing ? (
-                        <Badge tone="accent">
-                          {swing} to {proposerName(t)}
-                        </Badge>
-                      ) : null}
-                      {t.parentTradeId ? (
-                        <span className="text-xs text-muted">counter to #{t.parentTradeId}</span>
-                      ) : null}
-                      {counterId ? <span className="text-xs text-muted">countered by #{counterId}</span> : null}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      </div>
+      <TradesList items={items} teams={teamOptions} now={now.getTime()} />
 
       <p className="mt-3 text-xs text-muted">
         An offer&apos;s message stays between the two teams unless the trade enters league review, where the
         voters see it (the agent prompt and §11). An open offer expires after{" "}
-        {settings?.tradeOfferExpiryHours ?? 48} hours with no response (§3.5).
+        {settings?.tradeOfferExpiryHours ?? 48} hours with no response (§3.5). The page carries the newest{" "}
+        {RESOLVED_LIMIT} resolved trades and {OFFERS_LIMIT} offers.
       </p>
     </>
   );
