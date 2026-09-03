@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { isNull, sql } from "drizzle-orm";
 import { etDay } from "@league/shared";
 import {
@@ -11,7 +10,9 @@ import {
   spendRollups,
   teams,
 } from "@league/engine";
-import { Badge, Card, Cell, Empty, PageTitle, Row, Table, money } from "../../components/ui";
+import { Card, Cell, Empty, PageTitle, Row, Table, money } from "../../components/ui";
+import { SpendTable } from "../../components/spend-table";
+import type { SpendRow } from "../../lib/spendSort";
 import { db, leagueClock } from "../../lib/db";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
@@ -107,7 +108,7 @@ export default async function SpendPage() {
     { key: "reporter", teamId: null as number | null, href: "/spend/reporter", name: "League reporter", model: "reporter" },
   ];
 
-  const rows = agents.map((a) => {
+  const rows: SpendRow[] = agents.map((a) => {
     const agg = perAgent.find((p) => (p.teamId ?? null) === a.teamId);
     const list = Number(agg?.list ?? 0);
     const todayCost = perAgentDay
@@ -116,7 +117,10 @@ export default async function SpendPage() {
     const st = a.teamId === null ? undefined : standings.find((s) => s.teamId === a.teamId);
     const sessionCount = Number(sessionCounts.find((s) => (s.teamId ?? null) === a.teamId)?.n ?? 0);
     return {
-      ...a,
+      key: a.key,
+      href: a.href,
+      name: a.name,
+      model: a.model,
       today: todayCost,
       week: weekOf(a.key),
       season: list,
@@ -133,6 +137,7 @@ export default async function SpendPage() {
     };
   });
 
+  const teamIdOf = new Map(agents.map((a) => [a.key, a.teamId]));
   const leagueSeason = rows.reduce((s, r) => s + r.season, 0);
   const leaguePaid = rows.reduce((s, r) => s + r.paid, 0);
   const leagueToday = rows.reduce((s, r) => s + r.today, 0);
@@ -192,53 +197,7 @@ export default async function SpendPage() {
         {rows.length === 0 ? (
           <Empty>No agents yet.</Empty>
         ) : (
-          <Table
-            head={[
-              "Agent",
-              "Today",
-              "Week",
-              "Season (list)",
-              "Season (paid)",
-              "Sessions",
-              "Avg / session",
-              "$ / point",
-              "$ / win",
-              "In",
-              "Out",
-              "Reasoning",
-              "Cached",
-            ]}
-          >
-            {[...rows]
-              .sort((a, b) => b.season - a.season)
-              .map((r) => (
-                <Row key={r.key}>
-                  <Cell>
-                    <Link href={r.href} className="font-medium hover:text-accent">
-                      {r.name}
-                    </Link>
-                    <span className="ml-1.5 text-xs text-muted">{r.model}</span>
-                    {r.alarms > 0 ? (
-                      <span className="ml-1.5">
-                        <Badge tone="warn">{r.alarms} alarm{r.alarms === 1 ? "" : "s"}</Badge>
-                      </span>
-                    ) : null}
-                  </Cell>
-                  <Cell align="right">{money(r.today)}</Cell>
-                  <Cell align="right">{money(r.week)}</Cell>
-                  <Cell align="right">{money(r.season)}</Cell>
-                  <Cell align="right">{money(r.paid)}</Cell>
-                  <Cell align="right">{r.sessions}</Cell>
-                  <Cell align="right">{r.perSession === null ? "—" : money(r.perSession)}</Cell>
-                  <Cell align="right">{r.perPoint === null ? "—" : `$${r.perPoint.toFixed(3)}`}</Cell>
-                  <Cell align="right">{r.perWin === null ? "—" : money(r.perWin)}</Cell>
-                  <Cell align="right">{r.input.toLocaleString()}</Cell>
-                  <Cell align="right">{r.output.toLocaleString()}</Cell>
-                  <Cell align="right">{r.reasoning.toLocaleString()}</Cell>
-                  <Cell align="right">{r.cached.toLocaleString()}</Cell>
-                </Row>
-              ))}
-          </Table>
+          <SpendTable rows={rows} />
         )}
         <p className="mt-3 text-xs text-muted">
           List cost prices every step from the model catalog, so agents stay comparable. Paid cost counts only what bills the
@@ -267,8 +226,9 @@ export default async function SpendPage() {
                         style={{ width: `${maxDay > 0 ? Math.max(2, (total / maxDay) * 100) : 0}%` }}
                       >
                         {rows.map((r, i) => {
+                          const teamId = teamIdOf.get(r.key) ?? null;
                           const v = perAgentDay
-                            .filter((p) => (p.teamId ?? null) === r.teamId && p.day === day)
+                            .filter((p) => (p.teamId ?? null) === teamId && p.day === day)
                             .reduce((s, p) => s + Number(p.list), 0);
                           if (v <= 0) return null;
                           return (

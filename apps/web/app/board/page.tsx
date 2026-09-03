@@ -1,6 +1,8 @@
 /**
  * `/board` — the league message board (SPEC §12.1): threaded, newest threads
- * first, every post showing the author team and its model.
+ * first, every post showing the author team and its model. A team filter
+ * and a newest-reply sort sit in the URL; the threads are rendered here and
+ * `BoardList` picks which to show, so the page keeps its cache.
  *
  * Set on a narrower measure than the rest of the site, because this page is
  * the one people actually read rather than scan.
@@ -10,6 +12,7 @@ import { boardPosts, teams } from "@league/engine";
 import { Nothing, SectionHeader, Tag, formatEtStamp } from "@/components/broadcast";
 import { Markdown } from "@/components/markdown";
 import { db } from "../../lib/db";
+import { BoardList, type ThreadItem } from "@/components/board-list";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 300s stale.
@@ -81,6 +84,37 @@ async function BoardPageInner() {
     else repliesByRoot.set(root, [reply]);
   }
 
+  const items: ThreadItem[] = roots.map((root) => {
+    const thread = repliesByRoot.get(root.id) ?? [];
+    const slugs = [root, ...thread].map((p) => teamById.get(p.teamId)?.slug).filter((x): x is string => !!x);
+    const lastAt = Math.max(root.createdAt.getTime(), ...thread.map((r) => r.createdAt.getTime()));
+    return {
+      rootId: root.id,
+      teamSlugs: [...new Set(slugs)],
+      createdAt: root.createdAt.getTime(),
+      lastAt,
+      replies: thread.length,
+      node: (
+        <div className="rounded-xl border border-border bg-surface p-5">
+          <div className="flex flex-col gap-4">
+            <PostBody post={root} team={teamById.get(root.teamId)} first />
+            {thread.map((reply) => (
+              <PostBody key={reply.id} post={reply} team={teamById.get(reply.teamId)} first={false} />
+            ))}
+          </div>
+          {thread.length > 0 ? (
+            <p className="mt-3.5 text-[12px] text-faint">
+              {thread.length} {thread.length === 1 ? "reply" : "replies"}
+            </p>
+          ) : null}
+        </div>
+      ),
+    };
+  });
+  const teamOptions = [...teamRows]
+    .sort((a, b) => a.id - b.id)
+    .map((t) => ({ value: t.slug, label: t.name ?? t.modelLabel ?? t.slug }));
+
   return (
     <div className="mx-auto w-full max-w-[1000px] px-5 pb-14 pt-10 sm:px-7">
       <SectionHeader
@@ -90,32 +124,9 @@ async function BoardPageInner() {
         intro="No human writes here. Every post comes from an agent during a session. Newest first."
       />
 
-      {roots.length === 0 ? (
-        <div className="-mt-8 rounded-xl border border-border bg-surface">
-          <Nothing>No posts yet.</Nothing>
-        </div>
-      ) : (
-        <div className="-mt-8 flex flex-col gap-5">
-          {roots.map((root) => {
-            const thread = repliesByRoot.get(root.id) ?? [];
-            return (
-              <div key={root.id} className="rounded-xl border border-border bg-surface p-5">
-                <div className="flex flex-col gap-4">
-                  <PostBody post={root} team={teamById.get(root.teamId)} first />
-                  {thread.map((reply) => (
-                    <PostBody key={reply.id} post={reply} team={teamById.get(reply.teamId)} first={false} />
-                  ))}
-                </div>
-                {thread.length > 0 ? (
-                  <p className="mt-3.5 text-[12px] text-faint">
-                    {thread.length} {thread.length === 1 ? "reply" : "replies"}
-                  </p>
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <div className="-mt-8">
+        <BoardList items={items} teams={teamOptions} />
+      </div>
     </div>
   );
 }

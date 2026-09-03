@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useState } from "react";
 import { LiveDot, Nothing, formatEtStamp } from "@/components/broadcast";
+import { FilterBar, FilterSelect, ShowMore, useUrlState } from "@/components/list-controls";
+import { page, readParam } from "@/lib/listControls";
 import {
-  ALL,
   REPORTER,
   SESSION_STATUSES,
   filterSessions,
@@ -13,10 +14,14 @@ import {
   type SessionListRow,
 } from "@/lib/sessionsFilter";
 
+/** Rows revealed per "show more". */
+const STEP = 100;
+
 /**
  * The cross-team sessions table. The rows arrive already fetched from the
- * server page; the two filters are client state over that page of rows, which
- * is the right size for a league that runs hundreds of sessions, not millions.
+ * server page; the three filters are URL state applied over that page of
+ * rows, which is the right size for a league that runs hundreds of sessions
+ * a week, not millions.
  */
 export function SessionsTable({
   rows,
@@ -25,15 +30,18 @@ export function SessionsTable({
   rows: SessionListRow[];
   teams: Array<{ slug: string; label: string }>;
 }) {
-  const [team, setTeam] = useState<string>(ALL);
-  const [status, setStatus] = useState<string>(ALL);
-  const shown = filterSessions(rows, team, status);
+  const url = useUrlState();
+  const [limit, setLimit] = useState(STEP);
+  const kinds = [...new Set(rows.map((r) => r.kind))].sort();
+  const team = readParam(url.get("team"), [...teams.map((t) => t.slug), REPORTER]);
+  const status = readParam(url.get("status"), SESSION_STATUSES);
+  const kind = readParam(url.get("kind"), kinds);
+
+  const matching = filterSessions(rows, team, status, kind);
+  const { items: shown, more } = page(matching, limit);
   const live = rows.filter((r) => isLive(r.status));
   const teamLabel = (row: SessionListRow) =>
     row.teamId === null ? "League reporter" : (row.teamName ?? row.modelLabel ?? row.teamSlug ?? "A team");
-
-  const selectClass =
-    "rounded-md border border-border-strong bg-surface px-2.5 py-1.5 text-[13px] text-foreground";
 
   return (
     <div>
@@ -57,50 +65,36 @@ export function SessionsTable({
         </div>
       ) : null}
 
-      <div className="mb-3.5 flex flex-wrap items-center gap-2.5">
-        <label className="sr-only" htmlFor="sessions-team">
-          Team
-        </label>
-        <select
+      <FilterBar count={`${matching.length} of ${rows.length} sessions`}>
+        <FilterSelect
           id="sessions-team"
-          className={selectClass}
+          label="Team"
           value={team}
-          onChange={(e) => setTeam(e.target.value)}
-        >
-          <option value={ALL}>All teams</option>
-          {teams.map((t) => (
-            <option key={t.slug} value={t.slug}>
-              {t.label}
-            </option>
-          ))}
-          <option value={REPORTER}>League reporter</option>
-        </select>
-        <label className="sr-only" htmlFor="sessions-status">
-          Status
-        </label>
-        <select
+          onChange={(v) => url.set({ team: v })}
+          allLabel="All teams"
+          options={[...teams.map((t) => ({ value: t.slug, label: t.label })), { value: REPORTER, label: "League reporter" }]}
+        />
+        <FilterSelect
           id="sessions-status"
-          className={selectClass}
+          label="Status"
           value={status}
-          onChange={(e) => setStatus(e.target.value)}
-        >
-          <option value={ALL}>All statuses</option>
-          {SESSION_STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {s.replace(/_/g, " ")}
-            </option>
-          ))}
-        </select>
-        <span className="text-[12px] text-faint">
-          {shown.length} of {rows.length} sessions
-        </span>
-      </div>
+          onChange={(v) => url.set({ status: v })}
+          allLabel="All statuses"
+          options={SESSION_STATUSES.map((s) => ({ value: s, label: s.replace(/_/g, " ") }))}
+        />
+        <FilterSelect
+          id="sessions-kind"
+          label="Kind"
+          value={kind}
+          onChange={(v) => url.set({ kind: v })}
+          allLabel="All kinds"
+          options={kinds.map((k) => ({ value: k, label: k.replace(/_/g, " ") }))}
+        />
+      </FilterBar>
 
       <div className="min-w-0 overflow-hidden rounded-xl border border-border bg-surface">
         {shown.length === 0 ? (
-          <Nothing>
-            {rows.length === 0 ? "No session has run yet." : "No session matches these filters."}
-          </Nothing>
+          <Nothing>{rows.length === 0 ? "No session has run yet." : "No session matches these filters."}</Nothing>
         ) : (
           <div className="table-scroll">
             <table className="w-full min-w-[720px] text-[13px]">
@@ -150,9 +144,7 @@ export function SessionsTable({
                       {s.startedAt ? formatEtStamp(s.startedAt) : "—"}
                     </td>
                     <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{s.toolCalls}</td>
-                    <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">
-                      ${s.costUsd.toFixed(2)}
-                    </td>
+                    <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">${s.costUsd.toFixed(2)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -160,6 +152,7 @@ export function SessionsTable({
           </div>
         )}
       </div>
+      <ShowMore more={more} noun="sessions" onClick={() => setLimit((n) => n + STEP)} />
     </div>
   );
 }

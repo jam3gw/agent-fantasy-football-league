@@ -2,6 +2,42 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-03 — Filters and sorts on the public pages
+
+Jake asked for filters and sort on the trades page and the others. Built in
+one pass, all recorded in the §12.1 table:
+
+- **Trades**: one filter bar over all three sections — team on either side,
+  status, period (24h/7d/30d) — and a sort by newest or by size of swing;
+  forty cards per section with "show more"; the page now carries 200
+  resolved trades and 200 offers. A team page links to its own filtered view.
+- **Sessions**: kind filter joins team and status; filters mirrored into the
+  URL; 600 rows fetched, a hundred shown at a time.
+- **Transactions**: week filter and a by-week sort, applied in SQL like its
+  existing team and type filters.
+- **Board**: filter by a team that posted anywhere in the thread; sort by
+  newest thread or newest reply.
+- **Waivers**: the last run's results filter by team.
+- **Spend**: the per-agent table sorts by any column, direction toggles.
+
+**How, and why.** Reading `searchParams` on the server makes a route dynamic
+and drops its §12.1 cache (`/transactions` already pays that, and keeps its
+pattern). Everywhere else the server renders every card and a small client
+component picks which to show: the filter state is read from
+`window.location` after mount and written with `history.replaceState`, so a
+filtered view is a link, the page stays prerendered, and no Suspense
+bailout is needed (the prerendered HTML is the unfiltered list). The trade
+cards, board threads and waiver rows cross to the client as rendered React
+nodes with a few filterable fields beside them — the client never sees a
+row it should not render. The pure filter and sort functions
+(`lib/listControls.ts`, `tradesList.ts`, `boardList.ts`, `spendSort.ts`,
+`sessionsFilter.ts`) carry unit tests; unknown values sort last in both
+directions.
+
+**Not done.** Trades has no week filter: the `trades` table has no week
+column, so the period filter stands in. Board threads still cap at 40 with
+no "show more".
+
 ## 2026-09-03 — `/trades` lists offers that never reached review
 
 Jake asked whether the page should show offered trades. It now does: a

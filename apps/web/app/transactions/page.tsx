@@ -1,12 +1,14 @@
 /**
- * `/transactions` — every transaction, filterable by team and type
- * (SPEC §12.1). Each payload is rendered for its type rather than dumped as
+ * `/transactions` — every transaction, filterable by team, type and week,
+ * newest first or by week (SPEC §12.1). The filters are query parameters
+ * applied in SQL, so the page reads `searchParams` and renders per request. Each payload is rendered for its type rather than dumped as
  * raw JSON; commissioner actions appear here too (§12.2).
  */
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { and, arrayContains, desc, eq, inArray } from "drizzle-orm";
-import { players, teams, transactions, type TransactionType } from "@league/engine";
+import { and, arrayContains, desc, eq, inArray, sql } from "drizzle-orm";
+import { getSettings, players, teams, transactions, type TransactionType } from "@league/engine";
+import { readParam, readWeek } from "../../lib/listControls";
 import { db } from "../../lib/db";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "../../components/ui";
 import { InlineMarkdown } from "../../components/markdown";
@@ -17,6 +19,8 @@ import { flattenMarkdown } from "../../lib/broadcastLogic";
 export const revalidate = 300;
 
 const LIMIT = 200;
+const MAX_WEEK = 18;
+const SORTS = ["newest", "week"] as const;
 
 const TYPES: readonly TransactionType[] = [
   "draft_pick",
@@ -280,11 +284,14 @@ function FilterLinks({
   options,
   current,
   hrefFor,
+  allLabel = "all",
 }: {
   label: string;
   options: Array<{ value: string; label: string }>;
   current: string | undefined;
   hrefFor: (value: string | undefined) => string;
+  /** What the unset option is called; "all" for a filter, the default for a sort. */
+  allLabel?: string;
 }) {
   return (
     <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
@@ -293,7 +300,7 @@ function FilterLinks({
         href={hrefFor(undefined)}
         className={current === undefined ? "font-medium text-accent" : "text-muted hover:text-accent"}
       >
-        all
+        {allLabel}
       </Link>
       {options.map((o) => (
         <Link
@@ -311,12 +318,16 @@ function FilterLinks({
 async function TransactionsPageInner({
   searchParams,
 }: {
-  searchParams: Promise<{ team?: string | string[]; type?: string | string[] }>;
+  searchParams: Promise<{ team?: string | string[]; type?: string | string[]; week?: string | string[]; sort?: string | string[] }>;
 }) {
   const sp = await searchParams;
   const teamSlug = one(sp.team);
   const typeParam = one(sp.type);
   const type = TYPES.includes(typeParam as TransactionType) ? (typeParam as TransactionType) : undefined;
+  const settings = await getSettings(db()).catch(() => null);
+  const currentWeek = Math.min(MAX_WEEK, Math.max(1, settings?.currentWeek ?? 1));
+  const week = readWeek(one(sp.week), MAX_WEEK);
+  const sort = readParam(one(sp.sort), SORTS, "newest");
 
   const teamRows = await db().select().from(teams);
   const teamById = new Map(teamRows.map((t) => [t.id, t]));
@@ -329,9 +340,15 @@ async function TransactionsPageInner({
       and(
         type ? eq(transactions.type, type) : undefined,
         team ? arrayContains(transactions.teamIds, [team.id]) : undefined,
+        week !== undefined ? eq(transactions.week, week) : undefined,
       ),
     )
-    .orderBy(desc(transactions.id))
+    // Pre-season rows have no week; by week they sink to the bottom.
+    .orderBy(
+      ...(sort === "week"
+        ? [sql`${transactions.week} desc nulls last`, desc(transactions.id)]
+        : [desc(transactions.id)]),
+    )
     .limit(LIMIT);
 
   const ids = [...new Set(rows.flatMap((t) => playerIdsIn(t.payload)))];
@@ -348,13 +365,18 @@ async function TransactionsPageInner({
     teamOf: (teamId) => teamById.get(teamId),
   };
 
-  const hrefWith = (next: { team?: string; type?: string }) => {
+  const weekParam = week === undefined ? undefined : String(week);
+  const sortParam = sort === "newest" ? undefined : sort;
+  const hrefWith = (next: { team?: string; type?: string; week?: string; sort?: string }) => {
     const qs = new URLSearchParams();
     if (next.team) qs.set("team", next.team);
     if (next.type) qs.set("type", next.type);
+    if (next.week) qs.set("week", next.week);
+    if (next.sort) qs.set("sort", next.sort);
     const q = qs.toString();
     return q ? `/transactions?${q}` : "/transactions";
   };
+  const weeks = Array.from({ length: currentWeek }, (_, i) => String(i + 1));
 
   return (
     <>
@@ -367,20 +389,33 @@ async function TransactionsPageInner({
           label="Type"
           current={type}
           options={TYPES.map((t) => ({ value: t, label: TYPE_LABEL[t] }))}
-          hrefFor={(value) => hrefWith({ team: teamSlug, type: value })}
+          hrefFor={(value) => hrefWith({ team: teamSlug, type: value, week: weekParam, sort: sortParam })}
         />
         <FilterLinks
           label="Team"
           current={team?.slug}
           options={teamRows.map((t) => ({ value: t.slug, label: t.name ?? t.slug }))}
-          hrefFor={(value) => hrefWith({ team: value, type })}
+          hrefFor={(value) => hrefWith({ team: value, type, week: weekParam, sort: sortParam })}
+        />
+        <FilterLinks
+          label="Week"
+          current={weekParam}
+          options={weeks.map((w) => ({ value: w, label: w }))}
+          hrefFor={(value) => hrefWith({ team: teamSlug, type, week: value, sort: sortParam })}
+        />
+        <FilterLinks
+          label="Sort"
+          current={sortParam}
+          allLabel="newest"
+          options={[{ value: "week", label: "by week" }]}
+          hrefFor={(value) => hrefWith({ team: teamSlug, type, week: weekParam, sort: value })}
         />
       </div>
 
       <Card>
         {rows.length === 0 ? (
           <Empty>
-            {teamSlug || type ? "No transactions match this filter." : "No transactions yet."}
+            {teamSlug || type || week !== undefined ? "No transactions match this filter." : "No transactions yet."}
           </Empty>
         ) : (
           <Table head={["When", "Type", "Team", "What happened"]}>
