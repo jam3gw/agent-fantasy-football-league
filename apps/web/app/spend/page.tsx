@@ -50,6 +50,7 @@ export default async function SpendPage() {
           output: sql<number>`coalesce(sum(${spendLedger.outputTokens}), 0)::bigint`,
           reasoning: sql<number>`coalesce(sum(${spendLedger.reasoningTokens}), 0)::bigint`,
           cached: sql<number>`coalesce(sum(${spendLedger.cachedInputTokens}), 0)::bigint`,
+          cacheWrites: sql<number>`coalesce(sum(${spendLedger.cacheWriteTokens}), 0)::bigint`,
         })
         .from(spendLedger)
         .groupBy(spendLedger.teamId)
@@ -133,6 +134,7 @@ export default async function SpendPage() {
       output: Number(agg?.output ?? 0),
       reasoning: Number(agg?.reasoning ?? 0),
       cached: Number(agg?.cached ?? 0),
+      cacheWrites: Number(agg?.cacheWrites ?? 0),
       alarms: alarms.filter((al) => al.scopeKey === a.key).length,
     };
   });

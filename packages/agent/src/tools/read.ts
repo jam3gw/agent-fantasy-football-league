@@ -56,7 +56,7 @@ import {
   waiverRuns,
 } from "@league/engine";
 import type { LeagueTool, ToolContext, ToolResult } from "./types.ts";
-import { pageRows, toolFailure } from "./types.ts";
+import { extraPositions, pageRows, toolFailure } from "./types.ts";
 
 /* ------------------------------------------------------------------ *
  * shared helpers
@@ -105,6 +105,18 @@ function iso(d: Date | null | undefined): string | null {
 
 function et(d: Date | null | undefined): string | null {
   return d ? formatEt(d) : null;
+}
+
+/**
+ * The same rule for a transaction's payload: a lineup transaction stores the
+ * whole lineup before and after, but the `diff` already names every slot
+ * that changed, so only the diff is returned (an empty diff is a lineup
+ * re-set to itself).
+ */
+function compactTransactionPayload(type: string, payload: unknown): unknown {
+  if (type !== "lineup" || !payload || typeof payload !== "object") return payload;
+  const { before: _before, after: _after, ...rest } = payload as Record<string, unknown>;
+  return rest;
 }
 
 function round2(n: number): number {
@@ -347,10 +359,9 @@ async function rosterPayload(
       name: p.fullName,
       slot: slots.get(p.playerId) ?? "BN",
       position: p.position,
-      fantasy_positions: p.fantasyPositions,
+      ...extraPositions(p.position, p.fantasyPositions),
       nfl_team: p.nflTeam,
       opponent: game ? `${game.home ? "vs" : "@"} ${game.opponent}` : null,
-      kickoff_at: iso(game?.kickoffAt ?? null),
       kickoff_et: et(game?.kickoffAt ?? null),
       on_bye_this_week: p.nflTeam !== null && game === undefined,
       bye_week: bye,
@@ -373,10 +384,8 @@ async function rosterPayload(
     team: {
       id: team.id,
       name: team.name,
-      slug: team.slug,
       model: team.modelLabel,
-      model_id: team.modelId,
-      paused: team.paused,
+      ...(team.paused ? { paused: true } : {}),
       waiver_priority: team.waiverPriority,
       record: record
         ? { wins: record.wins, losses: record.losses, ties: record.ties, points_for: record.pointsFor }
@@ -491,7 +500,6 @@ export const getLeagueStateTool = readTool(
       .sort((a, b) => a.kickoffAt.getTime() - b.kickoffAt.getTime())
       .slice(0, 6)
       .map((s) => ({
-        kickoff_at: iso(s.kickoffAt),
         kickoff_et: et(s.kickoffAt),
         nfl_teams: s.nflTeams,
         my_players_locking: s.myPlayers,
@@ -860,7 +868,7 @@ export const getPlayerStatsTool = readTool(
         player_id: p.playerId,
         name: p.fullName,
         position: p.position,
-        fantasy_positions: p.fantasyPositions,
+        ...extraPositions(p.position, p.fantasyPositions),
         nfl_team: p.nflTeam,
         status: p.status,
         injury_status: p.injuryStatus,
@@ -871,7 +879,6 @@ export const getPlayerStatsTool = readTool(
           ? {
               week: next.week,
               opponent: next.home === p.nflTeam ? `vs ${next.away}` : `@ ${next.home}`,
-              kickoff_at: iso(next.kickoffAt),
               kickoff_et: et(next.kickoffAt),
             }
           : null,
@@ -947,7 +954,7 @@ export const searchPlayersTool = readTool(
       player_id: r.playerId,
       name: r.fullName,
       position: r.position,
-      fantasy_positions: r.fantasyPositions,
+      ...extraPositions(r.position, r.fantasyPositions),
       nfl_team: r.nflTeam,
       status: r.status,
       injury_status: r.injuryStatus,
@@ -1036,7 +1043,7 @@ export const getFreeAgentsTool = readTool(
       player_id: r.playerId,
       name: r.fullName,
       position: r.position,
-      fantasy_positions: r.fantasyPositions,
+      ...extraPositions(r.position, r.fantasyPositions),
       nfl_team: r.nflTeam,
       status: r.status,
       injury_status: r.injuryStatus,
@@ -1132,8 +1139,7 @@ export const getTransactionsTool = readTool(
       week: t.week,
       team_ids: t.teamIds,
       teams: t.teamIds.map((id) => idx.get(id)?.name ?? null),
-      payload: t.payload,
-      at: iso(t.createdAt),
+      payload: compactTransactionPayload(t.type, t.payload),
       at_et: et(t.createdAt),
     }));
     return pageRows(items, args.offset ?? 0, args.limit ?? 25);

@@ -26,7 +26,17 @@ export interface UsageTokens {
   outputTokens: number;
   reasoningTokens: number;
   cachedInputTokens: number;
+  /** Tokens written to the provider's prompt cache this step (Anthropic reports them; others 0). */
+  cacheWriteTokens?: number;
 }
+
+/**
+ * Anthropic prices a five-minute cache write at 1.25x the input rate. The
+ * catalog carries no write price, so the multiplier lives here; it applies
+ * only to steps priced from the table (the gateway's own cost already
+ * includes it).
+ */
+export const CACHE_WRITE_INPUT_MULTIPLIER = 1.25;
 
 export interface ModelStepCost {
   costUsd: number;
@@ -36,8 +46,8 @@ export interface ModelStepCost {
 /**
  * Cost of one model step. The gateway's own cost is preferred when the
  * provider metadata carries it (§8.7 verify); otherwise the price table.
- * Cached input tokens are billed at the cache-read rate and are NOT also
- * billed as ordinary input.
+ * Cached input tokens are billed at the cache-read rate, cache writes at the
+ * write rate, and neither is also billed as ordinary input.
  */
 export async function computeStepCost(
   db: EngineDb,
@@ -55,10 +65,12 @@ export async function computeStepCost(
   const rows = await db.select().from(modelPrices).where(eq(modelPrices.modelId, modelId));
   const p = rows[0];
   if (!p) return { costUsd: 0, source: "price_table" };
-  const uncachedInput = Math.max(0, usage.inputTokens - usage.cachedInputTokens);
+  const cacheWrite = usage.cacheWriteTokens ?? 0;
+  const uncachedInput = Math.max(0, usage.inputTokens - usage.cachedInputTokens - cacheWrite);
   const cost =
     (uncachedInput * p.inputUsdPerM) / 1_000_000 +
     (usage.cachedInputTokens * (p.cachedInputUsdPerM ?? p.inputUsdPerM)) / 1_000_000 +
+    (cacheWrite * p.inputUsdPerM * CACHE_WRITE_INPUT_MULTIPLIER) / 1_000_000 +
     (usage.outputTokens * p.outputUsdPerM) / 1_000_000 +
     (usage.reasoningTokens * (p.reasoningUsdPerM ?? p.outputUsdPerM)) / 1_000_000;
   return { costUsd: round6(cost), source: "price_table" };
@@ -96,6 +108,7 @@ export async function recordSpend(db: EngineDb, clock: Clock, entry: LedgerEntry
     outputTokens: entry.usage.outputTokens,
     reasoningTokens: entry.usage.reasoningTokens,
     cachedInputTokens: entry.usage.cachedInputTokens,
+    cacheWriteTokens: entry.usage.cacheWriteTokens ?? 0,
     costUsd: entry.costUsd,
     source: entry.source,
     toolName: entry.toolName ?? null,

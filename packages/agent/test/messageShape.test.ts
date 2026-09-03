@@ -333,6 +333,69 @@ describe("every message handed to the model is a valid ModelMessage", () => {
     expect(parts.some((p) => p.type === "tool-call" && p.toolCallId === "c1")).toBe(true);
   });
 
+  it("holds with Anthropic cache breakpoints on a tool message — the real SDK accepts the part-level option", async () => {
+    // The breakpoints ride on `providerOptions` of the tool message and of
+    // its last tool-result part (modelStep.ts withCaching). streamText
+    // validates the prompt against its own schema before any provider sees
+    // it, so this is where a bad shape would kill every Anthropic session
+    // on its second step.
+    let prompt: unknown = null;
+    const mock = new MockLanguageModelV4({
+      doStream: async (params: { prompt: unknown }) => {
+        prompt = params.prompt;
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: "text-start", id: "t" },
+              { type: "text-delta", id: "t", delta: "ok" },
+              { type: "text-end", id: "t" },
+              {
+                type: "finish",
+                finishReason: { unified: "stop", raw: undefined },
+                usage: {
+                  inputTokens: { total: 3, noCache: 1, cacheRead: 1, cacheWrite: 1 },
+                  outputTokens: { total: 1, text: 1, reasoning: undefined },
+                },
+              },
+            ],
+          }),
+        };
+      },
+    });
+    const step = createModelStep({} as never, {
+      stream: ((params: Record<string, unknown>) =>
+        streamText({ ...params, model: mock } as never)) as never,
+      flushIntervalMs: 0,
+    });
+
+    const result = await step(
+      {
+        modelId: "anthropic/claude-sonnet-5",
+        messages: [
+          { role: "system", content: "system" },
+          { role: "user", content: "brief" },
+          { role: "assistant", content: [{ type: "tool-call", toolCallId: "c1", toolName: "get_league_state", input: {} }] },
+          {
+            role: "tool",
+            content: [{ type: "tool-result", toolCallId: "c1", toolName: "get_league_state", output: { type: "json", value: { week: 2 } } }],
+          },
+        ],
+        tools: [],
+      },
+      1,
+    );
+    expect(result.text).toBe("ok");
+    // The usage detail the ledger prices from arrives as the SDK reports it.
+    expect(result.usage.cachedInputTokens).toBe(1);
+    expect(result.usage.cacheWriteTokens).toBe(1);
+    // And the breakpoint reached the provider layer on the tool-result part.
+    const messages = prompt as Array<{ role: string; content: Array<Record<string, unknown>>; providerOptions?: unknown }>;
+    const tool = messages.find((m) => m.role === "tool")!;
+    const breakpoint = { anthropic: { cacheControl: { type: "ephemeral" } } };
+    expect(tool.providerOptions).toEqual(breakpoint);
+    expect(tool.content[tool.content.length - 1]!.providerOptions).toEqual(breakpoint);
+  });
+
   it("holds after context trimming replaces an old tool result", () => {
     const messages: ModelMessage[] = [
       { role: "user", content: "hello" },

@@ -22,6 +22,7 @@ export interface SpendRow {
   output: number;
   reasoning: number;
   cached: number;
+  cacheWrites: number;
 }
 
 export const SPEND_COLUMNS = [
@@ -38,6 +39,7 @@ export const SPEND_COLUMNS = [
   ["output", "Out"],
   ["reasoning", "Reasoning"],
   ["cached", "Cached"],
+  ["cacheWrites", "Cache writes"],
 ] as const;
 export type SpendColumn = (typeof SPEND_COLUMNS)[number][0];
 export const SPEND_COLUMN_KEYS: readonly string[] = SPEND_COLUMNS.map(([k]) => k);

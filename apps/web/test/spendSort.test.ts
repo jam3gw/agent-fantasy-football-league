@@ -19,6 +19,7 @@ const row = (name: string, season: number, perPoint: number | null): SpendRow =>
   output: 0,
   reasoning: 0,
   cached: 0,
+  cacheWrites: 0,
 });
 const rows = [row("b", 5, null), row("a", 9, 0.2), row("c", 1, 0.1)];
 

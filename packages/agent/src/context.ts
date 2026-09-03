@@ -6,23 +6,27 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { formatEt, nextEtTime } from "@league/shared";
 import type { SessionKind } from "@league/engine";
 import {
-  STARTING_SLOTS,
   boardPosts,
   computeStandings,
   decisionLogs,
   draft,
   getSettings,
+  groupKickoffWindows,
+  lineupCheckDueAt,
   lineupEntries,
   lockedPlayerIds,
   matchups,
   nflGames,
+  pendingCheckIns,
+  players,
   playerWeekProj,
   playerWeekStats,
-  players,
   readScratchpad,
   rosterEntries,
-  teamWeekResults,
+  sessions,
+  STARTING_SLOTS,
   teams,
+  teamWeekResults,
   trades,
   tradeVotes,
   waiverClaims,
@@ -44,10 +48,26 @@ export interface ContextSnapshot {
   last_week_result?: LastWeekResult;
   this_week_matchup?: MatchupView;
   pending?: PendingItems;
+  /** Sessions already on the calendar for this team (§8.5, §8.10). */
+  scheduled_sessions?: ScheduledSessions;
   board: Array<{ id: number; team: string | null; body: string; at: string }>;
   scratchpad?: string;
   recent_decisions?: string[];
   kind_data?: Record<string, unknown>;
+}
+
+/**
+ * What is already booked for this team, so a check-in is booked with full
+ * knowledge: the agent's own pending check-ins (§8.10) and the league's
+ * sessions for it — queued rows, plus the `lineup_check` the week plan books
+ * 90 minutes before every game window it has a player in (§9.2), whether or
+ * not that row exists yet. Measured 2026-09-03: eight of fifteen queued
+ * check-ins were booked for the same moment as one of those lineup checks.
+ */
+export interface ScheduledSessions {
+  my_check_ins: Array<{ check_in_id: number; at_et: string; reason: string }>;
+  league_sessions_for_me: Array<{ kind: string; at_et: string; window_kickoff_et?: string }>;
+  note: string;
 }
 
 interface MyTeam {
@@ -389,6 +409,8 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
     roster_flags: rosterFlags,
   };
 
+  snapshot.scheduled_sessions = await scheduledSessions(ctx, team, roster, upcoming);
+
   snapshot.scratchpad = await readScratchpad(db, teamId);
 
   const recent = await db
@@ -401,6 +423,67 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
 
   snapshot.kind_data = await kindData(ctx, settings.season, week);
   return snapshot;
+}
+
+const SCHEDULED_NOTE =
+  "The league runs a lineup_check for you about 90 minutes before every game window you have a player in; " +
+  "you do not need to book a check-in for that moment. weekly_review (Tue), post_waivers (Wed) and the " +
+  "trade windows (Wed–Sat) run on their days without a booking.";
+
+/** Everything already on this team's calendar (§8.5, §8.10). */
+async function scheduledSessions(
+  ctx: ToolContext,
+  team: { id: number; paused: boolean; eliminated: boolean },
+  roster: Array<{ nflTeam: string | null }>,
+  weekGames: Array<{ kickoffAt: Date; home: string; away: string }>,
+): Promise<ScheduledSessions> {
+  const { db, clock } = ctx;
+  const now = clock.now();
+  const teamId = team.id;
+
+  const checkIns = await pendingCheckIns(db, teamId);
+
+  // Queued league sessions for this team (any kind but a check-in).
+  const queued = await db
+    .select({ kind: sessions.kind, context: sessions.context })
+    .from(sessions)
+    .where(and(eq(sessions.teamId, teamId), eq(sessions.status, "queued")));
+  const league: Array<{ at: Date; kind: string; window?: Date }> = [];
+  const bookedWindows = new Set<string>();
+  for (const row of queued) {
+    if (row.kind === "self_check_in") continue;
+    const due = new Date(String(row.context.due_at ?? ""));
+    if (Number.isNaN(due.getTime()) || due <= now) continue;
+    const windowKey = typeof row.context.window_kickoff_et === "string" ? row.context.window_kickoff_et : null;
+    if (windowKey) bookedWindows.add(windowKey);
+    league.push({ at: due, kind: row.kind, ...(windowKey ? { window: new Date(windowKey) } : {}) });
+  }
+
+  // Lineup checks the week plan will book (§9.2): one per window this team
+  // has a player in, 90 minutes before its first kickoff (booked rows carry
+  // a stagger of a few minutes on top). Listed even before the row exists,
+  // since the plan books them a day ahead and the agent is deciding now. A
+  // paused or eliminated team gets none, exactly as the plan skips it.
+  const myNflTeams = new Set(roster.map((r) => r.nflTeam).filter((t): t is string => t !== null));
+  const planned = team.paused || team.eliminated ? [] : groupKickoffWindows(weekGames);
+  for (const window of planned) {
+    const dueAt = lineupCheckDueAt(window);
+    if (dueAt <= now) continue;
+    if (bookedWindows.has(window.key.toISOString())) continue;
+    if (!window.nflTeams.some((t) => myNflTeams.has(t))) continue;
+    league.push({ at: dueAt, kind: "lineup_check", window: window.key });
+  }
+  league.sort((a, b) => a.at.getTime() - b.at.getTime());
+
+  return {
+    my_check_ins: checkIns.map((c) => ({ check_in_id: c.sessionId, at_et: formatEt(c.at), reason: c.reason })),
+    league_sessions_for_me: league.map((l) => ({
+      kind: l.kind,
+      at_et: formatEt(l.at),
+      ...(l.window ? { window_kickoff_et: formatEt(l.window) } : {}),
+    })),
+    note: SCHEDULED_NOTE,
+  };
 }
 
 /** Kind-specific extras (§8.5 last bullet). */

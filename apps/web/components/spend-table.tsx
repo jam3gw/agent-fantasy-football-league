@@ -69,6 +69,7 @@ export function SpendTable({ rows }: { rows: SpendRow[] }) {
           <Cell align="right">{count(r.output)}</Cell>
           <Cell align="right">{count(r.reasoning)}</Cell>
           <Cell align="right">{count(r.cached)}</Cell>
+          <Cell align="right">{count(r.cacheWrites)}</Cell>
         </Row>
       ))}
     </Table>
