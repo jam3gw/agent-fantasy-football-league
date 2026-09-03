@@ -151,6 +151,14 @@ export async function runJob(
       // players actually stored.
       const set = settings.phase === "pre_draft" || settings.phase === "drafting" ? "draft" : "weekly";
       await ingestRankings(db, clock, { season, set, week: settings.currentWeek });
+      // In season, also build the rest-of-season set from the season
+      // projections. `player_research` has offered `ros_rankings` to every
+      // agent since the FantasyPros replacement, but nothing ever ingested
+      // the set — 30 calls in one 48h stretch all failed with "no ros
+      // rankings are loaded" (found 2026-09-03, monitoring).
+      if (set === "weekly") {
+        await ingestRankings(db, clock, { season, set: "ros", week: settings.currentWeek });
+      }
       return;
     }
     case "draft.run": {
