@@ -42,7 +42,11 @@ Until then team 11 keeps running on the standard tier at standard prices.
 The price seed row lands on its own with the next deploy.
 
 Label stays "Muse Spark 1.2" on the site and in the agent's identity, because
-it is the same model; the tier shows in the model id next to it on `/spend`.
+it is the same model. The site says which seat runs under the training term
+(Jake's ask): `modelTierNote()` in the registry keys off the `-contributor`
+suffix, so it follows the production `teams` row rather than a hard-coded
+slot. It shows as a "contributor tier" tag plus one sentence on the team page,
+in the subtitle of the team's `/spend` page, and in the `/spend` footnote.
 
 ## 2026-09-03 — Cost: cache the whole conversation, carry each fact once, show the calendar
 
