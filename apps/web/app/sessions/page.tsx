@@ -4,7 +4,8 @@
  * team's page or by guessing a `/sessions/[id]` URL.
  *
  * The rows are the newest `SESSIONS_FETCHED`; the filters run in the browser
- * over that page. A queued or running session still resolves live on its own
+ * over that page, mirrored into the URL so a filtered view is a link, and
+ * the table reveals a hundred at a time. A queued or running session still resolves live on its own
  * page (§12's live view), so the 300s freshness here is fine.
  */
 import { Container, SectionHeader } from "@/components/broadcast";
@@ -21,7 +22,7 @@ export const metadata = {
 };
 
 /** How much history the page carries; the filters run over this many rows. */
-const SESSIONS_FETCHED = 300;
+const SESSIONS_FETCHED = 600;
 
 export default async function SessionsPage() {
   const [rows, teams] = await Promise.all([

@@ -48,12 +48,16 @@ export function teamKey(row: Pick<SessionListRow, "teamId" | "teamSlug">): strin
   return row.teamId === null ? REPORTER : (row.teamSlug ?? String(row.teamId));
 }
 
-export function filterSessions<T extends Pick<SessionListRow, "teamId" | "teamSlug" | "status">>(
+export function filterSessions<T extends Pick<SessionListRow, "teamId" | "teamSlug" | "status" | "kind">>(
   rows: readonly T[],
   team: string,
   status: string,
+  kind: string = ALL,
 ): T[] {
   return rows.filter(
-    (row) => (team === ALL || teamKey(row) === team) && (status === ALL || row.status === status),
+    (row) =>
+      (team === ALL || teamKey(row) === team) &&
+      (status === ALL || row.status === status) &&
+      (kind === ALL || row.kind === kind),
   );
 }

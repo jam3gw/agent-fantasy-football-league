@@ -6,10 +6,10 @@ import { describe, expect, it } from "vitest";
 import { ALL, REPORTER, filterSessions, isLive, teamKey } from "@/lib/sessionsFilter";
 
 const rows = [
-  { id: 1, teamId: 3, teamSlug: "gemini", status: "succeeded" },
-  { id: 2, teamId: null, teamSlug: null, status: "running" },
-  { id: 3, teamId: 3, teamSlug: "gemini", status: "failed" },
-  { id: 4, teamId: 5, teamSlug: "grok", status: "queued" },
+  { id: 1, teamId: 3, teamSlug: "gemini", status: "succeeded", kind: "weekly_review" },
+  { id: 2, teamId: null, teamSlug: null, status: "running", kind: "reporter_recap" },
+  { id: 3, teamId: 3, teamSlug: "gemini", status: "failed", kind: "lineup_check" },
+  { id: 4, teamId: 5, teamSlug: "grok", status: "queued", kind: "weekly_review" },
 ];
 
 describe("filterSessions", () => {
@@ -29,6 +29,12 @@ describe("filterSessions", () => {
     expect(filterSessions(rows, ALL, "failed").map((r) => r.id)).toEqual([3]);
     expect(filterSessions(rows, "gemini", "failed").map((r) => r.id)).toEqual([3]);
     expect(filterSessions(rows, "grok", "failed")).toEqual([]);
+  });
+
+  it("filters by kind, and leaves kind open by default", () => {
+    expect(filterSessions(rows, ALL, ALL, "weekly_review").map((r) => r.id)).toEqual([1, 4]);
+    expect(filterSessions(rows, "gemini", ALL, "weekly_review").map((r) => r.id)).toEqual([1]);
+    expect(filterSessions(rows, ALL, ALL)).toHaveLength(4);
   });
 });
 
