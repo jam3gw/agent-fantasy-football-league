@@ -154,7 +154,8 @@ export function reasoningVisibilityOptions(
  * Anthropic steps, the cached share of a step never rose above the snapshot
  * (docs/VERIFIED.md). A breakpoint on the last message caches the whole
  * conversation for the next step, whose new content is one assistant turn and
- * its tool results. The previous breakpoint is kept too (four is the
+ * its tool results — simulated on those rows, not yet measured live; the
+ * verify item in VERIFIED.md closes when a production session shows it. The previous breakpoint is kept too (four is the
  * provider's maximum) so a hit is found even when a step adds more content
  * blocks than the provider's automatic lookback covers.
  */

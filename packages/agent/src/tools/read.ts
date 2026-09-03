@@ -514,7 +514,6 @@ export const getLeagueStateTool = readTool(
       .sort((a, b) => a.kickoffAt.getTime() - b.kickoffAt.getTime())
       .slice(0, 6)
       .map((s) => ({
-        kickoff_at: iso(s.kickoffAt),
         kickoff_et: et(s.kickoffAt),
         nfl_teams: s.nflTeams,
         my_players_locking: s.myPlayers,
@@ -883,7 +882,7 @@ export const getPlayerStatsTool = readTool(
         player_id: p.playerId,
         name: p.fullName,
         position: p.position,
-        fantasy_positions: p.fantasyPositions,
+        ...extraPositions(p.position, p.fantasyPositions),
         nfl_team: p.nflTeam,
         status: p.status,
         injury_status: p.injuryStatus,
@@ -894,7 +893,6 @@ export const getPlayerStatsTool = readTool(
           ? {
               week: next.week,
               opponent: next.home === p.nflTeam ? `vs ${next.away}` : `@ ${next.home}`,
-              kickoff_at: iso(next.kickoffAt),
               kickoff_et: et(next.kickoffAt),
             }
           : null,

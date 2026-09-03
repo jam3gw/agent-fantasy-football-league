@@ -30,16 +30,25 @@ holds: the longest gap between two consecutive Anthropic steps was 156 seconds
 (average 16–21 s). Other providers' automatic caching sat at 29–43% on later
 steps and is not ours to set.
 
-Also confirmed from the same rows: the AI SDK folds cache-write tokens into
-`inputTokens` (step 1 of session 1104 reported 14,459 input with a 14,457
-prefix cached on step 2, so the write was in the count). The ledger had priced
-those at the plain input rate; `cache_write_tokens` is now recorded and priced
-at 1.25×.
+Inferred, not measured, from the same rows: the AI SDK appears to fold
+cache-write tokens into `inputTokens` (step 1 of session 1104 reported 14,459
+input, and step 2 read 14,457 from the cache, so the write must have been in
+step 1's count). The ledger never recorded writes, so it had priced them at the
+plain input rate; `cache_write_tokens` is now recorded and priced at 1.25×.
 
-**Still to verify on production after the deploy:** an Anthropic session's
-`cached_input_tokens` must now rise step by step (step N ≈ step N−1's input).
-Check the first Anthropic `trade_window` or `board_reply` after this ships;
-record the session id and the per-step numbers here.
+**Still to verify on production after the deploy**, on the first Anthropic
+`trade_window` or `board_reply` that runs; record the session id and the
+per-step numbers here:
+
+- `cached_input_tokens` rises step by step (step N ≈ step N−1's input);
+- `cache_write_tokens` is above 0 on step 1 and on later steps, which
+  confirms the gateway reports the field at all;
+- `input_tokens ≥ cached_input_tokens + cache_write_tokens` on every step,
+  which confirms the "folded into input" reading; if it does not hold, the
+  price-table formula in `computeStepCost` under-bills the write.
+
+The simulated savings above assume both of these hold and that every step
+after the first is a full-prefix hit.
 
 ## 2026-09-03 — Where the tokens go (§8.7)
 

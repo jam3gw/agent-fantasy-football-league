@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
-import { playerWeekProj, players, scheduleCheckIn, sessions } from "@league/engine";
+import { playerWeekProj, players, scheduleCheckIn, sessions, teams } from "@league/engine";
 import { buildContextSnapshot } from "../src/context.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
@@ -145,5 +145,48 @@ describe("scheduled sessions in the snapshot (§8.5, §8.10)", () => {
       { kind: "lineup_check", at_et: "Sun, Sep 13, 2026, 11:30 AM ET", window_kickoff_et: "Sun, Sep 13, 2026, 1:00 PM ET" },
     ]);
     expect(snapshot.scheduled_sessions!.my_check_ins).toEqual([]);
+  });
+
+  it("sorts queued league sessions of any kind with the planned checks, and skips one already due", async () => {
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    const clock = new FixedClock("2026-09-08T12:00:00.000Z");
+    await makeGame(db, { week: 1, kickoffAt: new Date("2026-09-13T17:00:00Z"), home: "KC", away: "BUF" });
+    const kc = await makePlayer(db, { nflTeam: "KC", position: "RB" });
+    await rosterPlayer(db, a, kc);
+    const row = (key: string, kind: "trade_response" | "post_waivers", due: string) => ({
+      teamId: a,
+      kind,
+      trigger: "test",
+      idempotencyKey: key,
+      status: "queued" as const,
+      modelId: "test/model",
+      context: { due_at: due },
+    });
+    await db.insert(sessions).values([
+      row("later", "trade_response", "2026-09-13T16:00:00.000Z"),
+      row("sooner", "post_waivers", "2026-09-09T13:00:00.000Z"),
+      row("past", "post_waivers", "2026-09-08T11:00:00.000Z"),
+    ]);
+
+    const snapshot = await buildContextSnapshot(ctxFor({ teamId: a, clock }));
+    expect(snapshot.scheduled_sessions!.league_sessions_for_me.map((s) => [s.kind, s.at_et])).toEqual([
+      ["post_waivers", "Wed, Sep 9, 2026, 9:00 AM ET"],
+      ["lineup_check", "Sun, Sep 13, 2026, 11:30 AM ET"],
+      ["trade_response", "Sun, Sep 13, 2026, 12:00 PM ET"],
+    ]);
+  });
+
+  it("plans no lineup checks for a paused or eliminated team, as the week plan books none", async () => {
+    await seedLeague(db);
+    const [a] = (await seedTeams(db)) as [number];
+    const clock = new FixedClock("2026-09-08T12:00:00.000Z");
+    await makeGame(db, { week: 1, kickoffAt: new Date("2026-09-13T17:00:00Z"), home: "KC", away: "BUF" });
+    const kc = await makePlayer(db, { nflTeam: "KC", position: "RB" });
+    await rosterPlayer(db, a, kc);
+    await db.update(teams).set({ eliminated: true }).where(eq(teams.id, a));
+
+    const snapshot = await buildContextSnapshot(ctxFor({ teamId: a, clock }));
+    expect(snapshot.scheduled_sessions!.league_sessions_for_me).toEqual([]);
   });
 });

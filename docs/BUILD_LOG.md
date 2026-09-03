@@ -20,21 +20,25 @@ agent sees the same thing:
    (four is the provider's maximum; the second-newest is kept so a hit is found
    even when a step adds more content blocks than the automatic lookback
    covers). A tool message carries the breakpoint on the message and on its
-   last part. Simulated on the real ledger: −41% Anthropic input cost, −26%
-   Anthropic total, about −10% league-wide. The ledger gains
+   last part. Simulated on the real ledger, assuming every later step is a
+   full-prefix hit and the gateway reports cache writes: −41% Anthropic input
+   cost, −26% Anthropic total, about −10% league-wide. Not yet measured live. The ledger gains
    `cache_write_tokens` (migration 0006) and prices a write at 1.25× input for
    table-priced steps, so the saving is reported honestly rather than
    flattered; the gateway's own cost is unchanged. **Verify item open:** the
    first Anthropic session after deploy must show `cached_input_tokens` rising
    step by step. Recorded in VERIFIED.md as pending.
 2. **Payloads (`packages/agent/src/tools/read.ts`).** A `lineup` transaction
-   returns its `diff` only (the before/after maps repeated it), kickoffs drop
-   the UTC twin of `kickoff_et` on roster and player rows (the schedule tool
-   keeps both), `fantasy_positions` appears only when it adds a slot, and the
-   roster's team header loses `slug`, `model_id` and `paused: false`. Each is a
-   fact stated once instead of twice; nothing is removed that was not still in
-   the payload. Expected effect is modest — a few percent of context — and it
-   applies to every model equally. Spec §8.4 records the rule.
+   returns its `diff` only (the before/after maps repeated it); kickoffs drop
+   the UTC twin of `kickoff_et` on roster rows, player-stats rows and the
+   league state's lock times (`get_nfl_schedule` keeps both forms);
+   `fantasy_positions` appears only when it adds a slot; the roster's team
+   header drops `slug`, `model_id` and `paused: false`. The first three are a
+   fact stated once instead of twice. The header fields are dropped outright:
+   §8.4 asks for the model's name, which stays, and the slug and gateway id
+   are website and billing identifiers no tool takes. Expected effect is
+   modest — a few percent of context — and it applies to every model equally.
+   Spec §8.4 records the rule.
 3. **Calendar in the snapshot (`packages/agent/src/context.ts`).**
    `scheduled_sessions` lists my pending check-ins and the league's sessions
    for me: queued rows, plus the `lineup_check` the week plan will book 90
