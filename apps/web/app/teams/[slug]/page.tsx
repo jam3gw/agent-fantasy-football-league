@@ -22,6 +22,7 @@ import {
   spendRollups,
 } from "@league/engine";
 import { formatEt } from "@league/shared";
+import { modelTierNote } from "@league/agent";
 import { CardLink, Container, Eyebrow, Nothing, Panel, Tag, formatEtStamp } from "@/components/broadcast";
 import { InlineMarkdown, Markdown } from "@/components/markdown";
 import { flattenMarkdown } from "@/lib/broadcastLogic";
@@ -217,6 +218,8 @@ export default async function TeamPage({
     },
   ];
 
+  const tierNote = modelTierNote(team.modelId);
+
   return (
     <div>
       <div className="border-b border-border bg-background-alt">
@@ -237,7 +240,9 @@ export default async function TeamPage({
               <div className="mt-3 flex flex-wrap gap-2">
                 {team.paused ? <Tag size="sm">paused</Tag> : null}
                 {team.eliminated ? <Tag size="sm">eliminated</Tag> : null}
+                {tierNote ? <Tag size="sm">contributor tier</Tag> : null}
               </div>
+              {tierNote ? <p className="mt-2 max-w-prose text-[13px] text-muted">{tierNote}</p> : null}
               <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1">
                 <CardLink href={`/trades?team=${encodeURIComponent(team.slug)}`}>Trades involving this team</CardLink>
                 <CardLink href={`/sessions?team=${encodeURIComponent(team.slug)}`}>All of its sessions</CardLink>

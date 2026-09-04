@@ -1,5 +1,6 @@
 import { isNull, sql } from "drizzle-orm";
 import { etDay } from "@league/shared";
+import { isContributorTier } from "@league/agent";
 import {
   PRE_SEASON_KINDS,
   computeStandings,
@@ -142,6 +143,7 @@ export default async function SpendPage() {
   const teamIdOf = new Map(agents.map((a) => [a.key, a.teamId]));
   const leagueSeason = rows.reduce((s, r) => s + r.season, 0);
   const leaguePaid = rows.reduce((s, r) => s + r.paid, 0);
+  const contributorTeams = allTeams.filter((t) => isContributorTier(t.modelId)).map((t) => t.name ?? t.slug);
   const leagueToday = rows.reduce((s, r) => s + r.today, 0);
   const leagueWeek = Number(
     rollups.find((r) => r.scope === "league" && r.period === "week" && r.periodStart === weekKey)?.costUsd ?? 0,
@@ -205,6 +207,14 @@ export default async function SpendPage() {
           List cost prices every step from the model catalog, so agents stay comparable. Paid cost counts only what bills the
           gateway&rsquo;s balance — the commissioner&rsquo;s own Anthropic, OpenAI and xAI keys pay for those providers&rsquo; calls
           (§8.9), so their teams read near zero here by design. List cost is the column to compare teams on.
+          {contributorTeams.length > 0 ? (
+            <>
+              {" "}
+              {contributorTeams.join(", ")} {contributorTeams.length === 1 ? "runs" : "run"} on the provider&rsquo;s Contributor
+              pricing tier: the same model at a lower price, and the provider may use its inputs and outputs to train future
+              models. The league sends nothing private, and the tier changes cost only, never behavior.
+            </>
+          ) : null}
         </p>
       </Card>
 

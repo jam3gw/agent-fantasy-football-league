@@ -421,12 +421,21 @@ export async function swapModelAction(form: FormData): Promise<void> {
   }
 
   await c.database.update(teams).set({ modelId, modelLabel, provider }).where(eq(teams.id, teamId));
-  const payload = { teamId, from: team.modelId, to: modelId, modelLabel, provider };
+  // A session carries its own model id from the moment it is queued, and the
+  // runner reads that, not the team's. Lineup checks are queued days before
+  // kickoff, so without this the swap would not reach them until the next
+  // trigger created new sessions. Running sessions keep the id they started on.
+  const requeued = await c.database
+    .update(sessions)
+    .set({ modelId, updatedAt: c.now })
+    .where(and(eq(sessions.teamId, teamId), eq(sessions.status, "queued"), eq(sessions.modelId, team.modelId)))
+    .returning({ id: sessions.id });
+  const payload = { teamId, from: team.modelId, to: modelId, modelLabel, provider, queuedSessions: requeued.length };
   await logAction(c, "model_swapped", payload, reason);
   await publicTransaction(c, "model_swapped", [teamId], { ...payload, reason });
   finish(
     "/admin/teams",
-    `${team.name ?? team.slug} now runs ${modelLabel}.` +
+    `${team.name ?? team.slug} now runs ${modelLabel}; ${requeued.length} queued session(s) moved with it.` +
       (onGateway === "unknown" ? " The gateway catalog could not be read, so the id was not verified." : ""),
   );
 }
