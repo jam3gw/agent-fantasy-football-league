@@ -22,7 +22,7 @@ import { InlineMarkdown } from "@/components/markdown";
 import { flattenMarkdown, gameStatus, winChancePercent } from "@/lib/broadcastLogic";
 import { db, leagueClock } from "@/lib/db";
 import { gameCards, teamName, type GameCard } from "@/lib/broadcast";
-import { liveStatus, safeRead as safe, settings, teamLineup, type LineupPlayer } from "@/lib/queries";
+import { liveStatus, safeRead as safe, settings, teamLineups, type LineupPlayer } from "@/lib/queries";
 
 // §12.1: 30s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 30s stale.
@@ -152,28 +152,46 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
   const league = await safe(settings, null);
   const season = league?.season ?? new Date().getUTCFullYear();
 
-  const [cards, live] = await Promise.all([
+  const [cards, live, clock] = await Promise.all([
     gameCards(week, season),
     safe(() => liveStatus(), { liveGames: 0, lastUpdateAt: null, delayed: false }),
+    safe(leagueClock, { now: () => new Date() }),
   ]);
 
-  // Lineups for every team playing this week.
-  const teamIds = cards.flatMap((c) => [c.awayTeam?.id, c.homeTeam?.id]).filter((id): id is number => id != null);
-  const lineups = new Map<number, SideLineup>();
-  for (const teamId of teamIds) {
-    if (lineups.has(teamId)) continue;
-    const rows = await safe(() => teamLineup(teamId, week, season), []);
-    lineups.set(teamId, { bySlot: new Map(rows.map((r) => [r.slot, r])) });
-  }
+  // Lineups for every team playing this week, fetched together: one team at
+  // a time was twelve serial trips to the database on every regeneration.
+  const teamIds = [
+    ...new Set(cards.flatMap((c) => [c.awayTeam?.id, c.homeTeam?.id]).filter((id): id is number => id != null)),
+  ];
+  const lineupRows = await safe(() => teamLineups(teamIds, week, season), new Map<number, LineupPlayer[]>());
+  const lineups = new Map<number, SideLineup>(
+    teamIds.map((teamId) => [teamId, { bySlot: new Map((lineupRows.get(teamId) ?? []).map((r) => [r.slot, r])) }]),
+  );
 
   const playerIds = [
     ...new Set([...lineups.values()].flatMap((side) => [...side.bySlot.values()].map((p) => p.playerId))),
   ];
 
-  const projections =
+  // The marquee game: the closest one actually being played — on a Thursday
+  // night every scheduled game is 0–0 and would beat the live one on margin —
+  // else the closest of whatever the week has.
+  const statusOf = (c: GameCard) => gameStatus(c.final, c.slotsToPlay, c.started);
+  const stillPlaying = cards.filter((c) => statusOf(c) === "live");
+  const featured =
+    (stillPlaying.length > 0 ? stillPlaying : cards)
+      .slice()
+      .sort((a, b) => Math.abs(a.awayPoints - a.homePoints) - Math.abs(b.awayPoints - b.homePoints))[0] ?? null;
+  const featuredStatus = featured === null ? null : statusOf(featured);
+  const featuredTeamIds = featured
+    ? [featured.awayTeam?.id, featured.homeTeam?.id].filter((id): id is number => id != null)
+    : [];
+
+  // Projections, locks and the marquee game's reasoning depend on nothing
+  // but the lineups above, so they go out together.
+  const [projections, locked, reasons] = await Promise.all([
     playerIds.length === 0
       ? []
-      : await safe(
+      : safe(
           () =>
             db()
               .select({ playerId: playerWeekProj.playerId, proj: playerWeekProj.projPtsPpr })
@@ -186,39 +204,14 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
                 ),
               ),
           [],
-        );
-  const projOf = new Map(projections.map((p) => [p.playerId, p.proj]));
-
-  const clock = await safe(leagueClock, { now: () => new Date() });
-  const locked =
+        ),
     playerIds.length === 0
       ? new Set<string>()
-      : await safe(() => lockedPlayerIds(db(), clock, season, week, playerIds), new Set<string>());
-
-  const weekSources = (league?.extra as { weekScoringSources?: Record<string, string> } | undefined)
-    ?.weekScoringSources;
-  const source = weekSources?.[String(week)];
-  const flagSource = source && source !== "sleeper" ? (SOURCE_LABEL[source] ?? `scored by ${source}`) : null;
-
-  // The marquee game: the closest one actually being played — on a Thursday
-  // night every scheduled game is 0–0 and would beat the live one on margin —
-  // else the closest of whatever the week has.
-  const statusOf = (c: GameCard) => gameStatus(c.final, c.slotsToPlay, c.started);
-  const stillPlaying = cards.filter((c) => statusOf(c) === "live");
-  const featured =
-    (stillPlaying.length > 0 ? stillPlaying : cards)
-      .slice()
-      .sort((a, b) => Math.abs(a.awayPoints - a.homePoints) - Math.abs(b.awayPoints - b.homePoints))[0] ?? null;
-  const featuredStatus = featured === null ? null : statusOf(featured);
-
-  // Why each side of the marquee game set the lineup it did.
-  const featuredTeamIds = featured
-    ? [featured.awayTeam?.id, featured.homeTeam?.id].filter((id): id is number => id != null)
-    : [];
-  const reasons =
+      : safe(() => lockedPlayerIds(db(), clock, season, week, playerIds), new Set<string>()),
+    // Why each side of the marquee game set the lineup it did.
     featuredTeamIds.length === 0
       ? []
-      : await safe(
+      : safe(
           () =>
             db()
               .select({
@@ -232,7 +225,15 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
               .where(and(eq(decisionLogs.week, week), inArray(decisionLogs.teamId, featuredTeamIds)))
               .orderBy(desc(decisionLogs.createdAt)),
           [],
-        );
+        ),
+  ]);
+  const projOf = new Map(projections.map((p) => [p.playerId, p.proj]));
+
+  const weekSources = (league?.extra as { weekScoringSources?: Record<string, string> } | undefined)
+    ?.weekScoringSources;
+  const source = weekSources?.[String(week)];
+  const flagSource = source && source !== "sleeper" ? (SOURCE_LABEL[source] ?? `scored by ${source}`) : null;
+
   /**
    * The card asks why this lineup, so a lineup decision answers it. A team
    * whose newest entry that week is a trade reply would otherwise explain its

@@ -192,43 +192,69 @@ export interface LineupPlayer {
 
 /** A team's lineup for a week with points by player, ghosts included (§7.5). */
 export async function teamLineup(teamId: number, week: number, season: number): Promise<LineupPlayer[]> {
+  return (await teamLineups([teamId], week, season)).get(teamId) ?? [];
+}
+
+/**
+ * The lineups of several teams in one round trip each: one query for the
+ * entries, then the player names and the week's points for all of them at
+ * once. A week's matchups page needs every team's lineup, and twelve calls
+ * to `teamLineup` cost thirty-six serial round trips to the database; this
+ * costs three. A team with no entries that week is left out of the map.
+ */
+export async function teamLineups(
+  teamIds: number[],
+  week: number,
+  season: number,
+): Promise<Map<number, LineupPlayer[]>> {
+  const byTeam = new Map<number, LineupPlayer[]>();
+  if (teamIds.length === 0) return byTeam;
   const entries = await db()
-    .select({ playerId: lineupEntries.playerId, slot: lineupEntries.slot })
+    .select({ teamId: lineupEntries.teamId, playerId: lineupEntries.playerId, slot: lineupEntries.slot })
     .from(lineupEntries)
-    .where(and(eq(lineupEntries.teamId, teamId), eq(lineupEntries.week, week)));
-  if (entries.length === 0) return [];
-  const ids = entries.map((e) => e.playerId);
-  const meta = await db()
-    .select({ playerId: players.playerId, name: players.fullName, position: players.position, nflTeam: players.nflTeam })
-    .from(players)
-    .where(inArray(players.playerId, ids));
-  const stats = await db()
-    .select({ playerId: playerWeekStats.playerId, ptsPpr: playerWeekStats.ptsPpr })
-    .from(playerWeekStats)
-    .where(and(eq(playerWeekStats.season, season), eq(playerWeekStats.week, week), inArray(playerWeekStats.playerId, ids)));
+    .where(and(inArray(lineupEntries.teamId, teamIds), eq(lineupEntries.week, week)));
+  if (entries.length === 0) return byTeam;
+  const ids = [...new Set(entries.map((e) => e.playerId))];
+  const [meta, stats] = await Promise.all([
+    db()
+      .select({ playerId: players.playerId, name: players.fullName, position: players.position, nflTeam: players.nflTeam })
+      .from(players)
+      .where(inArray(players.playerId, ids)),
+    db()
+      .select({ playerId: playerWeekStats.playerId, ptsPpr: playerWeekStats.ptsPpr })
+      .from(playerWeekStats)
+      .where(and(eq(playerWeekStats.season, season), eq(playerWeekStats.week, week), inArray(playerWeekStats.playerId, ids))),
+  ]);
   const metaOf = new Map(meta.map((m) => [m.playerId, m]));
   const ptsOf = new Map(stats.map((s) => [s.playerId, s.ptsPpr ?? 0]));
-  return entries.map((e) => ({
-    slot: e.slot,
-    playerId: e.playerId,
-    name: metaOf.get(e.playerId)?.name ?? e.playerId,
-    position: metaOf.get(e.playerId)?.position ?? null,
-    nflTeam: metaOf.get(e.playerId)?.nflTeam ?? null,
-    points: ptsOf.get(e.playerId) ?? 0,
-  }));
+  for (const e of entries) {
+    const list = byTeam.get(e.teamId) ?? [];
+    list.push({
+      slot: e.slot,
+      playerId: e.playerId,
+      name: metaOf.get(e.playerId)?.name ?? e.playerId,
+      position: metaOf.get(e.playerId)?.position ?? null,
+      nflTeam: metaOf.get(e.playerId)?.nflTeam ?? null,
+      points: ptsOf.get(e.playerId) ?? 0,
+    });
+    byTeam.set(e.teamId, list);
+  }
+  return byTeam;
 }
 
 /** Bench = rostered players with no lineup entry that week (§3.1). */
 export async function teamBench(teamId: number, week: number, season: number): Promise<LineupPlayer[]> {
-  const roster = await db()
-    .select({ playerId: rosterEntries.playerId, name: players.fullName, position: players.position, nflTeam: players.nflTeam })
-    .from(rosterEntries)
-    .innerJoin(players, eq(players.playerId, rosterEntries.playerId))
-    .where(eq(rosterEntries.teamId, teamId));
-  const entries = await db()
-    .select({ playerId: lineupEntries.playerId })
-    .from(lineupEntries)
-    .where(and(eq(lineupEntries.teamId, teamId), eq(lineupEntries.week, week)));
+  const [roster, entries] = await Promise.all([
+    db()
+      .select({ playerId: rosterEntries.playerId, name: players.fullName, position: players.position, nflTeam: players.nflTeam })
+      .from(rosterEntries)
+      .innerJoin(players, eq(players.playerId, rosterEntries.playerId))
+      .where(eq(rosterEntries.teamId, teamId)),
+    db()
+      .select({ playerId: lineupEntries.playerId })
+      .from(lineupEntries)
+      .where(and(eq(lineupEntries.teamId, teamId), eq(lineupEntries.week, week))),
+  ]);
   const placed = new Set(entries.map((e) => e.playerId));
   const bench = roster.filter((r) => !placed.has(r.playerId));
   if (bench.length === 0) return [];
