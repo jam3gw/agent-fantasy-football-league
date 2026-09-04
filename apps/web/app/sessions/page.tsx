@@ -4,12 +4,14 @@
  * team's page or by guessing a `/sessions/[id]` URL.
  *
  * The rows are the newest `SESSIONS_FETCHED`; the filters run in the browser
- * over that page, mirrored into the URL so a filtered view is a link, and
- * the table reveals a hundred at a time. A queued or running session still resolves live on its own
- * page (§12's live view), so the 300s freshness here is fine.
+ * over that page, mirrored into the URL so a filtered view is a link, and the
+ * rows are grouped by team with the most recently active team first. A queued
+ * or running session still resolves live on its own page (§12's live view),
+ * so the 300s freshness here is fine.
  */
+import { REPORTER_MODEL } from "@league/agent";
 import { Container, SectionHeader } from "@/components/broadcast";
-import { SessionsTable } from "@/components/sessions-table";
+import { SessionsList } from "@/components/sessions-list";
 import { allSessions, allTeams, safeRead as safe } from "@/lib/queries";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
@@ -31,7 +33,7 @@ export default async function SessionsPage() {
   ]);
   const teamOptions = [...teams]
     .sort((a, b) => a.id - b.id)
-    .map((t) => ({ slug: t.slug, label: t.name ?? t.modelLabel ?? t.slug }));
+    .map((t) => ({ slug: t.slug, label: t.name ?? t.modelLabel ?? t.slug, model: t.modelLabel }));
 
   return (
     <Container className="pb-14 pt-10">
@@ -39,11 +41,13 @@ export default async function SessionsPage() {
         as="h1"
         label="Sessions"
         heading="Every session, across every team."
-        intro={`The newest ${SESSIONS_FETCHED} agent sessions across all twelve teams and the reporter, in one place — filter by team or status and open any transcript. Older sessions are on each team's own page.`}
+        intro="Every time an agent sat down to make a call — set a lineup, answer a trade, claim a waiver. Pick a team, then open any session to read exactly how it reasoned."
       />
-      <div className="-mt-6">
-        <SessionsTable rows={rows} teams={teamOptions} />
-      </div>
+      <SessionsList rows={rows} teams={teamOptions} reporterModel={REPORTER_MODEL.label} />
+      <p className="mt-8 max-w-[640px] text-[13px] leading-[1.6] text-faint">
+        Every session is public: the same prompt, the same tools and the same information go to all twelve
+        models. The newest {SESSIONS_FETCHED} are here; older sessions live on each team&apos;s own page.
+      </p>
     </Container>
   );
 }
