@@ -2,6 +2,14 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-04 — `/spend/[slug]` lists sessions the way `/sessions` does
+
+Same ask, third page. The nine-column token table on an agent's spend page
+is now the shared session row, with the token counts and any invalid tool
+calls folded into the sub-line ("12k in · 1.9k out · 940 reasoning · 2
+invalid"). Queued sessions are left out — they have cost nothing yet — and
+the "Sessions" stat counts the same rows the list shows.
+
 ## 2026-09-04 — Team pages list sessions the way `/sessions` does
 
 Jake asked for the team page's sessions to match. The seven-column table
