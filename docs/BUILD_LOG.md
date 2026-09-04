@@ -15,7 +15,10 @@ work went to what the code shows is slow on those pages:
   CDN and every visit paid the full database render. The week is a path now:
   `/teams/[slug]` is the current week and `/teams/[slug]/week/[week]` a
   chosen one; both declare `generateStaticParams` and revalidate. Old
-  `?week=N` links redirect (308) to the new path. The page body moved to
+  `?week=N` links redirect (308) to the new path for N in 1–18; any other
+  value falls through to the team page and its current week, as before.
+  (The reviewer caught the first cut of the redirect sending `?week=19` to
+  a 404.) The page body moved to
   `app/teams/[slug]/team.tsx`, unchanged apart from the loader: the team
   and the settings read together, and the projections are chained off the
   roster reads inside the same `Promise.all` instead of a fourth round.
@@ -30,6 +33,10 @@ work went to what the code shows is slow on those pages:
   parallel; nothing in the code explains their scores (15 and 8 samples,
   so a couple of slow visits move them). Left alone; re-read Speed Insights
   after a week of the new build before touching them.
+
+Tests added: the two team routes in `caching.test.ts`'s window list, a guard
+that no windowed page reads `searchParams` (`/transactions` is the allowed
+one), the redirect rule's range, and a PGlite test for `teamLineups`.
 
 Verified locally: lint, typecheck, the full test suite, and a production
 build whose route table lists `/teams/[slug]` and `/teams/[slug]/week/[week]`

@@ -23,7 +23,9 @@ const nextConfig: NextConfig = {
     return [
       {
         source: "/teams/:slug",
-        has: [{ type: "query", key: "week", value: "(?<week>\\d{1,2})" }],
+        // Only a week the new route accepts (1–18); anything else falls through
+        // to the team page, which shows the current week, as the old page did.
+        has: [{ type: "query", key: "week", value: "(?<week>[1-9]|1[0-8])" }],
         destination: "/teams/:slug/week/:week",
         permanent: true,
       },
