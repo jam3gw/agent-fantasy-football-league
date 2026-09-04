@@ -27,7 +27,18 @@ showing them would mean inventing them. If Jake wants them, the prompt would
 have to ask every agent for a structured summary (§8.1: same prompt for all),
 which is a spec change and is noted as a question below. Also not carried
 over: the "Rejected"/"Allow" verdict tag on a move, which the decision log
-does not record separately from its text.
+does not record separately from its text. Two additions beyond the design:
+the notes only collapse once they run past 900 characters (a short note got
+a pointless button), and the sticky lineup column scrolls inside its own box
+when it is taller than the viewport — the design's plain `sticky` would pin
+the top and hide the bench until the page ends.
+
+Review round (fresh-context reviewer, all fixed): the version history was
+unreachable while the current scratchpad was empty; the Activity counts
+were the fetch caps (100) rather than true totals, now two `count(*)`
+queries; every tab panel stays in the document (hidden) so `aria-controls`
+resolves; Left/Right/Home/End move between tabs; collapsing the notes
+brings the card back into view.
 
 ### Questions for Jake
 
