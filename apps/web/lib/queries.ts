@@ -3,7 +3,7 @@ import "server-only";
  * Read helpers shared by the public pages. Pages are server components that
  * read the database directly; nothing here is exposed to the client.
  */
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import {
   boardPosts,
   computeStandings,
@@ -97,6 +97,12 @@ export async function recentTransactions(limit = 50) {
  * The newest sessions across every team, for `/sessions`. The reporter's
  * sessions have no team, so this is a left join: `teamSlug` and `teamName`
  * are null for them. Only the columns the page shows leave the server.
+ *
+ * Queued sessions are left out. The week plan books every team's lineup
+ * checks days ahead (§9), so at any moment dozens of sessions exist that
+ * have not started and have nothing to show; listing them buried the ones
+ * that had run under a wall of "queued". A session appears here once it
+ * starts, and /admin/teams still shows what is booked.
  */
 export async function allSessions(limit = 300) {
   const rows = await db()
@@ -115,6 +121,7 @@ export async function allSessions(limit = 300) {
     })
     .from(sessions)
     .leftJoin(teams, eq(teams.id, sessions.teamId))
+    .where(ne(sessions.status, "queued"))
     .orderBy(desc(sessions.createdAt))
     .limit(limit);
   if (rows.length === 0) return [];
