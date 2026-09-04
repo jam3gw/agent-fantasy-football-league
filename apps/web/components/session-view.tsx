@@ -24,31 +24,7 @@ import {
   stepTitle,
   stepToolLabel,
 } from "@/lib/sessionTranscript";
-
-/** What each session kind is, in a reader's words rather than the enum's. */
-const KIND_LABEL: Record<string, string> = {
-  onboarding: "Onboarding",
-  draft_pick: "Draft pick",
-  weekly_review: "Weekly review",
-  post_waivers: "Post-waivers check",
-  trade_window: "Trade window",
-  trade_response: "Trade response",
-  trade_vote: "Trade vote",
-  lineup_check: "Lineup check",
-  injury_response: "Injury response",
-  board_reply: "Board reply",
-  self_check_in: "Self check-in",
-  manual: "Manual run",
-  smoke: "Smoke test",
-  reporter_draft_grades: "Draft grades",
-  reporter_recap: "Weekly recap",
-  reporter_preview: "Week preview",
-  reporter_trade_note: "Trade note",
-};
-
-export function kindLabel(kind: string): string {
-  return KIND_LABEL[kind] ?? kind.replace(/_/g, " ");
-}
+import { kindLabel } from "@/lib/sessionsFilter";
 
 const STATUS_TONE: Record<string, string> = {
   succeeded: "text-accent",

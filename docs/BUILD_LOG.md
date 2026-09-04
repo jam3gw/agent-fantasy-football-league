@@ -2,6 +2,62 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-04 — `/sessions` redesigned: team-grouped, outcome-first rows
+
+From Jake's Claude Design handoff (`Sessions.dc.html`). The old page was a
+seven-column table whose only click target was a numeric id; his three
+complaints were "can't tell what's clickable", "titles aren't descriptive",
+"too dense".
+
+Done:
+- Rows are grouped under their team, most recently active team first, each
+  group a card with the team's name, model, session count and a Team-page
+  link. Four rows show per team; "Show N more" expands the card. Once one
+  team is picked its card shows forty.
+- The whole row is the link. It leads with what the agent decided — the
+  first sentence of the decision log it ended with, cut at a word past 120
+  characters — with the kind, tool-call count and session id underneath and
+  the status, relative time and cost on the right. `allSessions` now reads
+  the log in a second query over the page's ids rather than a join, so a
+  session with two logs still yields one row.
+- Sessions with no log say what happened instead: "Queued — waiting for a
+  turn", "Working through the lineup check…", "Ended with an error before
+  making a call", "Ran out of time before making a call", "Skipped — nothing
+  left to decide". The reporter and a draft pick never write a log, so those
+  fall back to the kind label.
+- The three dropdowns are chips: a scrollable team picker (name, model in
+  lighter text, count, live dot) and status and kind chips. `live` folds
+  queued and running, `failed` folds in a time-out, `trade` is every trade
+  kind, `waivers` is the weekly review plus the post-waivers check. The exact
+  statuses and kinds still work as URL values, so every old link keeps its
+  meaning, including the team page's "All of its sessions".
+- Relative times ("12 min ago") are only true in the browser: the page is
+  prerendered and served for up to 300 s, so the server renders the stamp and
+  the relative form takes over after hydration, ticking once a minute.
+- `KIND_LABEL` moved from `session-view.tsx` to `lib/sessionsFilter.ts` so
+  both pages share one set of names; SPEC §12.1's `/sessions` row updated.
+
+Review round (fresh-context reviewer, all fixed): the runner's
+`(no summary written)` placeholder log was showing verbatim as a row title —
+it is now a constant in `@league/shared` (`NO_SUMMARY_PLACEHOLDER`) that both
+the runner and the page use, and the page treats it as no log; the `kind`
+URL value is checked against every kind the enum knows rather than the
+kinds on the current page, so an old `?kind=trade_vote` link filters even
+when no vote is among the newest 600; the "Live now" strip's negative top
+margin only applies when the strip renders; the "All teams" chip no longer
+carries a live dot the prototype does not show; "Show N more" carries
+`aria-expanded` and `aria-controls`; tests for the placeholder, an empty
+page and a team that has not named itself yet. Second round: a paused
+session's dot and status are amber, not the green of a finished one; the
+reporter's card names its model like its chip does; rows inside a card sort
+by the time they show; the status and kind chip groups are real flex boxes,
+not `display: contents`, so their group labels reach the accessibility tree.
+
+Departures from the prototype, all deliberate: its Font Awesome link and the
+design system's React `Button` are not used (the site has no icon set, and the
+ghost button is one class string); density and rows-per-team are constants,
+not props, because nothing on the site sets them.
+
 ## 2026-09-03 — Team 11: Muse Spark 1.2 moves to Meta's Contributor tier
 
 Slot 11 now runs `meta/muse-spark-1.2-contributor` (was `meta/muse-spark-1.2`).

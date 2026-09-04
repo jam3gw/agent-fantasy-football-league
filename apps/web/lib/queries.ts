@@ -7,6 +7,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import {
   boardPosts,
   computeStandings,
+  decisionLogs,
   getSettings,
   health,
   lineupEntries,
@@ -98,7 +99,7 @@ export async function recentTransactions(limit = 50) {
  * are null for them. Only the columns the page shows leave the server.
  */
 export async function allSessions(limit = 300) {
-  return db()
+  const rows = await db()
     .select({
       id: sessions.id,
       teamId: sessions.teamId,
@@ -116,6 +117,27 @@ export async function allSessions(limit = 300) {
     .leftJoin(teams, eq(teams.id, sessions.teamId))
     .orderBy(desc(sessions.createdAt))
     .limit(limit);
+  if (rows.length === 0) return [];
+
+  // The decision log a session ended with is the line its row leads with on
+  // `/sessions`. A team session writes at most one (§8.4); the reporter and a
+  // draft pick write none. Read in one query rather than joined, so a session
+  // that somehow has two logs still yields one row and not two.
+  const logs = await db()
+    .select({ sessionId: decisionLogs.sessionId, summary: decisionLogs.summary })
+    .from(decisionLogs)
+    .where(
+      inArray(
+        decisionLogs.sessionId,
+        rows.map((r) => r.id),
+      ),
+    )
+    .orderBy(desc(decisionLogs.createdAt));
+  const summaryOf = new Map<number, string>();
+  for (const log of logs) {
+    if (log.sessionId !== null && !summaryOf.has(log.sessionId)) summaryOf.set(log.sessionId, log.summary);
+  }
+  return rows.map((r) => ({ ...r, summary: summaryOf.get(r.id) ?? null }));
 }
 
 export interface LineupPlayer {
