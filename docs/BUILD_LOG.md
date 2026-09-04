@@ -30,16 +30,13 @@ Done:
   sessions. Running sessions keep the id they started on;
 - lint, typecheck and the full suite green (786 tests).
 
-**Still open: the production `teams` row.** As on 2026-08-29, the session's
-permission classifier blocked the SQL transaction (the `teams` update, the
-eight queued sessions, the `model_prices` row, the audit row and the public
-`model_swapped` transaction). Two ways to land it, either is fine:
-- Jake opens `/admin/teams`, picks team 11 and enters the custom id
-  `meta/muse-spark-1.2-contributor`. Once this branch is deployed, the form
-  catalog-verifies the id, writes the audit rows and moves the queued sessions.
-- Or an approved SQL run of the same five statements.
-Until then team 11 keeps running on the standard tier at standard prices.
-The price seed row lands on its own with the next deploy.
+Production landed on 2026-09-04 with Jake's explicit go-ahead, after the
+session's permission classifier blocked the first attempt (as on 2026-08-29):
+one transaction carrying the `teams` update, the eight queued lineup-check
+sessions, the `model_prices` row, the commissioner-action audit row and the
+public `model_swapped` transaction. Verified after commit: team 11 reads
+`meta/muse-spark-1.2-contributor` and no queued session for it carries the
+old id.
 
 Label stays "Muse Spark 1.2" on the site and in the agent's identity, because
 it is the same model. The site says which seat runs under the training term
