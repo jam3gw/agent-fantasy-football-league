@@ -19,8 +19,11 @@ import {
   type SessionListRow,
 } from "@/lib/sessionsFilter";
 
+/** A row, with an optional tail for the sub-line — the spend page adds token counts. */
+export type SessionRowData = SessionListRow & { detail?: string };
+
 /** A plain list of rows, for a page that already knows whose sessions they are. */
-export function SessionRows({ rows }: { rows: SessionListRow[] }) {
+export function SessionRows({ rows }: { rows: SessionRowData[] }) {
   const now = useNow();
   return (
     <div className="flex flex-col">
@@ -37,7 +40,7 @@ export function SessionRows({ rows }: { rows: SessionListRow[] }) {
  * ones; the title is what the agent decided, and the sub-line is what kind
  * of session it was and how to find it by number.
  */
-export function SessionRow({ row, now }: { row: SessionListRow; now: Date | null }) {
+export function SessionRow({ row, now }: { row: SessionRowData; now: Date | null }) {
   const live = isLive(row.status);
   const bad = isBad(row.status);
   const paused = row.status === "paused";
@@ -64,6 +67,7 @@ export function SessionRow({ row, now }: { row: SessionListRow; now: Date | null
         <span className="text-[15px] font-semibold leading-[1.35] text-pretty text-foreground">{sessionTitle(row)}</span>
         <span className="text-[13px] leading-[1.4] text-muted">
           {kindLabel(row.kind)} · {row.toolCalls} tool call{row.toolCalls === 1 ? "" : "s"} · session {row.id}
+          {row.detail ? ` · ${row.detail}` : null}
         </span>
       </span>
       {/* On a phone the title needs the width, so status, time and cost

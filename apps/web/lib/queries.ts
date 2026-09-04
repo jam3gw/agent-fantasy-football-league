@@ -125,7 +125,7 @@ export async function allSessions(limit = 300) {
     .where(ne(sessions.status, "queued"))
     .orderBy(desc(sessions.createdAt))
     .limit(limit);
-  return withSummaries(rows);
+  return attachSummaries(rows);
 }
 
 /**
@@ -151,7 +151,7 @@ export async function teamSessions(
     .where(and(eq(sessions.teamId, team.id), ne(sessions.status, "queued")))
     .orderBy(desc(sessions.createdAt))
     .limit(limit);
-  return withSummaries(rows.map((r) => ({ ...r, teamSlug: team.slug, teamName: team.name, modelLabel: team.modelLabel })));
+  return attachSummaries(rows.map((r) => ({ ...r, teamSlug: team.slug, teamName: team.name, modelLabel: team.modelLabel })));
 }
 
 /**
@@ -160,7 +160,9 @@ export async function teamSessions(
  * write none. Read in one query rather than joined, so a session that
  * somehow has two logs still yields one row and not two.
  */
-async function withSummaries<T extends { id: number }>(rows: T[]): Promise<Array<T & { summary: string | null }>> {
+export async function attachSummaries<T extends { id: number }>(
+  rows: T[],
+): Promise<Array<T & { summary: string | null }>> {
   if (rows.length === 0) return [];
   const logs = await db()
     .select({ sessionId: decisionLogs.sessionId, summary: decisionLogs.summary })
