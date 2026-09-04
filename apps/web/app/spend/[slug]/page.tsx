@@ -1,11 +1,13 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
-import { formatEt } from "@league/shared";
+import { and, desc, eq, isNull, ne, sql } from "drizzle-orm";
 import { computeStandings, costAlarms, sessions, spendLedger, teams } from "@league/engine";
 import { modelTierNote } from "@league/agent";
-import { Badge, Card, Cell, Empty, PageTitle, Row, Table, money } from "../../../components/ui";
+import { SessionRows } from "@/components/session-rows";
+import { Badge, Card, Empty, PageTitle, money } from "../../../components/ui";
 import { db } from "../../../lib/db";
+import { attachSummaries } from "../../../lib/queries";
+import { compactTokens } from "../../../lib/sessionTranscript";
 
 // §12.1: 300s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 300s stale.
@@ -67,11 +69,14 @@ export default async function AgentSpendPage({ params }: { params: Promise<{ slu
       .orderBy(etDaySql)
       .catch(() => []),
     database
+      // Queued sessions have cost nothing yet, so they are left out here as
+      // on `/sessions`; the list is the same row as there, with the tokens.
       .select({
         id: sessions.id,
+        teamId: sessions.teamId,
         kind: sessions.kind,
         status: sessions.status,
-        modelId: sessions.modelId,
+        startedAt: sessions.startedAt,
         createdAt: sessions.createdAt,
         costUsd: sessions.costUsd,
         inputTokens: sessions.inputTokens,
@@ -81,9 +86,10 @@ export default async function AgentSpendPage({ params }: { params: Promise<{ slu
         invalidToolCalls: sessions.invalidToolCalls,
       })
       .from(sessions)
-      .where(sessionFilter)
+      .where(and(sessionFilter, ne(sessions.status, "queued")))
       .orderBy(desc(sessions.createdAt))
       .limit(200)
+      .then(attachSummaries)
       .catch(() => []),
     computeStandings(database).catch(() => []),
     database
@@ -101,6 +107,16 @@ export default async function AgentSpendPage({ params }: { params: Promise<{ slu
   const st = teamId === null ? undefined : standings.find((s) => s.teamId === teamId);
   const name = isReporter ? "League reporter" : (team?.name ?? slug);
   const sessionCount = sessionRows.length;
+  const rows = sessionRows.map((s) => ({
+    ...s,
+    teamSlug: team?.slug ?? null,
+    teamName: team?.name ?? null,
+    modelLabel: team?.modelLabel ?? null,
+    detail:
+      `${compactTokens(s.inputTokens)} in · ${compactTokens(s.outputTokens)} out` +
+      (s.reasoningTokens > 0 ? ` · ${compactTokens(s.reasoningTokens)} reasoning` : "") +
+      (s.invalidToolCalls > 0 ? ` · ${s.invalidToolCalls} invalid` : ""),
+  }));
 
   return (
     <>
@@ -128,7 +144,7 @@ export default async function AgentSpendPage({ params }: { params: Promise<{ slu
       <div className="mb-4 grid gap-3 sm:grid-cols-4">
         <Stat label="Season (list)" value={money(total)} note="every model step, catalog prices" />
         <Stat label="Season (paid)" value={money(paid)} note="billed to the gateway" />
-        <Stat label="Sessions" value={String(sessionCount)} note={sessionCount === 200 ? "most recent 200" : "all recorded"} />
+        <Stat label="Sessions" value={String(sessionCount)} note={sessionCount === 200 ? "most recent 200 that ran" : "all that have run"} />
         <Stat
           label="Cost per point"
           value={st && st.pointsFor > 0 ? `$${(total / st.pointsFor).toFixed(3)}` : "—"}
@@ -193,36 +209,9 @@ export default async function AgentSpendPage({ params }: { params: Promise<{ slu
           {sessionRows.length === 0 ? (
             <Empty>No sessions yet.</Empty>
           ) : (
-            <Table head={["When", "Kind", "Status", "Model", "Tool calls", "In", "Out", "Reasoning", "Cost"]}>
-              {sessionRows.map((s) => (
-                <Row key={s.id}>
-                  <Cell>
-                    <Link href={`/sessions/${s.id}`} className="hover:text-accent">
-                      {formatEt(s.createdAt)}
-                    </Link>
-                  </Cell>
-                  <Cell>{s.kind}</Cell>
-                  <Cell>
-                    {s.status === "failed" || s.status === "timed_out" ? (
-                      <Badge tone="warn">{s.status}</Badge>
-                    ) : (
-                      s.status
-                    )}
-                  </Cell>
-                  <Cell>
-                    <span className="font-mono text-xs">{s.modelId}</span>
-                  </Cell>
-                  <Cell align="right">
-                    {s.toolCalls}
-                    {s.invalidToolCalls > 0 ? <span className="ml-1 text-danger">({s.invalidToolCalls} invalid)</span> : null}
-                  </Cell>
-                  <Cell align="right">{s.inputTokens.toLocaleString()}</Cell>
-                  <Cell align="right">{s.outputTokens.toLocaleString()}</Cell>
-                  <Cell align="right">{s.reasoningTokens.toLocaleString()}</Cell>
-                  <Cell align="right">{money(s.costUsd)}</Cell>
-                </Row>
-              ))}
-            </Table>
+            <div className="-mx-4 -mb-4 mt-1 border-t border-border">
+              <SessionRows rows={rows} />
+            </div>
           )}
         </Card>
       </div>
