@@ -8,6 +8,7 @@
  * for it alongside the twelve team slugs.
  */
 import type { SessionStatus } from "@league/engine";
+import { NO_SUMMARY_PLACEHOLDER } from "@league/shared";
 
 /** The team-filter value that selects the reporter's sessions. */
 export const REPORTER = "reporter";
@@ -101,6 +102,9 @@ export const KIND_LABEL: Record<string, string> = {
   reporter_trade_note: "Trade note",
 };
 
+/** Every value the `kind` URL parameter accepts: the chips and the raw kinds. */
+export const KIND_PARAMS: readonly string[] = [...KIND_FILTERS.map((f) => f.value), ...Object.keys(KIND_LABEL)];
+
 export function kindLabel(kind: string): string {
   return KIND_LABEL[kind] ?? kind.replace(/_/g, " ");
 }
@@ -174,10 +178,12 @@ export function headlineOf(summary: string): string {
 /**
  * The line a row leads with: what the agent decided, in its own words, when
  * it left a decision log; otherwise what happened to the session. A reporter
- * session and a draft pick write no log, so those fall back to the kind.
+ * session and a draft pick write no log, so those fall back to the kind, and
+ * the runner's placeholder log counts as no log.
  */
 export function sessionTitle(row: Pick<SessionListRow, "kind" | "status" | "summary">): string {
-  const headline = row.summary ? headlineOf(row.summary) : "";
+  const summary = row.summary?.trim() === NO_SUMMARY_PLACEHOLDER ? null : row.summary;
+  const headline = summary ? headlineOf(summary) : "";
   if (headline) return headline;
   switch (row.status) {
     case "queued":

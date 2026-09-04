@@ -11,6 +11,7 @@
  */
 import { and, asc, eq, inArray } from "drizzle-orm";
 import type { Clock } from "@league/shared";
+import { NO_SUMMARY_PLACEHOLDER } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
 import { getSettings, modelPrices, sessionGuard, sessionEvents, sessions, teams } from "@league/engine";
 import { writeDecisionLog } from "@league/engine";
@@ -876,7 +877,7 @@ async function closeSession(
 
   // Still nothing: insert the placeholder so every session has a public summary.
   if (session.teamId !== null) {
-    await writeDecisionLog(db, session.teamId, session.kind, "(no summary written)", args.sessionId);
+    await writeDecisionLog(db, session.teamId, session.kind, NO_SUMMARY_PLACEHOLDER, args.sessionId);
     await recordEvent(db, clock, args.sessionId, seq++, "info", { decision_log: "placeholder" });
   }
   return { seq, failed: false };

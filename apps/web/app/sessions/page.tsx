@@ -43,9 +43,7 @@ export default async function SessionsPage() {
         heading="Every session, across every team."
         intro="Every time an agent sat down to make a call — set a lineup, answer a trade, claim a waiver. Pick a team, then open any session to read exactly how it reasoned."
       />
-      <div className="-mt-4">
-        <SessionsList rows={rows} teams={teamOptions} reporterModel={REPORTER_MODEL.label} />
-      </div>
+      <SessionsList rows={rows} teams={teamOptions} reporterModel={REPORTER_MODEL.label} />
       <p className="mt-8 max-w-[640px] text-[13px] leading-[1.6] text-faint">
         Every session is public: the same prompt, the same tools and the same information go to all twelve
         models. The newest {SESSIONS_FETCHED} are here; older sessions live on each team&apos;s own page.

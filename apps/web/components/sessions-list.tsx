@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
-import { CardLink, LiveDot, Nothing, formatEtStamp } from "@/components/broadcast";
+import { CardLink, Nothing, formatEtStamp } from "@/components/broadcast";
 import { useUrlState } from "@/components/list-controls";
 import { readParam } from "@/lib/listControls";
 import {
   ALL,
   KIND_FILTERS,
+  KIND_PARAMS,
   REPORTER,
   STATUS_FILTERS,
   STATUS_PARAMS,
@@ -16,6 +17,7 @@ import {
   isBad,
   isLive,
   kindLabel,
+  matchStatus,
   relativeTime,
   rowTime,
   sessionTitle,
@@ -50,10 +52,9 @@ export function SessionsList({
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const now = useNow();
 
-  const kinds = [...new Set(rows.map((r) => r.kind))];
   const team = readParam(url.get("team"), [...teams.map((t) => t.slug), REPORTER]);
   const status = readParam(url.get("status"), STATUS_PARAMS);
-  const kind = readParam(url.get("kind"), [...KIND_FILTERS.map((f) => f.value), ...kinds]);
+  const kind = readParam(url.get("kind"), KIND_PARAMS);
 
   const matching = filterSessions(rows, team, status, kind);
   const groups = groupSessions(matching);
@@ -66,9 +67,10 @@ export function SessionsList({
     url.set({ team: value });
   };
   // A legacy `?kind=trade_vote` link lands on a kind no chip names; the
-  // "Every kind" chip is left unlit so the reader sees a filter is on.
-  const kindChipOn = (value: string) => (value === ALL ? kind === ALL : kind === value);
-  const statusChipOn = (value: string) => (value === ALL ? status === ALL : value === status || matchStatusChip(value, status));
+  // "Every kind" chip is left unlit so the reader sees a filter is on. A
+  // legacy status lights the chip that folds it in.
+  const kindChipOn = (value: string) => kind === value;
+  const statusChipOn = (value: string) => (value === ALL ? status === ALL : value === status || matchStatus(value, status));
 
   const teamChips: Array<{ value: string; label: string; model: string | null }> = [
     { value: ALL, label: "All teams", model: null },
@@ -79,18 +81,28 @@ export function SessionsList({
   return (
     <div>
       {live.length > 0 ? (
-        <div className="mb-8 flex flex-wrap items-center gap-x-[18px] gap-y-2.5 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3">
+        <div className="-mt-4 mb-8 flex flex-wrap items-center gap-x-[18px] gap-y-2.5 rounded-xl border border-accent/30 bg-accent-soft px-4 py-3">
           <span className="inline-flex items-center gap-2 text-[12px] font-bold uppercase tracking-[0.1em] text-accent">
-            <LiveDot className="h-2 w-2 bg-[var(--green-light)] shadow-[0_0_0_3px_rgba(74,143,74,0.25)]" />
+            <span
+              aria-hidden="true"
+              className="live-dot h-2 w-2 rounded-full bg-[var(--green-light)] shadow-[0_0_0_3px_rgba(74,143,74,0.25)]"
+            />
             Live now
           </span>
           {live.map((s) => (
             <Link
               key={s.id}
               href={`/sessions/${s.id}`}
-              className="inline-flex items-baseline gap-2 text-[14px] text-foreground hover:text-accent"
+              className="group inline-flex items-baseline gap-2 text-[14px]"
             >
-              <span className="font-semibold">{teamLabel(s)}</span>
+              {/*
+                `globals.css` colours every `a` unlayered, which outranks any
+                Tailwind colour utility on the anchor itself, so the text
+                inside carries its own colour — here and on the rows below.
+              */}
+              <span className="font-semibold text-foreground transition-colors group-hover:text-accent">
+                {teamLabel(s)}
+              </span>
               <span className="text-muted">
                 {kindLabel(s.kind)} · {statusLabel(s.status).toLowerCase()}
               </span>
@@ -115,7 +127,7 @@ export function SessionsList({
                     : "border-border-strong bg-surface text-foreground"
                 }`}
               >
-                {liveTeams.has(chip.value) || (chip.value === ALL && live.length > 0) ? (
+                {liveTeams.has(chip.value) ? (
                   <span aria-hidden="true" className="h-[7px] w-[7px] rounded-full bg-accent-bright" />
                 ) : null}
                 {chip.label}
@@ -174,7 +186,7 @@ export function SessionsList({
                   </div>
                   {g.teamSlug ? <CardLink href={`/teams/${g.teamSlug}`}>Team page</CardLink> : null}
                 </div>
-                <div className="flex flex-col">
+                <div id={`sessions-${g.key}-rows`} className="flex flex-col">
                   {shown.map((s) => (
                     <SessionRow key={s.id} row={s} now={now} />
                   ))}
@@ -183,6 +195,8 @@ export function SessionsList({
                   <div className="flex justify-center border-t border-border/80 px-5 pb-4 pt-3">
                     <button
                       type="button"
+                      aria-expanded={false}
+                      aria-controls={`sessions-${g.key}-rows`}
                       onClick={() => setExpanded((e) => ({ ...e, [g.key]: true }))}
                       className="rounded-md border border-border-strong bg-transparent px-4 py-1.5 text-[13px] font-medium text-foreground transition-colors duration-300 hover:border-accent hover:bg-accent-soft hover:text-accent"
                     >
@@ -197,13 +211,6 @@ export function SessionsList({
       </div>
     </div>
   );
-}
-
-/** Whether a raw status in the URL belongs under a chip, so the chip lights. */
-function matchStatusChip(chip: string, status: string): boolean {
-  if (chip === "live") return isLive(status);
-  if (chip === "failed") return isBad(status);
-  return chip === status;
 }
 
 function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; children: React.ReactNode }) {
@@ -242,13 +249,13 @@ function SessionRow({ row, now }: { row: SessionListRow; now: Date | null }) {
   return (
     <Link
       href={`/sessions/${row.id}`}
-      className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-x-3.5 border-t border-border/80 px-5 py-3.5 text-foreground transition-colors duration-300 hover:bg-[rgba(47,93,52,0.06)] hover:text-foreground"
+      className="grid grid-cols-[18px_minmax(0,1fr)_auto] items-start gap-x-3.5 border-t border-border/80 px-5 py-3.5 transition-colors duration-300 hover:bg-[rgba(47,93,52,0.06)]"
     >
       <span className="flex justify-center pt-1.5">
         <span aria-hidden="true" className={`h-[9px] w-[9px] rounded-full ${live ? "live-dot" : ""} ${dot}`} />
       </span>
       <span className="flex min-w-0 flex-col gap-[3px]">
-        <span className="text-[15px] font-semibold leading-[1.35] text-pretty">{sessionTitle(row)}</span>
+        <span className="text-[15px] font-semibold leading-[1.35] text-pretty text-foreground">{sessionTitle(row)}</span>
         <span className="text-[13px] leading-[1.4] text-muted">
           {kindLabel(row.kind)} · {row.toolCalls} tool call{row.toolCalls === 1 ? "" : "s"} · session {row.id}
         </span>
