@@ -7,7 +7,7 @@
  * Everything inside them arrives as children, so the markdown, the links and
  * the session rows stay server-rendered.
  */
-import { useId, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 
 /**
  * The scratchpad card. Collapsed to a few hundred pixels with a fade, because
@@ -31,9 +31,22 @@ export function NotesCard({
   const collapsed = collapsible && !open;
   const notesId = useId();
   const versionsId = useId();
+  const card = useRef<HTMLDivElement>(null);
+  // Collapsing a long note pulls the page up from under a reader who had
+  // scrolled into it; bring the card's top back into view so the button they
+  // pressed is where they left it.
+  const toggle = () => {
+    setOpen((o) => !o);
+    if (open) {
+      requestAnimationFrame(() => {
+        const top = card.current?.getBoundingClientRect().top ?? 0;
+        if (top < 0) card.current?.scrollIntoView({ block: "start" });
+      });
+    }
+  };
   return (
     <div>
-      <div className="relative rounded-xl border border-border bg-surface">
+      <div ref={card} className="relative scroll-mt-6 rounded-xl border border-border bg-surface">
         <div
           id={notesId}
           className={`overflow-hidden px-[22px] pt-5 text-[14px] leading-[1.7] transition-[max-height] duration-300 ${
@@ -54,7 +67,7 @@ export function NotesCard({
               type="button"
               aria-expanded={!collapsed}
               aria-controls={notesId}
-              onClick={() => setOpen((o) => !o)}
+              onClick={toggle}
               className="rounded-md border border-border-strong bg-transparent px-4 py-1.5 text-[13px] font-medium text-foreground transition-colors duration-300 hover:border-accent hover:bg-accent-soft hover:text-accent"
             >
               {collapsed ? "Read the full notes" : "Collapse notes"}
@@ -109,14 +122,31 @@ export function ActivityTabs({ tabs }: { tabs: ActivityTab[] }) {
   const [active, setActive] = useState(tabs[0]?.key ?? "");
   const current = tabs.find((t) => t.key === active) ?? tabs[0];
   const baseId = useId();
+  const list = useRef<HTMLDivElement>(null);
   if (!current) return null;
+  // Left and right move between tabs and focus the one picked, as the ARIA
+  // tabs pattern asks; Home and End jump to the ends.
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    const i = tabs.findIndex((t) => t.key === current.key);
+    let next = i;
+    if (e.key === "ArrowRight") next = (i + 1) % tabs.length;
+    else if (e.key === "ArrowLeft") next = (i - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") next = 0;
+    else if (e.key === "End") next = tabs.length - 1;
+    else return;
+    e.preventDefault();
+    setActive(tabs[next].key);
+    list.current?.querySelectorAll<HTMLButtonElement>("[role=tab]")[next]?.focus();
+  };
   return (
     <div>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="text-[20px] font-bold tracking-[-0.02em]">Activity</h2>
         <div
+          ref={list}
           role="tablist"
           aria-label="Activity"
+          onKeyDown={onKeyDown}
           className="flex gap-1 rounded-full border border-[rgba(42,40,35,0.14)] bg-surface p-[3px]"
         >
           {tabs.map((t) => {
@@ -129,6 +159,7 @@ export function ActivityTabs({ tabs }: { tabs: ActivityTab[] }) {
                 id={`${baseId}-tab-${t.key}`}
                 aria-selected={on}
                 aria-controls={`${baseId}-panel-${t.key}`}
+                tabIndex={on ? 0 : -1}
                 onClick={() => setActive(t.key)}
                 className={`inline-flex h-7 items-center gap-1.5 rounded-full px-3.5 text-[13px] font-semibold transition-colors duration-300 ${
                   on ? "bg-foreground text-background" : "bg-transparent text-muted hover:text-accent"
@@ -142,14 +173,20 @@ export function ActivityTabs({ tabs }: { tabs: ActivityTab[] }) {
         </div>
       </div>
       <p className="mt-2 text-[13px] text-muted">{current.intro}</p>
-      <div
-        role="tabpanel"
-        id={`${baseId}-panel-${current.key}`}
-        aria-labelledby={`${baseId}-tab-${current.key}`}
-        className="mt-3.5"
-      >
-        {current.panel}
-      </div>
+      {/* Every panel stays in the document so each tab's aria-controls
+          resolves; only the picked one is shown. */}
+      {tabs.map((t) => (
+        <div
+          key={t.key}
+          role="tabpanel"
+          id={`${baseId}-panel-${t.key}`}
+          aria-labelledby={`${baseId}-tab-${t.key}`}
+          hidden={t.key !== current.key}
+          className="mt-3.5"
+        >
+          {t.panel}
+        </div>
+      ))}
     </div>
   );
 }

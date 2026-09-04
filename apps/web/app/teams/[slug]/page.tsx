@@ -10,7 +10,7 @@
  */
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, count, desc, eq, inArray, ne } from "drizzle-orm";
 import {
   STARTING_SLOTS,
   decisionLogs,
@@ -18,6 +18,7 @@ import {
   playerWeekProj,
   scratchpadVersions,
   scratchpads,
+  sessions,
   spendRollups,
 } from "@league/engine";
 import { formatEt } from "@league/shared";
@@ -122,7 +123,7 @@ export default async function TeamPage({
   const week =
     Number.isInteger(parsedWeek) && parsedWeek >= 1 && parsedWeek <= MAX_WEEK ? parsedWeek : (league?.currentWeek ?? 1);
 
-  const [table, lineup, bench, pad, versions, checkIns, decisions, teamSessions, spend] = await Promise.all([
+  const [table, lineup, bench, pad, versions, checkIns, decisions, teamSessions, spend, totals] = await Promise.all([
     safe(standings, []),
     safe(() => teamLineup(team.id, week, season), []),
     safe(() => teamBench(team.id, week, season), []),
@@ -163,7 +164,23 @@ export default async function TeamPage({
           ),
       [],
     ),
+    // The Activity tabs show how many there are in all, not how many the
+    // page fetched: the lists above are capped and a season runs past them.
+    safe(
+      async () => ({
+        moves: (await db().select({ n: count() }).from(decisionLogs).where(eq(decisionLogs.teamId, team.id)))[0]?.n ?? 0,
+        sessions:
+          (
+            await db()
+              .select({ n: count() })
+              .from(sessions)
+              .where(and(eq(sessions.teamId, team.id), ne(sessions.status, "queued")))
+          )[0]?.n ?? 0,
+      }),
+      null,
+    ),
   ]);
+  const counts = totals ?? { moves: decisions.length, sessions: teamSessions.length };
 
   const row = table.find((r) => r.teamId === team.id);
   const seasonSpend = spend.find((s) => s.periodStart === String(season)) ?? spend[0];
@@ -453,13 +470,19 @@ export default async function TeamPage({
                 </span>
               </div>
               <div className="mt-3.5">
-                {notes === "" ? (
+                {notes === "" && versions.length === 0 ? (
                   <div className="rounded-xl border border-border bg-surface">
                     <Nothing>This agent has not written anything in its scratchpad yet.</Nothing>
                   </div>
                 ) : (
                   <NotesCard versions={versionList} versionCount={versions.length} collapsible={notes.length > LONG_NOTES_CHARS}>
-                    <Markdown source={notes} id="pad" className="space-y-3 break-words" />
+                    {notes === "" ? (
+                      // Cleared since it was last written; the versions under
+                      // the card are still the history (§12.1).
+                      <Nothing>The scratchpad is empty right now. Its earlier versions are below.</Nothing>
+                    ) : (
+                      <Markdown source={notes} id="pad" className="space-y-3 break-words" />
+                    )}
                   </NotesCard>
                 )}
               </div>
@@ -471,7 +494,7 @@ export default async function TeamPage({
                   {
                     key: "moves",
                     label: "Moves",
-                    count: decisions.length,
+                    count: counts.moves,
                     intro:
                       moves.length === 0
                         ? "Every move the agent logs will show here, newest first."
@@ -481,7 +504,7 @@ export default async function TeamPage({
                   {
                     key: "sessions",
                     label: "Sessions",
-                    count: teamSessions.length,
+                    count: counts.sessions,
                     intro:
                       "Each session led by what the agent decided, newest first. Every one has a full transcript; sessions booked for later appear once they run.",
                     panel: sessionsPanel,
