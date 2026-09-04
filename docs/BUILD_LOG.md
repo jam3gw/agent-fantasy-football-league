@@ -2,6 +2,18 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-04 — Team pages list sessions the way `/sessions` does
+
+Jake asked for the team page's sessions to match. The seven-column table
+with the numeric id as its only link is gone; the team page now uses the
+same row as `/sessions` — what the agent decided, then kind, tool calls and
+id, with status, time and cost on the right, the whole row the link, and
+queued sessions left out. The row lives in `components/session-rows.tsx`
+so the two pages cannot drift; `teamSessions` in `lib/queries.ts` fetches a
+team's rows in the same shape, sharing the decision-log lookup with
+`allSessions`. On a phone the status line now drops under the title on both
+pages instead of squeezing it into a third of the width.
+
 ## 2026-09-04 — `/sessions` leaves out queued sessions
 
 Jake's call after the redesign went live: the "Live now" strip was a wall of
