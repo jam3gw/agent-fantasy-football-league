@@ -4,9 +4,11 @@
  * has to find it by sentinel rather than by slug.
  */
 import { describe, expect, it } from "vitest";
+import { NO_SUMMARY_PLACEHOLDER } from "@league/shared";
 import {
   ALL,
   REPORTER,
+  KIND_PARAMS,
   filterSessions,
   groupSessions,
   headlineOf,
@@ -63,6 +65,18 @@ describe("filterSessions", () => {
     expect(filterSessions(rows, ALL, ALL, "trade").map((r) => r.id)).toEqual([5]);
     expect(filterSessions(rows, "gemini", ALL, "lineup_check").map((r) => r.id)).toEqual([3]);
     expect(filterSessions(rows, ALL, ALL)).toHaveLength(6);
+  });
+});
+
+describe("URL values", () => {
+  it("accepts every raw kind, so an old link filters even when none of that kind is on the page", () => {
+    for (const k of ["trade_vote", "draft_pick", "reporter_recap", "onboarding"]) expect(KIND_PARAMS).toContain(k);
+    expect(KIND_PARAMS).toContain("waivers");
+  });
+
+  it("handles an empty page", () => {
+    expect(filterSessions([], ALL, ALL)).toEqual([]);
+    expect(groupSessions([])).toEqual([]);
   });
 });
 
@@ -124,6 +138,14 @@ describe("sessionTitle", () => {
     expect(sessionTitle({ ...base, status: "skipped" })).toMatch(/^Skipped/);
   });
 
+  it("treats the runner's placeholder log as no log", () => {
+    expect(sessionTitle({ ...base, status: "timed_out", summary: NO_SUMMARY_PLACEHOLDER })).toBe(
+      "Ran out of time before making a call",
+    );
+    expect(sessionTitle({ ...base, status: "failed", summary: ` ${NO_SUMMARY_PLACEHOLDER} ` })).toMatch(/error/);
+    expect(sessionTitle({ ...base, summary: NO_SUMMARY_PLACEHOLDER })).toBe("Lineup check");
+  });
+
   it("prefers the log even when the session then timed out", () => {
     expect(sessionTitle({ ...base, status: "timed_out", summary: "Held the lineup." })).toBe("Held the lineup.");
   });
@@ -177,6 +199,14 @@ describe("groupSessions", () => {
     expect(g.name).toBe("Gridiron Gurus");
     expect(g.model).toBe("Claude Opus 4");
     expect(g.teamSlug).toBe("gridiron-gurus");
+  });
+
+  it("names a team that has not named itself yet after its model", () => {
+    const unnamed = { id: 7, slug: "seat-7", name: null, model: "GLM-5.3" };
+    const [g] = groupSessions([row(1, unnamed, 1)]);
+    expect(g.name).toBe("GLM-5.3");
+    expect(g.model).toBe("GLM-5.3");
+    expect(g.teamSlug).toBe("seat-7");
   });
 
   it("gives the reporter a name, no model line and no team page", () => {

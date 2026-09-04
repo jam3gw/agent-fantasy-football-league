@@ -37,6 +37,18 @@ Done:
 - `KIND_LABEL` moved from `session-view.tsx` to `lib/sessionsFilter.ts` so
   both pages share one set of names; SPEC §12.1's `/sessions` row updated.
 
+Review round (fresh-context reviewer, all fixed): the runner's
+`(no summary written)` placeholder log was showing verbatim as a row title —
+it is now a constant in `@league/shared` (`NO_SUMMARY_PLACEHOLDER`) that both
+the runner and the page use, and the page treats it as no log; the `kind`
+URL value is checked against every kind the enum knows rather than the
+kinds on the current page, so an old `?kind=trade_vote` link filters even
+when no vote is among the newest 600; the "Live now" strip's negative top
+margin only applies when the strip renders; the "All teams" chip no longer
+carries a live dot the prototype does not show; "Show N more" carries
+`aria-expanded` and `aria-controls`; tests for the placeholder, an empty
+page and a team that has not named itself yet.
+
 Departures from the prototype, all deliberate: its Font Awesome link and the
 design system's React `Button` are not used (the site has no icon set, and the
 ghost button is one class string); density and rows-per-team are constants,
