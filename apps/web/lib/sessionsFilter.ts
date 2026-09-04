@@ -223,9 +223,9 @@ export function rowTime(row: Pick<SessionListRow, "startedAt" | "createdAt">): D
 }
 
 /**
- * The rows by team, the most recently active team first. `rows` arrive
- * newest first, so each group's first row is its newest and decides the
- * order.
+ * The rows by team, the most recently active team first, and newest first
+ * inside each team by the time the row shows — a session that was queued
+ * early but started late sits where its start puts it.
  */
 export function groupSessions<T extends SessionListRow>(rows: readonly T[]): SessionGroup<T>[] {
   const groups = new Map<string, SessionGroup<T>>();
@@ -244,6 +244,7 @@ export function groupSessions<T extends SessionListRow>(rows: readonly T[]): Ses
     }
     group.rows.push(row);
   }
+  for (const g of groups.values()) g.rows.sort((a, b) => rowTime(b).getTime() - rowTime(a).getTime());
   const newest = (g: SessionGroup<T>) => rowTime(g.rows[0]).getTime();
   return [...groups.values()].sort((a, b) => newest(b) - newest(a));
 }
