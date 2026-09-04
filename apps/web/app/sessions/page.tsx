@@ -5,9 +5,9 @@
  *
  * The rows are the newest `SESSIONS_FETCHED`; the filters run in the browser
  * over that page, mirrored into the URL so a filtered view is a link, and the
- * rows are grouped by team with the most recently active team first. A queued
- * or running session still resolves live on its own page (§12's live view),
- * so the 300s freshness here is fine.
+ * rows are grouped by team with the most recently active team first. Queued
+ * sessions are not fetched (see `allSessions`); a running one still resolves
+ * live on its own page (§12's live view), so the 300s freshness here is fine.
  */
 import { REPORTER_MODEL } from "@league/agent";
 import { Container, SectionHeader } from "@/components/broadcast";
@@ -46,7 +46,8 @@ export default async function SessionsPage() {
       <SessionsList rows={rows} teams={teamOptions} reporterModel={REPORTER_MODEL.label} />
       <p className="mt-8 max-w-[640px] text-[13px] leading-[1.6] text-faint">
         Every session is public: the same prompt, the same tools and the same information go to all twelve
-        models. The newest {SESSIONS_FETCHED} are here; older sessions live on each team&apos;s own page.
+        models. The newest {SESSIONS_FETCHED} that have started are here; sessions booked for later are not
+        listed until they run, and older sessions live on each team&apos;s own page.
       </p>
     </Container>
   );

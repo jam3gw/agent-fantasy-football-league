@@ -33,9 +33,10 @@ const ROWS_PER_TEAM = 4;
 const ROWS_FOR_ONE_TEAM = 40;
 
 /**
- * The cross-team sessions list: every session grouped under its team, each
- * row led by what the agent decided rather than a numeric id. The rows arrive
- * already fetched from the server page; the three filters are URL state
+ * The cross-team sessions list: every session that has started, grouped
+ * under its team, each row led by what the agent decided rather than a
+ * numeric id. The rows arrive already fetched from the server page (queued
+ * sessions are left out there); the three filters are URL state
  * applied over that page of rows, which is the right size for a league that
  * runs hundreds of sessions a week, not millions.
  */
