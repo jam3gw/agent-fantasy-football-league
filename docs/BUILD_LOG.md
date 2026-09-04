@@ -2,6 +2,17 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-04 — `/sessions` leaves out queued sessions
+
+Jake's call after the redesign went live: the "Live now" strip was a wall of
+forty-odd "Lineup check · queued" links, because the week plan books every
+team's lineup checks days ahead (§9) and a queued session has nothing to
+show. `allSessions` now filters `status != 'queued'`, so queued sessions
+appear neither in the strip, the counts, nor the cards until they start;
+`/admin/teams` still shows what is booked. The page's footnote says so.
+SPEC §12.1's `/sessions` row updated. The `queued` URL value is still
+accepted and simply matches nothing.
+
 ## 2026-09-04 — `/sessions` redesigned: team-grouped, outcome-first rows
 
 From Jake's Claude Design handoff (`Sessions.dc.html`). The old page was a
