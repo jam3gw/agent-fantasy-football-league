@@ -23,6 +23,7 @@ import {
   type StandingsRow,
 } from "@league/engine";
 import { db } from "./db";
+import type { SessionListRow } from "./sessionsFilter";
 
 export type TeamRow = typeof teams.$inferSelect;
 
@@ -124,12 +125,43 @@ export async function allSessions(limit = 300) {
     .where(ne(sessions.status, "queued"))
     .orderBy(desc(sessions.createdAt))
     .limit(limit);
-  if (rows.length === 0) return [];
+  return withSummaries(rows);
+}
 
-  // The decision log a session ended with is the line its row leads with on
-  // `/sessions`. A team session writes at most one (§8.4); the reporter and a
-  // draft pick write none. Read in one query rather than joined, so a session
-  // that somehow has two logs still yields one row and not two.
+/**
+ * A team's own sessions for its page, in the shape `/sessions` lists them,
+ * queued ones left out for the same reason.
+ */
+export async function teamSessions(
+  team: Pick<TeamRow, "id" | "slug" | "name" | "modelLabel">,
+  limit = 100,
+): Promise<SessionListRow[]> {
+  const rows = await db()
+    .select({
+      id: sessions.id,
+      teamId: sessions.teamId,
+      kind: sessions.kind,
+      status: sessions.status,
+      startedAt: sessions.startedAt,
+      createdAt: sessions.createdAt,
+      toolCalls: sessions.toolCalls,
+      costUsd: sessions.costUsd,
+    })
+    .from(sessions)
+    .where(and(eq(sessions.teamId, team.id), ne(sessions.status, "queued")))
+    .orderBy(desc(sessions.createdAt))
+    .limit(limit);
+  return withSummaries(rows.map((r) => ({ ...r, teamSlug: team.slug, teamName: team.name, modelLabel: team.modelLabel })));
+}
+
+/**
+ * The decision log a session ended with is the line its row leads with. A
+ * team session writes at most one (§8.4); the reporter and a draft pick
+ * write none. Read in one query rather than joined, so a session that
+ * somehow has two logs still yields one row and not two.
+ */
+async function withSummaries<T extends { id: number }>(rows: T[]): Promise<Array<T & { summary: string | null }>> {
+  if (rows.length === 0) return [];
   const logs = await db()
     .select({ sessionId: decisionLogs.sessionId, summary: decisionLogs.summary })
     .from(decisionLogs)
