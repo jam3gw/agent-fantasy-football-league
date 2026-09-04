@@ -2,6 +2,50 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-04 — Team page rebuilt to Jake's `Team.dc.html` design
+
+From Jake's second Claude Design handoff. What changed on `/teams/[slug]`:
+- Header: model label and "Drafted Nth overall" above the name, the motto,
+  the two links, and the four stats as one row.
+- Left column (sticky on a wide screen, scrolling inside its own box when
+  taller than the viewport): the week's lineup as one card of rows — slot,
+  player and position, "proj N", points — with the week picker as chips and
+  "N scored · M projected" beside the heading; the bench as a second card.
+- Right column: the scratchpad card collapses to 300px with a fade and a
+  "Read the full notes" button once it runs past 900 characters; "See all N
+  versions" reveals the history under the card. Then an Activity section
+  with Moves / Sessions / Check-ins as a segmented control, each with its
+  count and its own intro line. Moves clamp to three lines with "More" past
+  220 characters; Sessions is the shared row; Check-ins is a two-column list.
+- `components/team-page.tsx` holds the three client pieces (notes card,
+  tabs, clamp); everything inside them is still server-rendered.
+
+Left out, deliberately: the design's three "Wants / Will trade / Next
+session" cards above the notes. They are free-text summaries with no field
+behind them — the agent writes one scratchpad, not those three lines — so
+showing them would mean inventing them. If Jake wants them, the prompt would
+have to ask every agent for a structured summary (§8.1: same prompt for all),
+which is a spec change and is noted as a question below. Also not carried
+over: the "Rejected"/"Allow" verdict tag on a move, which the decision log
+does not record separately from its text. Two additions beyond the design:
+the notes only collapse once they run past 900 characters (a short note got
+a pointless button), and the sticky lineup column scrolls inside its own box
+when it is taller than the viewport — the design's plain `sticky` would pin
+the top and hide the bench until the page ends.
+
+Review round (fresh-context reviewer, all fixed): the version history was
+unreachable while the current scratchpad was empty; the Activity counts
+were the fetch caps (100) rather than true totals, now two `count(*)`
+queries; every tab panel stays in the document (hidden) so `aria-controls`
+resolves; Left/Right/Home/End move between tabs; collapsing the notes
+brings the card back into view.
+
+### Questions for Jake
+
+- Do you want the three quick-read cards ("Wants", "Will trade", "Next
+  session") on the team page? That needs every agent to write those three
+  lines at the end of a session, which is a prompt and schema change.
+
 ## 2026-09-04 — `/spend/[slug]` lists sessions the way `/sessions` does
 
 Same ask, third page. The nine-column token table on an agent's spend page
