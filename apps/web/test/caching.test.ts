@@ -27,7 +27,17 @@ const WINDOWS: Record<string, number> = {
   "sessions/[id]/page.tsx": 300,
   "spend/page.tsx": 300,
   "spend/[slug]/page.tsx": 300,
+  "teams/page.tsx": 300,
+  "teams/[slug]/page.tsx": 300,
+  "teams/[slug]/week/[week]/page.tsx": 300,
 };
+
+/**
+ * Pages the spec lets read their query string. Reading `searchParams` makes
+ * Next render a page per request, so the window above never reaches the CDN;
+ * this list is the whole allowance.
+ */
+const READS_QUERY = new Set(["transactions/page.tsx"]);
 
 const appDir = fileURLToPath(new URL("../app/", import.meta.url));
 
@@ -37,6 +47,24 @@ describe("§12.1 — freshness windows", () => {
     expect(source).toMatch(new RegExp(`export const revalidate = ${seconds};`));
     // `force-dynamic` would silently replace the window with `no-store`.
     expect(source).not.toContain('export const dynamic = "force-dynamic"');
+    // So would reading the query string: the team page did, and lost its window.
+    if (!READS_QUERY.has(file)) expect(source).not.toContain("searchParams");
+  });
+
+  it("the team page's old ?week= links redirect to the path the static route serves", () => {
+    // Read as text, as above: `withWorkflow` wraps the exported config.
+    const config = readFileSync(fileURLToPath(new URL("../next.config.ts", import.meta.url)), "utf8");
+    const rule = config.slice(config.indexOf('source: "/teams/:slug"'), config.indexOf("permanent: true"));
+    expect(rule).toContain('destination: "/teams/:slug/week/:week"');
+    expect(rule).toContain('type: "query", key: "week"');
+    const value = /value: "((?:[^"\\]|\\.)*)"/.exec(rule)?.[1];
+    expect(value).toBeDefined();
+    // Next anchors the pattern. Every week the route accepts redirects; anything
+    // else (0, 19, "abc") falls through to the team page and its current week,
+    // which is what the old page showed for those, instead of a 404.
+    const pattern = new RegExp(`^${JSON.parse(`"${value}"`)}$`);
+    for (let w = 1; w <= 18; w++) expect(String(w)).toMatch(pattern);
+    for (const bad of ["0", "19", "99", "abc", "1e0", " 1"]) expect(bad).not.toMatch(pattern);
   });
 
   it("every admin page stays out of every cache", () => {

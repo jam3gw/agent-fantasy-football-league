@@ -2,6 +2,50 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-04 — Speed Insights: the four pages under 90
+
+Vercel Speed Insights put `/matchups/[week]` at 56, `/benchmark` at 61,
+`/teams` at 85 and `/teams/[slug]` at 88; every other public page scored
+100. The per-metric breakdown is not readable from this session, so the
+work went to what the code shows is slow on those pages:
+
+- `/teams/[slug]` read its `?week=` query string, and a page that reads its
+  query string is rendered per request — the same `no-store` trap the
+  matchups page comment describes — so its 300 s window never reached the
+  CDN and every visit paid the full database render. The week is a path now:
+  `/teams/[slug]` is the current week and `/teams/[slug]/week/[week]` a
+  chosen one; both declare `generateStaticParams` and revalidate. Old
+  `?week=N` links redirect (308) to the new path for N in 1–18; any other
+  value falls through to the team page and its current week, as before.
+  (The reviewer caught the first cut of the redirect sending `?week=19` to
+  a 404.) The page body moved to
+  `app/teams/[slug]/team.tsx`, unchanged apart from the loader: the team
+  and the settings read together, and the projections are chained off the
+  roster reads inside the same `Promise.all` instead of a fourth round.
+- `/matchups/[week]` loaded the twelve lineups one team at a time, three
+  queries each, then projections, then the clock, then locks, then the
+  marquee game's reasons — about forty serial round trips on every
+  regeneration. `teamLineups` in `lib/queries.ts` fetches every team's
+  lineup in three queries, and projections, locks and reasons go out
+  together. `teamLineup` is now a one-team call into it, and `teamBench`
+  runs its two independent reads together.
+- `/teams` and `/benchmark` were already static and already loaded in
+  parallel; nothing in the code explains their scores (15 and 8 samples,
+  so a couple of slow visits move them). Left alone; re-read Speed Insights
+  after a week of the new build before touching them.
+
+Tests added: the two team routes in `caching.test.ts`'s window list, a guard
+that no windowed page reads `searchParams` (`/transactions` is the allowed
+one), the redirect rule's range, and a PGlite test for `teamLineups`.
+
+Verified locally: lint, typecheck, the full test suite, and a production
+build whose route table lists `/teams/[slug]` and `/teams/[slug]/week/[week]`
+as static with revalidation.
+
+Seen in that route table and not touched here: `/transactions` reads its
+query string too, so it is the one remaining public page rendered per
+request. It was not in the list Jake sent; same fix applies when it is.
+
 ## 2026-09-04 — Team page rebuilt to Jake's `Team.dc.html` design
 
 From Jake's second Claude Design handoff. What changed on `/teams/[slug]`:
