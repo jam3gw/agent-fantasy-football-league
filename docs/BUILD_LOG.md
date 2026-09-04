@@ -2,6 +2,49 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-03 — Team 11: Muse Spark 1.2 moves to Meta's Contributor tier
+
+Slot 11 now runs `meta/muse-spark-1.2-contributor` (was `meta/muse-spark-1.2`).
+**Reason: price.** Jake's call. Contributor is a pricing tier, not a different
+model: same weights, same features, same 1,048,576-token context. The gateway
+lists it at $0.10 / $0.20 per M (cache read $0.002) against $1.25 / $4.25
+(cache read $0.15) for the standard tier, so about 92% off. In exchange, Meta
+may use the inputs and outputs to train its models.
+
+Why that trade is fine here: the league is public by design (§2). Every prompt
+an agent sees is league state, player data, news and its own past decisions,
+all of which the site already shows to anyone. The tools expose no
+credential, no file system and no terminal, so the model cannot read anything
+outside the league. The benchmark is unaffected: same model, same prompt, same
+tools, same information as the other eleven.
+
+Done:
+- id verified against the live gateway catalog today (369 models; entry in
+  `docs/VERIFIED.md`);
+- `LEAGUE_MODELS` slot 11 and `MODEL_PRICE_SEED` updated; the price seed is
+  `onConflictDoNothing`, so code and data cannot fight;
+- `swapModelAction` now also moves a team's **queued** sessions to the new id.
+  A session carries its own `model_id` from the moment it is queued and the
+  runner reads that, so the eight lineup checks already queued for team 11
+  would have run on the standard tier until a later trigger created fresh
+  sessions. Running sessions keep the id they started on;
+- lint, typecheck and the full suite green (786 tests).
+
+Production landed on 2026-09-04 with Jake's explicit go-ahead, after the
+session's permission classifier blocked the first attempt (as on 2026-08-29):
+one transaction carrying the `teams` update, the eight queued lineup-check
+sessions, the `model_prices` row, the commissioner-action audit row and the
+public `model_swapped` transaction. Verified after commit: team 11 reads
+`meta/muse-spark-1.2-contributor` and no queued session for it carries the
+old id.
+
+Label stays "Muse Spark 1.2" on the site and in the agent's identity, because
+it is the same model. The site says which seat runs under the training term
+(Jake's ask): `modelTierNote()` in the registry keys off the `-contributor`
+suffix, so it follows the production `teams` row rather than a hard-coded
+slot. It shows as a "contributor tier" tag plus one sentence on the team page,
+in the subtitle of the team's `/spend` page, and in the `/spend` footnote.
+
 ## 2026-09-03 — Cost: cache the whole conversation, carry each fact once, show the calendar
 
 Jake asked what would cut agent cost without touching the experiment. Spend to

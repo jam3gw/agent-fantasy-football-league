@@ -18,7 +18,7 @@ export const MODEL_IDS = [
   "deepseek/deepseek-v4-pro",
   "moonshotai/kimi-k3",
   "alibaba/qwen3.8-max",
-  "meta/muse-spark-1.2",
+  "meta/muse-spark-1.2-contributor",
   "zai/glm-5.3",
 ];
 

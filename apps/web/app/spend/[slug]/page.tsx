@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { formatEt } from "@league/shared";
 import { computeStandings, costAlarms, sessions, spendLedger, teams } from "@league/engine";
+import { modelTierNote } from "@league/agent";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table, money } from "../../../components/ui";
 import { db } from "../../../lib/db";
 
@@ -108,7 +109,7 @@ export default async function AgentSpendPage({ params }: { params: Promise<{ slu
         subtitle={
           isReporter
             ? "The thirteenth agent. No team, no roster, the same tools and the same allowance."
-            : `${team?.modelLabel ?? ""} · ${team?.modelId ?? ""}`
+            : `${team?.modelLabel ?? ""} · ${team?.modelId ?? ""}${team && modelTierNote(team.modelId) ? ` — ${modelTierNote(team.modelId)}` : ""}`
         }
       />
 
