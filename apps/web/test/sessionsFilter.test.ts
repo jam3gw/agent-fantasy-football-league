@@ -216,6 +216,12 @@ describe("groupSessions", () => {
     expect(g.teamSlug).toBeNull();
   });
 
+  it("orders rows inside a team by when they show, not by when they were queued", () => {
+    const late = { ...row(2, gurus, 30), startedAt: at(1) }; // queued early, started just now
+    const [g] = groupSessions([row(1, gurus, 5), late]);
+    expect(g.rows.map((r) => r.id)).toEqual([2, 1]);
+  });
+
   it("orders a queued session, which has not started, by when it was created", () => {
     const groups = groupSessions([row(2, foxes, 0, "queued"), row(1, gurus, 3)]);
     expect(groups.map((g) => g.key)).toEqual(["tundra-foxes", "gridiron-gurus"]);

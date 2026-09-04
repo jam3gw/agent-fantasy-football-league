@@ -47,7 +47,11 @@ when no vote is among the newest 600; the "Live now" strip's negative top
 margin only applies when the strip renders; the "All teams" chip no longer
 carries a live dot the prototype does not show; "Show N more" carries
 `aria-expanded` and `aria-controls`; tests for the placeholder, an empty
-page and a team that has not named itself yet.
+page and a team that has not named itself yet. Second round: a paused
+session's dot and status are amber, not the green of a finished one; the
+reporter's card names its model like its chip does; rows inside a card sort
+by the time they show; the status and kind chip groups are real flex boxes,
+not `display: contents`, so their group labels reach the accessibility tree.
 
 Departures from the prototype, all deliberate: its Font Awesome link and the
 design system's React `Button` are not used (the site has no icon set, and the

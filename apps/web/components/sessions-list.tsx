@@ -139,7 +139,7 @@ export function SessionsList({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <span className="mr-1 text-[11px] font-bold uppercase tracking-[0.1em] text-faint">Show</span>
-          <div className="contents" role="group" aria-label="Status">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Status">
             {STATUS_FILTERS.map((f) => (
               <Chip key={f.value} on={statusChipOn(f.value)} onClick={() => url.set({ status: f.value })}>
                 {f.label}
@@ -147,7 +147,7 @@ export function SessionsList({
             ))}
           </div>
           <span aria-hidden="true" className="mx-1.5 h-[18px] w-px bg-border-strong" />
-          <div className="contents" role="group" aria-label="Kind">
+          <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Kind">
             {KIND_FILTERS.map((f) => (
               <Chip key={f.value} on={kindChipOn(f.value)} onClick={() => url.set({ kind: f.value })}>
                 {f.label}
@@ -179,7 +179,7 @@ export function SessionsList({
                     <h2 id={`sessions-${g.key}`} className="text-[17px] font-bold tracking-[-0.02em]">
                       {g.name}
                     </h2>
-                    {g.model ? <span className="text-[13px] text-muted">{g.model}</span> : null}
+                    <span className="text-[13px] text-muted">{g.model ?? reporterModel}</span>
                     <span className="text-[12px] tabular-nums text-faint">
                       {g.rows.length} session{g.rows.length === 1 ? "" : "s"}
                     </span>
@@ -237,14 +237,17 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
 function SessionRow({ row, now }: { row: SessionListRow; now: Date | null }) {
   const live = isLive(row.status);
   const bad = isBad(row.status);
-  const tone = live ? "text-accent" : bad ? "text-danger" : "text-muted";
+  const paused = row.status === "paused";
+  const tone = live ? "text-accent" : bad ? "text-danger" : paused ? "text-warn" : "text-muted";
   const dot = live
     ? "bg-[var(--green-light)] shadow-[0_0_0_3px_rgba(74,143,74,0.25)]"
     : bad
       ? "bg-danger"
-      : row.status === "skipped"
-        ? "bg-border-strong"
-        : "bg-accent";
+      : paused
+        ? "bg-warn"
+        : row.status === "skipped"
+          ? "bg-border-strong"
+          : "bg-accent";
   const at = rowTime(row);
   return (
     <Link
