@@ -14,6 +14,21 @@ const nextConfig: NextConfig = {
    * What is left here is the one direction that needs forcing: nothing behind
    * the commissioner login may ever be stored, by any cache.
    */
+  /**
+   * The team page's week used to be a query string. Reading one makes Next
+   * render the page per request, so the week is a path segment now; the old
+   * links still land in the right place.
+   */
+  async redirects() {
+    return [
+      {
+        source: "/teams/:slug",
+        has: [{ type: "query", key: "week", value: "(?<week>\\d{1,2})" }],
+        destination: "/teams/:slug/week/:week",
+        permanent: true,
+      },
+    ];
+  },
   async headers() {
     return [
       { source: "/admin/:path*", headers: [{ key: "Cache-Control", value: "private, no-store" }] },
