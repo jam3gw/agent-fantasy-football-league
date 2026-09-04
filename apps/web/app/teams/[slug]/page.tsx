@@ -18,13 +18,13 @@ import {
   playerWeekProj,
   scratchpadVersions,
   scratchpads,
-  sessions,
   spendRollups,
 } from "@league/engine";
 import { formatEt } from "@league/shared";
 import { modelTierNote } from "@league/agent";
 import { CardLink, Container, Eyebrow, Nothing, Panel, Tag, formatEtStamp } from "@/components/broadcast";
 import { InlineMarkdown, Markdown } from "@/components/markdown";
+import { SessionRows } from "@/components/session-rows";
 import { flattenMarkdown } from "@/lib/broadcastLogic";
 import { db } from "@/lib/db";
 import {
@@ -34,6 +34,7 @@ import {
   teamBench,
   teamBySlug,
   teamLineup,
+  teamSessions as sessionsOf,
   type LineupPlayer,
 } from "@/lib/queries";
 
@@ -135,16 +136,7 @@ export default async function TeamPage({
           .limit(100),
       [],
     ),
-    safe(
-      () =>
-        db()
-          .select()
-          .from(sessions)
-          .where(eq(sessions.teamId, team.id))
-          .orderBy(desc(sessions.createdAt))
-          .limit(100),
-      [],
-    ),
+    safe(() => sessionsOf(team, 100), []),
     safe(
       () =>
         db()
@@ -449,55 +441,15 @@ export default async function TeamPage({
               <h2 className="text-[20px] font-bold tracking-[-0.02em]">Sessions</h2>
               <p className="mt-1.5 text-[13px] text-muted">
                 {Math.min(teamSessions.length, SESSIONS_SHOWN)} most recent
-                {teamSessions.length > SESSIONS_SHOWN ? ` of the last ${teamSessions.length}` : ""}, newest
-                first. Every one has a full transcript.
+                {teamSessions.length > SESSIONS_SHOWN ? ` of the last ${teamSessions.length}` : ""} that have run,
+                newest first, each led by what the agent decided. Every one has a full transcript; sessions booked
+                for later appear once they run.
               </p>
               <div className="mt-3.5 min-w-0 overflow-hidden rounded-xl border border-border bg-surface">
                 {teamSessions.length === 0 ? (
                   <Nothing>This agent has not run a session yet.</Nothing>
                 ) : (
-                  <div className="table-scroll">
-                    <table className="w-full min-w-[640px] text-[13px]">
-                      <thead>
-                        <tr className="bg-background-alt text-left text-[10px] font-bold uppercase tracking-[0.1em] text-muted">
-                          <th className="whitespace-nowrap px-3 py-2.5">ID</th>
-                          <th className="whitespace-nowrap px-3 py-2.5">Kind</th>
-                          <th className="whitespace-nowrap px-3 py-2.5">Status</th>
-                          <th className="whitespace-nowrap px-3 py-2.5">Started</th>
-                          <th className="whitespace-nowrap px-3 py-2.5 text-right">Tools</th>
-                          <th className="whitespace-nowrap px-3 py-2.5 text-right">Cost</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {teamSessions.slice(0, SESSIONS_SHOWN).map((s) => (
-                          <tr key={s.id} className="border-t border-border/80">
-                            <td className="whitespace-nowrap px-3 py-2.5">
-                              <Link href={`/sessions/${s.id}`} className="font-semibold text-accent">
-                                {s.id}
-                              </Link>
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5">{s.kind.replace(/_/g, " ")}</td>
-                            <td className="whitespace-nowrap px-3 py-2.5">
-                              <span
-                                className={
-                                  s.status === "failed" || s.status === "timed_out" ? "text-danger" : "text-muted"
-                                }
-                              >
-                                {s.status}
-                              </span>
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-muted">
-                              {s.startedAt ? formatEtStamp(s.startedAt) : "—"}
-                            </td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{s.toolCalls}</td>
-                            <td className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">
-                              ${(s.costUsd ?? 0).toFixed(2)}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <SessionRows rows={teamSessions.slice(0, SESSIONS_SHOWN)} />
                 )}
               </div>
             </div>
