@@ -11,6 +11,7 @@ import Link from "next/link";
 import { formatEt } from "@league/shared";
 import { OutcomeBanner, Fact, StepCard } from "@/components/session-steps";
 import { SessionRail, type RailStep } from "@/components/session-rail";
+import { StepOpenTracker } from "@/components/step-open-tracker";
 import type { SessionSummaryData, SessionTeamData, TranscriptEvent } from "@/components/transcript";
 import { money } from "@/components/ui";
 import {
@@ -166,6 +167,7 @@ export function SessionTranscript({
         </div>
 
         <div className="flex min-w-0 flex-col gap-3.5">
+          <StepOpenTracker />
           {live}
           {steps.map((step) => (
             <StepCard
