@@ -510,8 +510,8 @@ export function splitHeadline(
     const end = match.index + match[0].length;
     if (end > max) break;
     if (end < minSentence) continue;
-    // "vs." and its kind end no sentence.
-    if (ABBREVIATION.test(flat.slice(0, match.index + 1))) continue;
+    // "vs." and its kind end no sentence; "No." and "St." only ahead of a number.
+    if (isAbbreviation(flat, match.index)) continue;
     // A sentence end inside `**Bold. Sentence**` is not a break to cut on.
     if (tokenSafeCut(flat, end) < end) continue;
     return { headline: flat.slice(0, end).trim(), body: flat.slice(end).trim() };
@@ -524,30 +524,51 @@ export function splitHeadline(
 }
 
 /** A full stop after one of these is an abbreviation, not the end of a sentence. */
-const ABBREVIATION = /(?:^|\s)(?:vs|v|e\.g|i\.e|etc|cf|approx|no|mr|mrs|ms|dr|st|jr|sr|inc|ltd)\.$/i;
+const ABBREVIATION = /(?:^|\s)(?:vs|v|e\.g|i\.e|etc|cf|approx|mr|mrs|ms|dr|jr|sr|inc|ltd)\.$/i;
+/** These are abbreviations only ahead of a number: "No. 1 pick", "St. 3" — a sentence can end in "no." */
+const NUMBERED_ABBREVIATION = /(?:^|\s)(?:no|st)\.$/i;
 
+/** Is the full stop at `at` in `flat` an abbreviation's rather than a sentence's? */
+function isAbbreviation(flat: string, at: number): boolean {
+  const before = flat.slice(0, at + 1);
+  if (ABBREVIATION.test(before)) return true;
+  return NUMBERED_ABBREVIATION.test(before) && /^\s+\d/.test(flat.slice(at + 1));
+}
+
+/** A fence marker line: opens or closes a block, unless the block is all on this one line. */
 const FENCE_LINE = /^\s*(?:`{3,}|~{3,})/;
+const ONE_LINE_FENCE = /^\s*(?:`{3,}[^\n]+?`{3,}|~{3,}[^\n]+?~{3,})/;
 const RULE_LINE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
 const BLOCK_MARKERS = /^\s*(?:#{1,6}\s+|[-*+]\s+|\d{1,3}[.)]\s+|>\s?)+/;
+/** A line with nothing but marker characters, or a table row: not prose to close. */
+const NOT_PROSE = /^(?:[-#*+>|:\s]*|\|.*)$/;
+/** Ends in a stop, or in a stop followed by whatever closes a quote, a bracket or an inline token. */
+const ALREADY_CLOSED = /[.?!…:;,]["”’)*`_~]*$/;
 
 /**
  * A full stop on every line that ends without one, outside fenced code, so
  * that a line break survives flattening as a sentence boundary. A line that
  * ends in a colon, comma or semicolon runs on into the next by intent and
- * is left alone; so is anything that is only a marker, a rule or a fence.
+ * is left alone; so is anything that is only a marker, a rule, a table row
+ * or a fence. A stop inside a closing `**` or backtick already counts.
  */
 function closeLines(text: string): string {
   let inFence = false;
   return text
     .split("\n")
     .map((line) => {
-      if (FENCE_LINE.test(line)) {
+      // A one-line fence (```quick``` aside) opens and closes on the spot,
+      // the shape `flattenMarkdown` handles first; it must not flip the
+      // state and swallow every line after it, and any prose after it on
+      // the line is a line like any other.
+      const oneLine = ONE_LINE_FENCE.test(line);
+      if (FENCE_LINE.test(line) && !oneLine) {
         inFence = !inFence;
         return line;
       }
       if (inFence || RULE_LINE.test(line)) return line;
-      const content = line.replace(BLOCK_MARKERS, "").trimEnd();
-      if (content === "" || /[.?!…:;,]["”’)]*$/.test(content)) return line;
+      const content = (oneLine ? line.replace(ONE_LINE_FENCE, "") : line).replace(BLOCK_MARKERS, "").trimEnd();
+      if (NOT_PROSE.test(content) || ALREADY_CLOSED.test(content)) return line;
       return `${line.trimEnd()}.`;
     })
     .join("\n");
@@ -561,9 +582,11 @@ function closeLines(text: string): string {
  * through `InlineMarkdown`.
  */
 export function plainExcerpt(md: string, maxWords = 90): string {
+  // Underscores stay: `pts_allow_14_20` is an identifier, which is why the
+  // renderer does not treat `_` as a mark either.
   const plain = flattenMarkdown(
     md.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1"),
-  ).replace(/[*_`~]/g, "");
+  ).replace(/[*`~]/g, "");
   const words = plain.split(" ").filter(Boolean);
   return words.length <= maxWords ? plain : `${words.slice(0, maxWords).join(" ")}…`;
 }

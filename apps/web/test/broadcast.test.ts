@@ -669,6 +669,36 @@ describe("a headline out of an agent's paragraph", () => {
     expect(splitHeadline("Above\n---\nBelow").headline).toBe("Above. Below.");
   });
 
+  it("does not double a full stop that sits inside a closing token", () => {
+    // `**Start Gibbs.**` is already closed; a second stop after the `**`
+    // rendered as "Start Gibbs.. Bench Wright." on the lead.
+    expect(splitHeadline("**Start Gibbs.**\nBench Wright.").headline).toBe("**Start Gibbs.** Bench Wright.");
+    expect(splitHeadline("*Done.*\n`npm test.`\nNext").headline).toBe("*Done.* `npm test.` Next.");
+  });
+
+  it("does not let a one-line fence swallow every line after it", () => {
+    expect(splitHeadline("Start\n```quick``` aside\nLine one\nLine two").headline).toBe(
+      "Start. aside. Line one. Line two.",
+    );
+  });
+
+  it("leaves marker-only lines and table rows alone", () => {
+    expect(splitHeadline("- \n#\n-\n> \nReal line").headline).toBe("Real line.");
+    expect(splitHeadline("```only```\nAfter").headline).toBe("After.");
+    expect(splitHeadline("| a | b |\n| - | - |\nAfter").headline).toBe("| a | b | | - | - | After.");
+  });
+
+  it("ends a sentence on a bare no., and keeps No. 1 whole", () => {
+    const yes =
+      "Everything on that roster is a no. The rest of the league can stop asking me about it now, and the answer will not change before December.";
+    expect(splitHeadline(yes).headline).toBe("Everything on that roster is a no.");
+    const pick =
+      "Took the No. 1 pick and used it on a tight end, as everybody has now heard. Ask me in December about it, when the whole league has seen why.";
+    expect(splitHeadline(pick).headline).toBe(
+      "Took the No. 1 pick and used it on a tight end, as everybody has now heard.",
+    );
+  });
+
   it("does not take an abbreviation for a sentence end", () => {
     const text =
       "Sat Rice over Jennings in the FLEX vs. the Chargers because the snap share favours him. Jennings stays on the bench.";
@@ -700,6 +730,10 @@ describe("the report's plain excerpt", () => {
     expect(plainExcerpt("See [the board](/board) and ![chart](x.png) — **bold** `code`.")).toBe(
       "See the board and — bold code.",
     );
+  });
+
+  it("keeps underscores, which are identifiers here, not marks", () => {
+    expect(plainExcerpt("Watch pts_allow_14_20 this week.")).toBe("Watch pts_allow_14_20 this week.");
   });
 
   it("caps at the word count with an ellipsis", () => {

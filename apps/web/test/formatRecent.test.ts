@@ -24,6 +24,12 @@ describe("formatEtRecent", () => {
     expect(formatEtRecent(new Date("2026-08-28T15:00:00Z"), now)).toBe("Aug 28");
   });
 
+  it("carries the zone only on the forms that carry a clock", () => {
+    expect(formatEtRecent(new Date("2026-09-25T13:47:00Z"), now, true)).toBe("9:47 AM ET");
+    expect(formatEtRecent(new Date("2026-09-24T01:02:00Z"), now, true)).toBe("Wed 9:02 PM ET");
+    expect(formatEtRecent(new Date("2026-08-28T15:00:00Z"), now, true)).toBe("Aug 28");
+  });
+
   it("reads the day in Eastern time, not UTC", () => {
     // 11:30 PM ET Thursday is 3:30 AM UTC Friday; it is still yesterday.
     expect(formatEtRecent(new Date("2026-09-25T03:30:00Z"), now)).toBe("Thu 11:30 PM");

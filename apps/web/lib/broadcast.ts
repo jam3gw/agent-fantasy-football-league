@@ -9,7 +9,7 @@ import "server-only";
  * every derivation that involves a judgement call says what it assumes.
  */
 import { cache } from "react";
-import { and, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
 import {
   STARTING_SLOTS,
   boardPosts,
@@ -35,6 +35,7 @@ import {
 } from "@league/engine";
 import { db } from "./db";
 import { allTeams, safeRead as safe, settings } from "./queries";
+import type { EngineDb } from "@league/engine";
 import type { Result } from "./broadcastLogic";
 import {
   cardProgress,
@@ -275,8 +276,6 @@ export interface WireItem {
   /** The tracked label ahead of the line: "trade", "waiver", "waivers", "reporter". */
   kind: string;
   text: string;
-  /** The page the line is about. */
-  href: string;
 }
 
 /**
@@ -375,7 +374,6 @@ export const leagueWire = cache(async (limit = 10): Promise<WireItem[]> => {
         give: named(t.givePlayerIds),
         get: named(t.getPlayerIds),
       }),
-      href: "/trades",
     })),
     ...claims
       .filter((c): c is typeof c & { at: Date } => c.at !== null)
@@ -388,7 +386,6 @@ export const leagueWire = cache(async (limit = 10): Promise<WireItem[]> => {
           playerNameOf.get(c.addPlayerId) ?? null,
           c.dropPlayerId === null ? null : (playerNameOf.get(c.dropPlayerId) ?? null),
         ),
-        href: "/waivers",
       })),
     ...runs.map((r) => ({
       at: r.at,
@@ -397,55 +394,62 @@ export const leagueWire = cache(async (limit = 10): Promise<WireItem[]> => {
         r.summary.results.length,
         r.summary.results.filter((x) => x.status === "success").length,
       ),
-      href: "/waivers",
     })),
-    ...reports.map((r) => ({ at: r.at, kind: "reporter", text: r.title, href: "/report" })),
+    ...reports.map((r) => ({ at: r.at, kind: "reporter", text: r.title })),
   ];
   return newestFirst(items, limit);
 });
 
 /**
- * When the league last did anything a reader can see — the masthead's stamp
- * between games, where "Updated 4:41 PM" would be about scores nobody is
- * watching. Everything the stream and the wire draw on: decisions, board
- * posts, transactions, reporter posts, and the trades and waiver claims that
- * move without writing a transaction. One statement of scalar subqueries,
- * like the pulse stamp, because the masthead runs on every route; `cache`d
- * per request so the home page's own read of it is free.
+ * When the league last did anything a reader can see: the newest row across
+ * everything the stream and the wire draw on — decisions, board posts,
+ * transactions, reporter posts, failed sessions, and the trades, waiver
+ * claims and waiver runs that move without writing a transaction. One
+ * statement of scalar subqueries, like the pulse stamp, because the
+ * masthead runs on every route. Takes the database so a test can run the
+ * SQL for real; `lastMoveAt` below is what the pages call.
+ *
+ * Anchored on the settings singleton so the read is one statement; every
+ * inner column is verified to exist on its inner table (the
+ * correlated-subquery trap noted in pulse.ts), and `test/lastMove.test.ts`
+ * exercises each source. The epoch keeps the driver out of it: a number
+ * comes back as a number or a numeric string, never as a Date it may or may
+ * not have mapped. All sources empty → NULL → null, never 1970.
  */
-export const lastMoveAt = cache(async (): Promise<Date | null> => {
-  // Anchored on the settings singleton so the read is one statement, the
-  // same way the pulse stamp is; every inner column is verified to exist on
-  // its inner table (the correlated-subquery trap noted in pulse.ts). The
-  // epoch keeps the driver out of it: a number comes back as a number or a
-  // numeric string, never as a Date it may or may not have mapped.
-  const rows = await safe(
-    () =>
-      db()
-        .select({
-          at: sql<unknown>`extract(epoch from greatest(
-            (select max(created_at) from decision_logs),
-            (select max(created_at) from board_posts),
-            (select max(created_at) from transactions),
-            (select max(created_at) from reporter_posts),
-            (select max(updated_at) from trades),
-            (select max(processed_at) from waiver_claims)
-          ))`,
-        })
-        .from(leagueSettings)
-        .where(eq(leagueSettings.id, 1)),
-    [],
-  );
+export async function readLastMove(database: EngineDb): Promise<Date | null> {
+  const rows = await database
+    .select({
+      at: sql<unknown>`extract(epoch from greatest(
+        (select max(created_at) from decision_logs),
+        (select max(created_at) from board_posts),
+        (select max(created_at) from transactions),
+        (select max(created_at) from reporter_posts),
+        (select max(created_at) from sessions where status in ('failed', 'timed_out')),
+        (select max(updated_at) from trades),
+        (select max(processed_at) from waiver_claims),
+        (select max(run_at) from waiver_runs)
+      ))`,
+    })
+    .from(leagueSettings)
+    .where(eq(leagueSettings.id, 1));
   const epoch = Number(rows[0]?.at ?? Number.NaN);
   return Number.isFinite(epoch) ? new Date(epoch * 1000) : null;
-});
+}
 
 /**
- * The week's first kickoff while it is still ahead, or null once it has
- * passed or when the schedule is not in yet. The judgement is made here
- * rather than in the page, which must stay pure: a page that compared the
- * kickoff against the clock itself would present a played week's kickoff
- * as upcoming until the week advanced.
+ * The masthead's stamp between games, where "Updated 4:41 PM" would be about
+ * scores nobody is watching. `cache`d per request so the home page's own
+ * read of it is free; degrades to null like every page read.
+ */
+export const lastMoveAt = cache((): Promise<Date | null> => safe(() => readLastMove(db()), null));
+
+/**
+ * The week's next kickoff that is still ahead — Thursday night's before the
+ * week starts, Sunday's early window on a Saturday — or null once the week's
+ * last game has kicked off or when the schedule is not in yet. The
+ * judgement is made here rather than in the page, which must stay pure: a
+ * page that compared kickoffs against the clock itself would present a
+ * played week's kickoff as upcoming until the week advanced.
  */
 export async function nextKickoff(week: number, season: number, now: Date = new Date()): Promise<Date | null> {
   const rows = await safe(
@@ -453,13 +457,12 @@ export async function nextKickoff(week: number, season: number, now: Date = new 
       db()
         .select({ at: nflGames.kickoffAt })
         .from(nflGames)
-        .where(and(eq(nflGames.season, season), eq(nflGames.week, week)))
+        .where(and(eq(nflGames.season, season), eq(nflGames.week, week), gt(nflGames.kickoffAt, now)))
         .orderBy(nflGames.kickoffAt)
         .limit(1),
     [],
   );
-  const at = rows[0]?.at ?? null;
-  return at !== null && at.getTime() > now.getTime() ? at : null;
+  return rows[0]?.at ?? null;
 }
 
 /* ------------------------------------------------------------------ *
