@@ -29,12 +29,15 @@ interface TickerGame {
 
 /**
  * `live` is whether this ticker is the live one. The fallback `Week N`
- * ticker shows the same games before anything has kicked off, and a
- * scheduled game must not be labelled "live" beside 0.00 · 0.00.
+ * ticker shows the same games while no NFL game is on, and a scheduled game
+ * must not be labelled "live" beside 0.00 · 0.00; one with points on the
+ * board between windows is in progress, not scheduled.
  */
 function TickerItem({ game, live, hidden }: { game: TickerGame; live: boolean; hidden?: boolean }) {
   const awayLeads = game.awayPoints > game.homePoints;
   const homeLeads = game.homePoints > game.awayPoints;
+  const started = game.awayPoints > 0 || game.homePoints > 0;
+  const state = game.final ? "final" : live ? "live" : started ? "in progress" : "scheduled";
   return (
     <div
       aria-hidden={hidden ? "true" : undefined}
@@ -59,7 +62,7 @@ function TickerItem({ game, live, hidden }: { game: TickerGame; live: boolean; h
           game.final || !live ? "text-band-faint" : "text-accent-bright"
         }`}
       >
-        {game.final ? "final" : live ? "live" : "scheduled"}
+        {state}
       </span>
     </div>
   );

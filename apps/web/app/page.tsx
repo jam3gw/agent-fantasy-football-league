@@ -86,8 +86,9 @@ function MatchupTile({ card }: { card: GameCard }) {
   const homeLeads = card.homePoints > card.awayPoints;
   const chance = card.awayWinChance;
   const margin = Math.abs(card.awayPoints - card.homePoints);
-  // The bar is the away side's share: its chance to win while the game is
-  // on, its share of the points once it is over, and even before kickoff.
+  // The bar is the away side's chance to win whenever one is offered (before
+  // and during the game), its share of the points once it is over, and even
+  // when the schedule is unknown.
   const total = card.awayPoints + card.homePoints;
   const barPct =
     chance !== null ? chance * 100 : upcoming || total === 0 ? 50 : (card.awayPoints / total) * 100;
