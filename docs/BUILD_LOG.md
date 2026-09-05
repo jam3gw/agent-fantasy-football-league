@@ -2,6 +2,41 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Trade roster reservation counted incoming players without crediting outgoing ones
+
+Trade 34 (Second Overall → Gridiron Gambit, Addison for Aaron Jones, one for
+one) failed on accept with `roster_illegal`: "the trade would put the
+counterparty at 15 active players". Gridiron Gambit had a separate one-for-one
+(trade 31) in review at that moment. `incomingReservedCount` held one spot for
+that trade's incoming player and gave no credit for the outgoing one, so a
+14-man team with any trade in review could not accept a second one-for-one.
+Gridiron Gambit then read the error as Second Overall's roster being full and
+asked it to drop a player, which would not have helped.
+
+Fix, in `packages/engine/src/roster.ts`:
+
+- The reservation is now the net gain of each trade in review, floored at
+  zero, summed over trades. A trade executes or fails as a unit and its outgoing
+  players are frozen, so the roster after any subset of these trades executes is
+  at most the current size plus this sum.
+- An outgoing player who sits in the week's IR slot frees the IR slot, not an
+  active spot, so he does not offset an incoming player (reviewer finding).
+- The helper takes `week` and an optional `excludeTradeId`; the duplicate copy
+  in `trades.ts` is gone. Free-agent adds, waiver claims and trade checks all
+  use the one function.
+
+Spec reading: §3.5 and §7.2 say "incoming players count toward the limit" and
+give the reason — so a later add cannot block execution. Net-per-trade keeps
+that guarantee (new test: add to 14 beside a one-for-one in review, then the
+trade executes) and stops the false rejections. Recorded here because it
+departs from the literal text.
+
+Not changed: board-reply sessions still have no roster tools (§8.6). Second
+Overall said on the board it would drop a player and resend; it gets a trade
+window session today at 12:00 PM ET with `drop_player` and `propose_trade`.
+Also not changed: a lineup change can move a frozen IR occupant out of IR
+without any reservation check; that was true before and is out of scope.
+
 ## 2026-09-04 — Speed Insights: the four pages under 90
 
 Vercel Speed Insights put `/matchups/[week]` at 56, `/benchmark` at 61,

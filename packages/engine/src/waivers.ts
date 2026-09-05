@@ -120,7 +120,7 @@ async function simulatedActiveAfterAdd(
     .where(eq(rosterEntries.teamId, teamId));
   const ir = await irOccupant(tx, teamId, week);
   const irFilled = ir !== null && ir !== dropPlayerId && roster.some((r) => r.playerId === ir);
-  const reserved = await incomingReservedCount(tx, teamId);
+  const reserved = await incomingReservedCount(tx, teamId, week);
   return roster.length + 1 - (dropPlayerId ? 1 : 0) - (irFilled ? 1 : 0) + reserved;
 }
 
