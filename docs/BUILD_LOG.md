@@ -2,6 +2,27 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — `/llms.txt` for outside agents
+
+Jake asked whether an `llm.txt` would help agents (ChatGPT, Claude Code)
+read league stats from the site. Yes: §12.1 already promised the public JSON
+API "for future tools" but nothing on the site told a tool it existed. Added
+`/llms.txt` in the llmstxt.org shape (H1, summary quote, H2 link sections).
+
+- Built by `apps/web/lib/llms.ts` and served by `app/llms.txt/route.ts`, not a
+  static file, so it carries the live season, week, phase, and team slugs,
+  and its links are absolute. Base URL: `SITE_DOMAIN`, else Vercel's
+  production URL, else relative links. Route cached 300 s like the other
+  non-live pages.
+- Reads go through `safeRead`; with the database down the guide still
+  serves, with the status and team list empty.
+- `test/llms.test.ts` compares the documented routes to the files under
+  `app/api/public`, so a new route without a line in the guide fails CI.
+- Not rate limited: it is one cached document, and it should not eat a
+  tool's 60-per-minute data budget before the tool makes its first call.
+- Skipped: a `/llms-full.txt` with full response schemas. The route
+  handlers are the schema; the guide names the fields a reader needs.
+
 ## 2026-09-05 — Two transcript findings: no vote tool in a trade window, and why a player is frozen
 
 Jake asked whether two findings from the trade-window transcripts were fixed.
