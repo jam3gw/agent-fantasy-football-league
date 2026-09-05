@@ -97,6 +97,81 @@ rejected, countered, cancelled or expires. Production has no case of two open
 offers sharing a give-side player. Added an explicit test that names the
 scenario and checks the player is offerable again after the first offer ends.
 
+## 2026-09-05 — Two trade windows, reasoning billed once, get_league_rosters (deployed)
+
+Jake's three asks from the cost analysis below. Merged to `main` as `31e00f4`
+after two reviewer rounds (round 1: the snapshot's calendar note still said
+Wed–Sat, `/about` said four windows, an already-booked window would still
+fire on a removed day; round 2: my "reasoning beyond output" hedge made the
+visible output free — fixed, and the expected value in the test corrected).
+Lint, typecheck, 824 tests green. Production healthy after the deploy
+(`/api/healthz` ok, `/spend` 200, `/about` shows "Wednesday and Friday").
+
+1. **Trade windows: two a week.** `extra.tradeWindowDays` (default `[3, 5]`,
+   Wednesday and Friday) on `/admin/settings`; `bookRecurringJobs` reads it,
+   and `sessions.book` re-checks it when a booked row fires, so a day removed
+   after booking books nothing. Why Wed and Fri: the waiver run has just
+   moved rosters on Wednesday, and a Friday offer, its response and a 24-hour
+   review all finish before Sunday's kickoffs, which a Saturday window cannot.
+   Production: `scheduled_jobs` 446 (Sat 2026-09-05) and 1846 (Thu
+   2026-09-10) marked done with the reason in `error`; no session rows were
+   ever created for them. Spec §2, §8.6, §9.1 and Appendix F updated. Saves
+   about $10 a week at Friday's rate.
+2. **Reasoning billed once.** `computeStepCost` no longer adds
+   `reasoning_tokens × output price` on top of an output count that already
+   includes them (the SDK reports reasoning as a share of output;
+   `output ≥ reasoning` on all 628 price-table steps). A model with its own
+   reasoning price pays the difference on that share; reasoning a provider
+   reports beyond its output (none does) is billed in full alongside the
+   output. Tests cover null, cheaper and dearer reasoning prices, and the
+   beyond-output case.
+3. **`get_league_rosters`.** Every roster in one call, one short row a player
+   (`id, name, pos, nfl, slot, proj` plus `inj, bye, bye_now, season_pts,
+   locked` only when set), starters first, paged by team under the §8.2 cap,
+   `team_ids` filter. In `READ_TOOLS`, so every kind with read tools has it;
+   `trade_vote`, `board_reply`, `draft_pick` and `smoke` keep their narrow
+   sets. The scouting bullet in the prompt names it. Spec §8.4 row added.
+   Measure next Wednesday: `get_team_roster` calls per trade window (was 11
+   for most agents) and trade-window input tokens a step (was 46k).
+
+**Reprice of the 628 overstated ledger rows: not yet done.** The backup
+exists (`spend_ledger_backup_20260905`, 628 rows, $44.1705 as recorded;
+overstatement $7.09: Fable $3.61, Grok $2.06, Sonnet $1.11, GPT Sol $0.19,
+GPT Terra $0.12). The bulk `UPDATE` against production was refused by the
+session's permission classifier, so it waits for Jake. The statements, in
+order, all against the production branch:
+
+```sql
+-- 1. the ledger rows (only the backed-up ids; no new row qualifies, checked)
+update spend_ledger l
+   set cost_usd = round((l.cost_usd
+         - least(l.reasoning_tokens, l.output_tokens)
+           * coalesce(p.reasoning_usd_per_m, p.output_usd_per_m) / 1e6)::numeric, 6)
+  from model_prices p
+ where p.model_id = l.model_id
+   and l.id in (select id from spend_ledger_backup_20260905);
+
+-- 2. session totals
+update sessions s set cost_usd = x.total
+  from (select session_id, sum(cost_usd) as total from spend_ledger
+         where session_id in (select distinct session_id from spend_ledger_backup_20260905)
+         group by session_id) x
+ where x.session_id = s.id;
+
+-- 3. rollups (cost only; token and session counts are unchanged)
+update spend_rollups r set cost_usd = coalesce((
+  select sum(l.cost_usd) from spend_ledger l join sessions s on s.id = l.session_id
+   where (r.scope = 'league' or coalesce(l.team_id::text, 'reporter') = r.scope_key)
+     and case r.period
+           when 'day'    then (l.created_at at time zone 'America/New_York')::date::text = r.period_start
+           when 'week'   then 'W' || (s.context ->> 'week') = r.period_start
+           when 'season' then true end), 0);
+```
+
+Undo: `update spend_ledger l set cost_usd = b.cost_usd from
+spend_ledger_backup_20260905 b where b.id = l.id`, then steps 2 and 3
+again. Drop the backup table once the numbers are confirmed.
+
 ## 2026-09-05 — Cost analysis: where the $10–19 a day goes (§8.7)
 
 Jake asked whether the league is token-inefficient or managing context
@@ -134,9 +209,8 @@ Two findings that are the ledger's, not the agents':
    2026-09-01 that is $1.88 on Fable, $1.37 on Grok, $0.80 on Sonnet, $0.20
    on the two GPT seats: $4.25 of $50, about 8%. Gateway-priced steps are
    not affected. The BYOK bills are lower than `/spend` shows by that much.
-   Not changed here; it is a question and a fix in one, so it waits for the
-   next cost pass (drop the reasoning term unless a model prices reasoning
-   separately, then reprice the affected rows as `39d5b78` did).
+   Fixed the same day (entry above); the reprice of the old rows waits for
+   Jake to run the recorded SQL.
 2. **Caching now works** (VERIFIED.md, item closed): session 2117's cached
    input rose 15.5k → 20.0k → 27.7k → 29.2k step by step, cache writes were
    reported on every step, and input ≥ cached + write held throughout.
