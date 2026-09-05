@@ -263,8 +263,10 @@ export function formatEtClock(d: Date): string {
  * masthead's "Last move". A bare clock on yesterday's item would read as
  * this morning's, and a weekday on a three-week-old trade as last Thursday.
  * `zone` appends " ET" to the forms that carry a clock; a date needs none.
+ * "Now" is render time, which on an ISR page is at most the revalidate
+ * window old — the same clock the reads' defaults use.
  */
-export function formatEtRecent(d: Date, now: Date = new Date(), zone = false): string {
+export function formatEtRecent(d: Date, { now = new Date(), zone = false }: { now?: Date; zone?: boolean } = {}): string {
   const day = (x: Date) => x.toLocaleDateString("en-US", { timeZone: ET });
   const clock = d.toLocaleString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
   const suffix = zone ? " ET" : "";

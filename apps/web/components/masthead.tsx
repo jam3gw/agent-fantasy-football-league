@@ -27,7 +27,12 @@ interface TickerGame {
   final: boolean;
 }
 
-function TickerItem({ game, hidden }: { game: TickerGame; hidden?: boolean }) {
+/**
+ * `live` is whether this ticker is the live one. The fallback `Week N`
+ * ticker shows the same games before anything has kicked off, and a
+ * scheduled game must not be labelled "live" beside 0.00 · 0.00.
+ */
+function TickerItem({ game, live, hidden }: { game: TickerGame; live: boolean; hidden?: boolean }) {
   const awayLeads = game.awayPoints > game.homePoints;
   const homeLeads = game.homePoints > game.awayPoints;
   return (
@@ -51,16 +56,16 @@ function TickerItem({ game, hidden }: { game: TickerGame; hidden?: boolean }) {
       </span>
       <span
         className={`text-[10px] font-bold uppercase tracking-[0.1em] ${
-          game.final ? "text-band-faint" : "text-accent-bright"
+          game.final || !live ? "text-band-faint" : "text-accent-bright"
         }`}
       >
-        {game.final ? "final" : "live"}
+        {game.final ? "final" : live ? "live" : "scheduled"}
       </span>
     </div>
   );
 }
 
-function ScoreTicker({ games, label, week }: { games: TickerGame[]; label: string; week: number }) {
+function ScoreTicker({ games, label, week, live }: { games: TickerGame[]; label: string; week: number; live: boolean }) {
   return (
     <div className="flex h-[42px] items-center overflow-hidden border-y border-band-border">
       <div className="flex flex-shrink-0 items-center self-stretch bg-accent px-4 text-[11px] font-bold uppercase tracking-[0.14em] text-band-text">
@@ -77,10 +82,10 @@ function ScoreTicker({ games, label, week }: { games: TickerGame[]; label: strin
             assistive tech so the scores are announced once. */}
         <div className="ticker-track">
           {games.map((g) => (
-            <TickerItem key={g.id} game={g} />
+            <TickerItem key={g.id} game={g} live={live} />
           ))}
           {games.map((g) => (
-            <TickerItem key={`echo-${g.id}`} game={g} hidden />
+            <TickerItem key={`echo-${g.id}`} game={g} live={live} hidden />
           ))}
         </div>
       </div>
@@ -165,7 +170,7 @@ export async function Masthead() {
                     ? `Updated ${formatEtTime(live.lastUpdateAt)}`
                     : "No scores yet"
                   : lastMove
-                    ? `Last move ${formatEtRecent(lastMove, new Date(), true)}`
+                    ? `Last move ${formatEtRecent(lastMove, { zone: true })}`
                     : "Nothing has happened yet"}
             </span>
           </div>
@@ -176,7 +181,7 @@ export async function Masthead() {
           wire has anything to say, the week's games as a fallback so an
           empty band does not sit under the masthead in week 1. */}
       {isLive && games.length > 0 ? (
-        <ScoreTicker games={games} label="Live" week={week} />
+        <ScoreTicker games={games} label="Live" week={week} live />
       ) : wire.length > 0 ? (
         <div className="flex h-[42px] items-center overflow-hidden border-y border-band-border">
           <div className="flex flex-shrink-0 items-center self-stretch bg-accent px-4 text-[11px] font-bold uppercase tracking-[0.14em] text-band-text">
@@ -197,7 +202,7 @@ export async function Masthead() {
           </div>
         </div>
       ) : games.length > 0 ? (
-        <ScoreTicker games={games} label={`Week ${week}`} week={week} />
+        <ScoreTicker games={games} label={`Week ${week}`} week={week} live={false} />
       ) : null}
 
       <Container>

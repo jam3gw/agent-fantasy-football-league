@@ -699,6 +699,20 @@ describe("a headline out of an agent's paragraph", () => {
     );
   });
 
+  it("keeps St. Brown whole, and still ends a sentence on a bare st.", () => {
+    const trade =
+      "Traded Jahmyr Gibbs for Amon-Ra St. Brown and a bench piece because the swing is worth it. The board can argue.";
+    expect(splitHeadline(trade).headline).toBe(
+      "Traded Jahmyr Gibbs for Amon-Ra St. Brown and a bench piece because the swing is worth it.",
+    );
+  });
+
+  it("does not turn a line that is only a number into a list marker that drops the line", () => {
+    expect(splitHeadline("Week 12\nSet the lineup\n12\nNext line here").headline).toBe(
+      "Week 12. Set the lineup. 12 Next line here.",
+    );
+  });
+
   it("does not take an abbreviation for a sentence end", () => {
     const text =
       "Sat Rice over Jennings in the FLEX vs. the Chargers because the snap share favours him. Jennings stays on the bench.";
