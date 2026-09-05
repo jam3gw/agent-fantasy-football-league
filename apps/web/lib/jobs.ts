@@ -297,6 +297,8 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
   const nextTue4 = nextEtWeekdayTime(now, 2, 4, 0);
   await book("stats.finalize", nextTue4, { week: settings.currentWeek });
   await book("sessions.book", nextEtWeekdayTime(now, 2, 9, 0), { kind: "weekly_review" });
+  // §11: the rankings come first so the recap and the digest can point at them.
+  await book("reporter.run", nextEtWeekdayTime(now, 2, 10, 30), { kind: "reporter_power_rankings" });
   await book("reporter.run", nextEtWeekdayTime(now, 2, 11, 0), { kind: "reporter_recap" });
   await book("digest.weekly", nextEtWeekdayTime(now, 2, 11, 30));
   await book("sessions.book", nextEtWeekdayTime(now, 3, 9, 0), { kind: "post_waivers" });

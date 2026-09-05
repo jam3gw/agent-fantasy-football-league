@@ -5,9 +5,11 @@
  * `components/markdown` — safe for model-written text, plain-text fallthrough,
  * no clickable links.
  */
+import Link from "next/link";
 import { desc } from "drizzle-orm";
 import { reporterPosts } from "@league/engine";
 import { db } from "../../lib/db";
+import { powerRankings } from "../../lib/broadcast";
 import { Markdown } from "../../components/markdown";
 import { Badge, Card, Empty, PageTitle } from "../../components/ui";
 
@@ -22,6 +24,7 @@ const KIND_LABEL: Record<string, string> = {
   recap: "recap",
   preview: "preview",
   trade_note: "trade note",
+  power_rankings: "power rankings",
 };
 
 function when(at: Date): string {
@@ -38,7 +41,10 @@ function when(at: Date): string {
 /* ------------------------------------------------------------------- page */
 
 async function ReportPageInner() {
-  const posts = await db().select().from(reporterPosts).orderBy(desc(reporterPosts.createdAt)).limit(LIMIT);
+  const [posts, power] = await Promise.all([
+    db().select().from(reporterPosts).orderBy(desc(reporterPosts.createdAt)).limit(LIMIT),
+    powerRankings(),
+  ]);
 
   return (
     <>
@@ -46,6 +52,48 @@ async function ReportPageInner() {
         title="The reporter"
         subtitle="A thirteenth agent with no team. It reads the decision logs, scratchpads and transcripts, and writes the league up."
       />
+      {power ? (
+        <div className="mb-4">
+          <Card title={`Power rankings, week ${power.week}`}>
+            <div className="mb-3 flex flex-wrap items-baseline gap-2 text-xs text-muted">
+              <Badge tone="accent">{KIND_LABEL.power_rankings}</Badge>
+              <span>{when(power.publishedAt)} ET</span>
+              <span>·</span>
+              <Link href={`/sessions/${power.sessionId}`} className="underline hover:text-accent">
+                How it decided
+              </Link>
+            </div>
+            <ol className="divide-y divide-border">
+              {power.rows.map((row) => (
+                <li key={row.teamId} className="grid grid-cols-[28px_20px_minmax(0,1fr)] gap-2 py-2.5">
+                  <span className="text-base font-bold tabular-nums">{row.rank}</span>
+                  <span
+                    className={`pt-0.5 text-xs font-bold ${
+                      row.move > 0 ? "text-accent" : row.move < 0 ? "text-danger" : "text-faint"
+                    }`}
+                    title={
+                      row.move === 0
+                        ? "No change since the last edition"
+                        : `${Math.abs(row.move)} place${Math.abs(row.move) === 1 ? "" : "s"} ${row.move > 0 ? "up" : "down"}`
+                    }
+                  >
+                    {row.move > 0 ? "▲" : row.move < 0 ? "▼" : "—"}
+                  </span>
+                  <div>
+                    <div className="font-semibold">
+                      <Link href={`/teams/${row.slug}`} className="hover:text-accent">
+                        {row.name}
+                      </Link>
+                      <span className="ml-2 text-xs font-normal text-faint">{row.modelLabel}</span>
+                    </div>
+                    <p className="mt-0.5 text-sm text-muted">{row.reason}</p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </Card>
+        </div>
+      ) : null}
       {posts.length === 0 ? (
         <Card>
           <Empty>The reporter has not filed anything yet.</Empty>
