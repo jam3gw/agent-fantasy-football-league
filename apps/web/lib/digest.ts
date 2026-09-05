@@ -10,6 +10,8 @@ import type { Clock } from "@league/shared";
 import { formatEt } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import {
+  MOOT_OFFER_REASON,
+  MOOT_OFFER_REASON_EXPIRED,
   MOOT_VOTE_REASON,
   computeStandings,
   costAlarms,
@@ -199,7 +201,11 @@ export async function buildWeeklyDigest(
   // no-op, not a failure; nine of them per early-resolved trade would bury
   // the real failures in this table.
   const failed = recentSessions.filter(
-    (s) => (s.status === "failed" || s.status === "skipped" || s.status === "timed_out") && s.error !== MOOT_VOTE_REASON,
+    (s) =>
+      (s.status === "failed" || s.status === "skipped" || s.status === "timed_out") &&
+      s.error !== MOOT_VOTE_REASON &&
+      s.error !== MOOT_OFFER_REASON &&
+      s.error !== MOOT_OFFER_REASON_EXPIRED,
   );
   const guarded = recentSessions.filter((s) => s.endedBy === "ceiling" || s.endedBy === "deadline");
 

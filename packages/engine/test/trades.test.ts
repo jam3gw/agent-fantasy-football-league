@@ -15,7 +15,10 @@ import type { PlayerSpec } from "./helpers/factories.ts";
 import { makeGame, makePlayer, rosterPlayer, seedLeague, seedTeams, setLineupEntry } from "./helpers/factories.ts";
 import { lineupEntries, rosterEntries, sessions, teams, trades, transactions } from "../src/db/schema.ts";
 import {
+  MOOT_OFFER_REASON,
+  MOOT_OFFER_REASON_EXPIRED,
   MOOT_VOTE_REASON,
+  SUPERSEDED_REASON_PREFIX,
   cancelTrade,
   expireAllProposedAtDeadline,
   expireOffers,
@@ -242,11 +245,10 @@ describe("trade lifecycle (§3.5, §7.5)", () => {
 });
 
 describe("freeze rules (§3.5)", () => {
-  it("while 'proposed', the proposer's give-side player cannot be dropped or offered again", async () => {
+  it("while 'proposed', the proposer's give-side player cannot be dropped but can be offered to another team", async () => {
     const ids = await setup();
     const clock = new FixedClock(T0);
     const a = await owned(ids[0]!, "a1");
-    const a2 = await owned(ids[0]!, "a2");
     const b = await owned(ids[1]!, "b1");
     const c = await owned(ids[2]!, "c1");
 
@@ -256,47 +258,143 @@ describe("freeze rules (§3.5)", () => {
     expect(await dropPlayer(db, clock, ids[0]!, a)).toMatchObject({ ok: false, error: "frozen" });
     expect(await ownerOf(a)).toBe(ids[0]!);
 
-    const second = await proposeTrade(db, clock, ids[0]!, {
-      toTeamId: ids[2]!,
-      givePlayerIds: [a],
-      getPlayerIds: [c],
-    });
-    expect(second).toMatchObject({ ok: false, error: "frozen" });
-
-    // an unfrozen player of the same team is still tradeable
-    const ok = await proposeTrade(db, clock, ids[0]!, {
-      toTeamId: ids[2]!,
-      givePlayerIds: [a2],
-      getPlayerIds: [c],
-    });
-    expect(ok.ok).toBe(true);
+    // the same player may be shopped to a second team while the first offer is open
+    const second = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[2]!, givePlayerIds: [a], getPlayerIds: [c] });
+    expect(second.ok).toBe(true);
+    // and a third team may ask for him
+    const ask = await proposeTrade(db, clock, ids[3]!, { toTeamId: ids[0]!, givePlayerIds: [], getPlayerIds: [a] });
+    expect(ask.ok).toBe(true);
   });
 
-  it("the same player cannot be offered to two teams at once; once the first offer ends he can be offered again", async () => {
+  it("first accept wins: every other open offer sharing a player ends 'superseded' and its response session is retired", async () => {
+    const ids = await setup();
+    const clock = new FixedClock(T0);
+    const a = await owned(ids[0]!, "a1");
+    const a2 = await owned(ids[0]!, "a2");
+    const b = await owned(ids[1]!, "b1");
+    const c = await owned(ids[2]!, "c1");
+    const d = await owned(ids[3]!, "d1");
+    const e = await owned(ids[4]!, "e1");
+
+    // a shopped to ids[1] and ids[2]; ids[3] asks for b (the player ids[1] gives up)
+    const toB = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[1]!, givePlayerIds: [a], getPlayerIds: [b] });
+    const toC = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[2]!, givePlayerIds: [a], getPlayerIds: [c] });
+    const forB = await proposeTrade(db, clock, ids[3]!, { toTeamId: ids[1]!, givePlayerIds: [d], getPlayerIds: [b] });
+    // an unrelated offer stays open
+    const other = await proposeTrade(db, clock, ids[4]!, { toTeamId: ids[0]!, givePlayerIds: [e], getPlayerIds: [a2] });
+    expect(toB.ok && toC.ok && forB.ok && other.ok).toBe(true);
+    if (!toB.ok || !toC.ok || !forB.ok || !other.ok) return;
+
+    clock.advance(HOUR);
+    const acc = await respondToTrade(db, clock, ids[1]!, toB.value.tradeId, "accept");
+    expect(acc.ok).toBe(true);
+    if (!acc.ok) return;
+    expect(acc.value.status).toBe("accepted");
+    expect(acc.value.supersededTradeIds).toEqual([toC.value.tradeId, forB.value.tradeId]);
+
+    for (const id of [toC.value.tradeId, forB.value.tradeId]) {
+      const row = await tradeRow(id);
+      expect(row.status).toBe("superseded");
+      expect(row.resolutionReason).toBe(`${SUPERSEDED_REASON_PREFIX}${toB.value.tradeId}`);
+      expect(row.resolvedAt).toEqual(clock.now());
+    }
+    expect((await tradeRow(other.value.tradeId)).status).toBe("proposed");
+
+    // the counterparties' queued response sessions for the superseded offers are skipped
+    const rows = await db.select().from(sessions).where(eq(sessions.kind, "trade_response"));
+    const byTrade = new Map(rows.map((s) => [Number(s.context.trade_id), s]));
+    for (const id of [toC.value.tradeId, forB.value.tradeId]) {
+      expect(byTrade.get(id)).toMatchObject({ status: "skipped", endedBy: null, error: MOOT_OFFER_REASON });
+    }
+    expect(byTrade.get(other.value.tradeId)?.status).toBe("queued");
+
+    // a superseded offer can no longer be answered
+    expect(await respondToTrade(db, clock, ids[2]!, toC.value.tradeId, "accept")).toMatchObject({
+      ok: false,
+      error: "bad_status",
+    });
+    // and once the accepted trade is in review, a is frozen for new offers
+    const late = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[2]!, givePlayerIds: [a], getPlayerIds: [c] });
+    expect(late).toMatchObject({ ok: false, error: "frozen" });
+  });
+
+  it("accepting a counter supersedes other open offers for its players; the countered original is left alone", async () => {
+    const ids = await setup();
+    const clock = new FixedClock(T0);
+    const a = await owned(ids[0]!, "a1");
+    const b = await owned(ids[1]!, "b1");
+    const b2 = await owned(ids[1]!, "b2");
+    const c = await owned(ids[2]!, "c1");
+
+    const orig = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[1]!, givePlayerIds: [a], getPlayerIds: [b] });
+    const side = await proposeTrade(db, clock, ids[2]!, { toTeamId: ids[0]!, givePlayerIds: [c], getPlayerIds: [a] });
+    expect(orig.ok && side.ok).toBe(true);
+    if (!orig.ok || !side.ok) return;
+
+    // ids[1] counters with b2 instead of b; ids[0] accepts the counter
+    const ctr = await respondToTrade(db, clock, ids[1]!, orig.value.tradeId, "counter", {
+      givePlayerIds: [b2],
+      getPlayerIds: [a],
+      message: null,
+    });
+    expect(ctr.ok).toBe(true);
+    if (!ctr.ok || ctr.value.counterTradeId === undefined) return;
+    const acc = await respondToTrade(db, clock, ids[0]!, ctr.value.counterTradeId, "accept");
+    expect(acc.ok).toBe(true);
+    if (!acc.ok) return;
+    expect(acc.value.supersededTradeIds).toEqual([side.value.tradeId]);
+    expect((await tradeRow(orig.value.tradeId)).status).toBe("countered");
+    expect((await tradeRow(side.value.tradeId)).status).toBe("superseded");
+  });
+
+  it("a superseded offer cannot be cancelled, is left alone by the expiry sweeps, and still counts toward the daily limit", async () => {
     const ids = await setup();
     const clock = new FixedClock(T0);
     const a = await owned(ids[0]!, "a1");
     const b = await owned(ids[1]!, "b1");
     const c = await owned(ids[2]!, "c1");
+    const d = await owned(ids[3]!, "d1");
 
-    const first = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[1]!, givePlayerIds: [a], getPlayerIds: [b] });
-    expect(first.ok).toBe(true);
-    if (!first.ok) return;
+    const toB = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[1]!, givePlayerIds: [a], getPlayerIds: [b] });
+    const toC = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[2]!, givePlayerIds: [a], getPlayerIds: [c] });
+    const toD = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[3]!, givePlayerIds: [a], getPlayerIds: [d] });
+    expect(toB.ok && toC.ok && toD.ok).toBe(true);
+    if (!toB.ok || !toC.ok || !toD.ok) return;
+    expect((await respondToTrade(db, clock, ids[1]!, toB.value.tradeId, "accept")).ok).toBe(true);
 
-    // a is frozen in the first offer: the same player to a different team is refused
-    const second = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[2]!, givePlayerIds: [a], getPlayerIds: [c] });
-    expect(second).toMatchObject({ ok: false, error: "frozen" });
-    // and ids[2] cannot ask for him either while he is frozen elsewhere
-    const ask = await proposeTrade(db, clock, ids[2]!, { toTeamId: ids[0]!, givePlayerIds: [c], getPlayerIds: [a] });
-    expect(ask).toMatchObject({ ok: false, error: "frozen" });
+    expect(await cancelTrade(db, clock, ids[0]!, toC.value.tradeId)).toMatchObject({ ok: false, error: "bad_status" });
+    clock.advance(49 * HOUR);
+    const swept = await expireOffers(db, clock);
+    expect(swept.ok && swept.value).toEqual([]);
+    const deadline = await expireAllProposedAtDeadline(db, clock);
+    expect(deadline.ok && deadline.value).toEqual([]);
+    expect((await tradeRow(toC.value.tradeId)).status).toBe("superseded");
+    expect((await tradeRow(toD.value.tradeId)).status).toBe("superseded");
 
-    // the first offer is rejected → the freeze lifts and the second team can have the offer
-    expect((await respondToTrade(db, clock, ids[1]!, first.value.tradeId, "reject")).ok).toBe(true);
-    const again = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[2]!, givePlayerIds: [a], getPlayerIds: [c] });
-    expect(again.ok).toBe(true);
+    // three offers went out today, superseded or not: the fourth is refused
+    clock.advance(-49 * HOUR);
+    const e = await owned(ids[4]!, "e1");
+    const fourth = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[4]!, givePlayerIds: [], getPlayerIds: [e] });
+    expect(fourth).toMatchObject({ ok: false, error: "offer_limit" });
   });
 
-  it("the counterparty's get-side player is free while 'proposed' but frozen once 'accepted'", async () => {
+  it("an expired offer's queued response session is retired with the sweep", async () => {
+    const ids = await setup();
+    const clock = new FixedClock(T0);
+    const a = await owned(ids[0]!, "a1");
+    const b = await owned(ids[1]!, "b1");
+    const p = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[1]!, givePlayerIds: [a], getPlayerIds: [b] });
+    expect(p.ok).toBe(true);
+    if (!p.ok) return;
+    clock.advance(49 * HOUR);
+    const swept = await expireOffers(db, clock);
+    expect(swept.ok && swept.value).toEqual([p.value.tradeId]);
+    const rows = await db.select().from(sessions).where(eq(sessions.kind, "trade_response"));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ status: "skipped", endedBy: null, error: MOOT_OFFER_REASON_EXPIRED });
+  });
+
+  it("the counterparty's get-side player is free while 'proposed' and frozen once 'accepted'", async () => {
     const ids = await setup();
     const clock = new FixedClock(T0);
     const a = await owned(ids[0]!, "a1");
@@ -315,17 +413,13 @@ describe("freeze rules (§3.5)", () => {
     });
     expect(elsewhere.ok).toBe(true);
     if (!elsewhere.ok) return;
-    // …and that offer freezes b for ids[1], so the accept of the first trade is
-    // blocked while it stands (b is now frozen elsewhere).
-    const blocked = await respondToTrade(db, clock, ids[1]!, p.value.tradeId, "accept");
-    expect(blocked).toMatchObject({ ok: false, error: "player_moved" });
-    expect((await tradeRow(p.value.tradeId)).status).toBe("failed");
-
-    // a clean run: cancel the side offer, propose again, accept → both sides frozen
-    const cancelled = await cancelTrade(db, clock, ids[1]!, elsewhere.value.tradeId);
-    expect(cancelled.ok).toBe(true);
-    const tradeId = await proposeAndAccept(clock, ids, [a], [b]);
-    expect((await tradeRow(tradeId)).status).toBe("accepted");
+    // accepting the first trade binds b and supersedes the side offer
+    const acc = await respondToTrade(db, clock, ids[1]!, p.value.tradeId, "accept");
+    expect(acc.ok).toBe(true);
+    if (!acc.ok) return;
+    expect(acc.value.supersededTradeIds).toEqual([elsewhere.value.tradeId]);
+    expect((await tradeRow(elsewhere.value.tradeId)).status).toBe("superseded");
+    expect((await tradeRow(p.value.tradeId)).status).toBe("accepted");
 
     const afterAccept = await proposeTrade(db, clock, ids[1]!, {
       toTeamId: ids[2]!,

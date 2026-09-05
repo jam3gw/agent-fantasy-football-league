@@ -2,6 +2,58 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Jake: the same player may be offered to several teams; the first accept wins
+
+Jake's decision, replacing the §3.5 freeze rule for open offers. Before, a
+proposer's give-side player was frozen the moment an offer went out, so a team
+could not shop one player to two teams and had to wait for a rejection or an
+expiry (48 hours) before the next offer. Now:
+
+- An open (`proposed`) offer binds nobody for other offers. A team may offer
+  the same player to several teams at once, and another team may ask for a
+  player who is already in an outgoing offer. Only a trade in review
+  (`accepted`) freezes its players for offers.
+- **First accept wins.** On accept, every other open offer that names any
+  player in the accepted trade — either side, any team — ends as
+  `superseded`, `resolution_reason` "superseded by trade N", `resolved_at`
+  now. Its queued `trade_response` session is skipped with
+  `MOOT_OFFER_REASON` (a healthy no-op, kept out of the digest's failure
+  table like the retired vote sessions). `trade.superseded` is emitted per
+  offer. The accept result and the `respond_to_trade` tool return the ids.
+- Drops stay strict: a proposer's give-side player still cannot be dropped
+  while an offer is open (`roster.ts` `frozenPlayerIds` is unchanged), so a
+  player is never dropped out from under the offers he is in.
+- The accept re-check now ignores other open offers, so the old failure mode
+  — accept fails with `player_moved` because the counterparty had shopped
+  the same player elsewhere — is gone; that side offer is superseded instead.
+
+Reviewer findings, fixed: `respondToTrade` now locks the trade row and both
+the accept and the supersede update are guarded on `status = 'proposed'`, so
+two overlapping offers accepted at the same instant serialise instead of both
+entering review (or the second flipping a superseded row back to accepted).
+Second pass: row locks alone deadlock — accept A holds its row and wants
+every other open offer, accept B the reverse — so propose and respond take
+one transaction-scoped advisory lock (`pg_advisory_xact_lock`) before any
+row lock. Accepts and proposes queue behind each other for a few
+milliseconds; nothing else waits on it.
+The expiry sweeps now retire an expired offer's queued `trade_response`
+session too (`MOOT_OFFER_REASON_EXPIRED`); before, that session ran only to
+get `bad_status`. Noted, not changed: superseded offers still count toward
+the 3-offers-per-day limit — shopping one player to three teams spends the
+day's quota. That is the spec's "offers per day", and the tool description
+says the same player may go to several teams, so the agent can weigh it.
+
+New trade status `superseded`: schema type, `/trades` offer list (verb and
+reason shown), the agent's `get_trade` resolved set, tool descriptions for
+`propose_trade` and `respond_to_trade`, SPEC §3.5 and §17. No migration: the
+status column is plain text.
+
+Tests: shop one player to two teams plus a third team asking for the other
+side's player; accept one → the two overlapping offers are superseded with
+the reason, their response sessions skipped, an unrelated offer stays open,
+the superseded offer cannot be answered, and the player is frozen for new
+offers while in review.
+
 ## 2026-09-05 — Trade roster reservation counted incoming players without crediting outgoing ones
 
 Trade 34 (Second Overall → Gridiron Gambit, Addison for Aaron Jones, one for

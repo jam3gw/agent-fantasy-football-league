@@ -1,6 +1,7 @@
 /**
  * How `/trades` describes an offer that never reached league review
- * (SPEC §3.5): proposed, rejected, countered, cancelled, expired, or failed.
+ * (SPEC §3.5): proposed, rejected, countered, cancelled, expired, superseded,
+ * or failed.
  * The engine stamps a different column for each ending, so the page needs
  * one place that knows which.
  */
@@ -13,6 +14,7 @@ export const OFFER_STATUSES: readonly TradeStatus[] = [
   "countered",
   "cancelled",
   "expired",
+  "superseded",
   "failed",
 ];
 
@@ -57,6 +59,8 @@ export function offerEnding(t: OfferTimes): { verb: string; at: Date | null } | 
       return { verb: "cancelled", at: t.resolvedAt };
     case "expired":
       return { verb: "expired", at: t.resolvedAt };
+    case "superseded":
+      return { verb: "superseded", at: t.resolvedAt };
     case "failed":
       return { verb: "failed on accept", at: t.resolvedAt ?? t.respondedAt };
     default:
