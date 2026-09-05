@@ -5,8 +5,10 @@
  * it can be exercised without one. The decisions worth being sure about are
  * not the queries though — they are what a projected margin is worth as a
  * probability, what counts as a win, how a team moves in the power rankings,
- * and how a transaction's free-form payload becomes a sentence. Those live
- * here, take plain data, and are tested in `test/broadcast.test.ts`.
+ * how a transaction's free-form payload becomes a sentence, where an agent's
+ * paragraph breaks into a headline, and what the wire says about a trade or a
+ * waiver. Those live here, take plain data, and are tested in
+ * `test/broadcast.test.ts`.
  */
 
 export type Result = "W" | "L" | "T";
@@ -464,4 +466,133 @@ export function summarizeBody(text: string, max: number): string {
     return at < stop + 1 ? `${head}…` : head;
   }
   return `${cut.trimEnd()}…`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Headlines
+ * ------------------------------------------------------------------ */
+
+/**
+ * An agent writes a paragraph; the front page wants a headline over it.
+ *
+ * The first sentence is the headline when it is long enough to say something
+ * and short enough to set at 22px — a two-word opener ("Respect.") is skipped
+ * for the next sentence end inside the window, and a first sentence that runs
+ * past the window is cut at a word with an ellipsis. Whatever the headline
+ * did not use is the body, so nothing is said twice and nothing is lost. A
+ * cut never lands inside an inline Markdown token, same as `summarizeBody`.
+ */
+export function splitHeadline(
+  text: string,
+  max = 110,
+  minSentence = 24,
+): { headline: string; body: string } {
+  const flat = flattenMarkdown(text);
+  if (flat.length <= max) return { headline: flat, body: "" };
+
+  for (const match of flat.matchAll(/[.?!…](?:["”’)]*)(?=\s)/g)) {
+    const end = match.index + match[0].length;
+    if (end > max) break;
+    if (end < minSentence) continue;
+    // A sentence end inside `**Bold. Sentence**` is not a break to cut on.
+    if (tokenSafeCut(flat, end) < end) continue;
+    return { headline: flat.slice(0, end).trim(), body: flat.slice(end).trim() };
+  }
+
+  const safe = tokenSafeCut(flat, max);
+  const space = flat.lastIndexOf(" ", safe);
+  const cut = space > max * 0.5 ? space : safe;
+  return { headline: `${flat.slice(0, cut).trimEnd()}…`, body: flat.slice(cut).trim() };
+}
+
+/**
+ * Markdown to a plain-text excerpt of roughly `maxWords` words: the weekly
+ * report's teaser on the front page. Links and images reduce to their text,
+ * `flattenMarkdown` drops fences and block markers, and the leftover inline
+ * marks are stripped because the teaser renders as plain text rather than
+ * through `InlineMarkdown`.
+ */
+export function plainExcerpt(md: string, maxWords = 90): string {
+  const plain = flattenMarkdown(
+    md.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1"),
+  ).replace(/[*_`~]/g, "");
+  const words = plain.split(" ").filter(Boolean);
+  return words.length <= maxWords ? plain : `${words.slice(0, maxWords).join(" ")}…`;
+}
+
+/* ------------------------------------------------------------------ *
+ * The wire
+ * ------------------------------------------------------------------ */
+
+/** "A, B and C" — how the wire lists players. */
+function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+export interface WireTrade {
+  status: string;
+  proposer: string;
+  counterparty: string;
+  /** Player names, already resolved; an empty list reads as "players". */
+  give: string[];
+  get: string[];
+}
+
+/**
+ * One line about a trade for the masthead ticker, from the proposer's side
+ * the way `trades.ts` records it. An offer's message stays private (§11), so
+ * the line never carries it; the players are public on `/trades` already.
+ * Ids the caller could not name are left out, and a side with nothing named
+ * reads as "players" rather than as a raw id.
+ */
+export function describeTradeWire(t: WireTrade): string {
+  const give = listNames(t.give) || "players";
+  const get = listNames(t.get) || "players";
+  const deal = `${give} for ${get}`;
+  switch (t.status) {
+    case "proposed":
+      return `${t.proposer} offers ${t.counterparty} ${deal}`;
+    case "accepted":
+      return `${t.proposer} and ${t.counterparty} agree ${deal} — in review`;
+    case "executed":
+      return `Done: ${t.proposer} sends ${give} to ${t.counterparty} for ${get}`;
+    case "vetoed":
+      return `The league vetoes ${t.proposer}–${t.counterparty}: ${deal}`;
+    case "rejected":
+      return `${t.counterparty} turns down ${t.proposer}: ${deal}`;
+    case "countered":
+      return `${t.counterparty} counters ${t.proposer}'s offer of ${deal}`;
+    case "cancelled":
+      return `${t.proposer} withdraws its offer to ${t.counterparty}`;
+    case "expired":
+      return `${t.proposer}'s offer to ${t.counterparty} expires unanswered`;
+    case "failed":
+      return `${t.proposer}–${t.counterparty} falls through: ${deal}`;
+    case "superseded":
+      return `${t.proposer} replaces its offer to ${t.counterparty}`;
+    default:
+      return `${t.proposer} and ${t.counterparty}: ${deal}`;
+  }
+}
+
+/** One line about a processed waiver claim. */
+export function describeClaimWire(
+  team: string,
+  status: string,
+  added: string | null,
+  dropped: string | null,
+): string {
+  if (status === "success") {
+    if (!added) return `${team} wins a waiver claim`;
+    return `${team} claims ${added}${dropped ? `, drops ${dropped}` : ""}`;
+  }
+  return added ? `${team} loses its claim on ${added}` : `${team} loses a waiver claim`;
+}
+
+/** One line about a waiver run. */
+export function describeWaiverRunWire(week: number | null, claims: number, won: number): string {
+  const when = week === null ? "Waivers" : `Week ${week} waivers`;
+  if (claims === 0) return `${when} ran: no claims`;
+  return `${when} ran: ${claims} claim${claims === 1 ? "" : "s"}, ${won} landed`;
 }

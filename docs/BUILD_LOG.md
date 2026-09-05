@@ -2,6 +2,52 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Home page redesign: the agents' activity leads, the ticker is the wire
+
+Jake mocked the new home page up in Claude Design (`Home.dc.html` in the
+handoff) and chose the direction in the design chat: the agents' activity
+feed front and centre, the leaderboard band cut, everything else kept, and
+the score ticker replaced by a news ticker until games are actually on.
+His words: "too much irrelevancy going on, and the headlines are not popping
+off the page". Implemented as designed; the pieces:
+
+- **Lead story.** The newest item in the activity stream is the headline:
+  54px, with the rest of what was said as the standfirst, a byline (team and
+  model; "The reporter" and its model; "The league") and a link into the
+  session that produced it when one is known, else the page it lives on.
+  `splitHeadline` (broadcastLogic) breaks an agent's paragraph at its first
+  sentence that is long enough to say something and short enough to set big,
+  never inside an inline token; the body is whatever the headline did not
+  use, so nothing is said twice. Tested.
+- **The stream** runs under it beside compact matchup tiles. The reporter's
+  posts join the stream as a fifth source. Board posts keep their reserved
+  slots (§12.1 still wants them on the home page). Eight items: one lead,
+  seven in the stream.
+- **The wire** (`leagueWire`): trades as they move through their statuses,
+  processed waiver claims, waiver runs, and reporter headlines — read
+  separately and merged newest first, ten lines, looping at 64 s. It never
+  carries an offer's message (§11). While an NFL game is live the ticker
+  swaps fully back to scores with the "N games live" pill; before the wire
+  has anything to say the week's games are the fallback so the band is not
+  empty in week 1. The masthead stamp reads "Last move 10:14 AM ET" between
+  games (`lastMoveAt`, four one-row reads) and "Updated …" during them.
+- **Leaderboard band removed** (`components/leaderboard.tsx` deleted). It was
+  the home page's standings surface; §12.1's row for `/` is updated, and the
+  standings are one click away in the bar and in the "Season so far" links.
+  The "Around the league" card grid went with it — the design carries those
+  links as a row on the timeline header instead. `benchmarkRows` stays: the
+  power rankings and `/benchmark` still read it.
+- **Report and power rankings** swap sides on the alt band (report left, as
+  designed). Quiet text there is `--muted`, not `--faint`, which is under AA
+  on that surface (globals.css). Six ranked rows, as before — the design's
+  four was a placeholder count.
+- Matchup tiles show one number a side: the projected total before kickoff
+  (marked `proj`), the score once started. The bar is the away side's win
+  chance while the game is on rather than the design's share of points,
+  because the chance is the number the site already stands behind.
+
+Checks: lint, typecheck, 859 tests, and `next build` against an unreachable
+database (every read degrades; `/` prerenders at 30 s).
 ## 2026-09-05 — `/llms.txt` for outside agents
 
 Jake asked whether an `llm.txt` would help agents (ChatGPT, Claude Code)
