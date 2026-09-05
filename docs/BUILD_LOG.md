@@ -2,6 +2,101 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Jake: the same player may be offered to several teams; the first accept wins
+
+Jake's decision, replacing the §3.5 freeze rule for open offers. Before, a
+proposer's give-side player was frozen the moment an offer went out, so a team
+could not shop one player to two teams and had to wait for a rejection or an
+expiry (48 hours) before the next offer. Now:
+
+- An open (`proposed`) offer binds nobody for other offers. A team may offer
+  the same player to several teams at once, and another team may ask for a
+  player who is already in an outgoing offer. Only a trade in review
+  (`accepted`) freezes its players for offers.
+- **First accept wins.** On accept, every other open offer that names any
+  player in the accepted trade — either side, any team — ends as
+  `superseded`, `resolution_reason` "superseded by trade N", `resolved_at`
+  now. Its queued `trade_response` session is skipped with
+  `MOOT_OFFER_REASON` (a healthy no-op, kept out of the digest's failure
+  table like the retired vote sessions). `trade.superseded` is emitted per
+  offer. The accept result and the `respond_to_trade` tool return the ids.
+- Drops stay strict: a proposer's give-side player still cannot be dropped
+  while an offer is open (`roster.ts` `frozenPlayerIds` is unchanged), so a
+  player is never dropped out from under the offers he is in.
+- The accept re-check now ignores other open offers, so the old failure mode
+  — accept fails with `player_moved` because the counterparty had shopped
+  the same player elsewhere — is gone; that side offer is superseded instead.
+
+Reviewer findings, fixed: `respondToTrade` now locks the trade row and both
+the accept and the supersede update are guarded on `status = 'proposed'`, so
+two overlapping offers accepted at the same instant serialise instead of both
+entering review (or the second flipping a superseded row back to accepted).
+Second pass: row locks alone deadlock — accept A holds its row and wants
+every other open offer, accept B the reverse — so propose and respond take
+one transaction-scoped advisory lock (`pg_advisory_xact_lock`) before any
+row lock. Accepts and proposes queue behind each other for a few
+milliseconds; nothing else waits on it.
+The expiry sweeps now retire an expired offer's queued `trade_response`
+session too (`MOOT_OFFER_REASON_EXPIRED`); before, that session ran only to
+get `bad_status`. Noted, not changed: superseded offers still count toward
+the 3-offers-per-day limit — shopping one player to three teams spends the
+day's quota. That is the spec's "offers per day", and the tool description
+says the same player may go to several teams, so the agent can weigh it.
+
+New trade status `superseded`: schema type, `/trades` offer list (verb and
+reason shown), the agent's `get_trade` resolved set, tool descriptions for
+`propose_trade` and `respond_to_trade`, SPEC §3.5 and §17. No migration: the
+status column is plain text.
+
+Tests: shop one player to two teams plus a third team asking for the other
+side's player; accept one → the two overlapping offers are superseded with
+the reason, their response sessions skipped, an unrelated offer stays open,
+the superseded offer cannot be answered, and the player is frozen for new
+offers while in review.
+
+## 2026-09-05 — Trade roster reservation counted incoming players without crediting outgoing ones
+
+Trade 34 (Second Overall → Gridiron Gambit, Addison for Aaron Jones, one for
+one) failed on accept with `roster_illegal`: "the trade would put the
+counterparty at 15 active players". Gridiron Gambit had a separate one-for-one
+(trade 31) in review at that moment. `incomingReservedCount` held one spot for
+that trade's incoming player and gave no credit for the outgoing one, so a
+14-man team with any trade in review could not accept a second one-for-one.
+Gridiron Gambit then read the error as Second Overall's roster being full and
+asked it to drop a player, which would not have helped.
+
+Fix, in `packages/engine/src/roster.ts`:
+
+- The reservation is now the net gain of each trade in review, floored at
+  zero, summed over trades. A trade executes or fails as a unit and its outgoing
+  players are frozen, so the roster after any subset of these trades executes is
+  at most the current size plus this sum.
+- An outgoing player who sits in the week's IR slot frees the IR slot, not an
+  active spot, so he does not offset an incoming player (reviewer finding).
+- The helper takes `week` and an optional `excludeTradeId`; the duplicate copy
+  in `trades.ts` is gone. Free-agent adds, waiver claims and trade checks all
+  use the one function.
+
+Spec reading: §3.5 and §7.2 say "incoming players count toward the limit" and
+give the reason — so a later add cannot block execution. Net-per-trade keeps
+that guarantee (new test: add to 14 beside a one-for-one in review, then the
+trade executes) and stops the false rejections. Recorded here because it
+departs from the literal text.
+
+Not changed: board-reply sessions still have no roster tools (§8.6). Second
+Overall said on the board it would drop a player and resend; it gets a trade
+window session today at 12:00 PM ET with `drop_player` and `propose_trade`.
+Also not changed: a lineup change can move a frozen IR occupant out of IR
+without any reservation check; that was true before and is out of scope.
+
+Checked on request: the same player offered to two different teams at once.
+The engine already refuses the second offer with `frozen` (§3.5: a
+proposer's give-side player is frozen while the offer is `proposed`), and
+refuses a third team asking for him. The freeze lifts when the first offer is
+rejected, countered, cancelled or expires. Production has no case of two open
+offers sharing a give-side player. Added an explicit test that names the
+scenario and checks the player is offerable again after the first offer ends.
+
 ## 2026-09-05 — Two trade windows, reasoning billed once, get_league_rosters (deployed)
 
 Jake's three asks from the cost analysis below. Merged to `main` as `31e00f4`

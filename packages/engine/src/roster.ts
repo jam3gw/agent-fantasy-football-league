@@ -2,7 +2,8 @@
  * Shared roster helpers: roster reads, active counts, IR legality (§3.6),
  * slot eligibility (§3.1), trade freezes and roster reservations (§3.5).
  */
-import { and, eq, inArray, or } from "drizzle-orm";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import type { EngineDb } from "./db/index.ts";
 import type { LineupSlot, StartingSlot } from "./db/schema.ts";
 import { lineupEntries, players, rosterEntries, trades } from "./db/schema.ts";
@@ -137,9 +138,13 @@ export async function isIrIllegal(
 }
 
 /**
- * Players of `teamId` frozen by trades (§3.5): give-side of its own `proposed`
- * offers; both sides of `accepted` trades it is a party to. A frozen player
- * cannot be dropped, traded elsewhere, or put in another offer.
+ * Players of `teamId` that cannot be **dropped** because of trades (§3.5):
+ * give-side of its own `proposed` offers; both sides of `accepted` trades it
+ * is a party to. This is the drop freeze only. Offers use the narrower
+ * trades.ts `frozenPlayerIdsExcluding` — an open offer binds nobody for other
+ * offers (the same player may be shopped to several teams; the first accept
+ * supersedes the rest), but a player is never dropped out from under the
+ * offers he is in.
  */
 export async function frozenPlayerIds(db: EngineDb, teamId: number): Promise<Set<string>> {
   const frozen = new Set<string>();
@@ -154,7 +159,7 @@ export async function frozenPlayerIds(db: EngineDb, teamId: number): Promise<Set
     );
   for (const t of open) {
     if (t.status === "proposed") {
-      // only the proposer's give-side is frozen while proposed
+      // only the proposer's give-side is held (against drops) while proposed
       if (t.proposerTeamId === teamId) for (const p of t.givePlayerIds) frozen.add(p);
     } else {
       // accepted (in review): both sides
@@ -167,23 +172,42 @@ export async function frozenPlayerIds(db: EngineDb, teamId: number): Promise<Set
 
 /**
  * Roster reservation (§3.5): players incoming to `teamId` from trades in
- * review count toward its 14-active limit for free-agent adds and waiver
- * claims. Returns the count of such players.
+ * review count toward its 14-active limit for free-agent adds, waiver claims
+ * and other trades. Returns the number of active spots to hold.
+ *
+ * The reservation is the *net* gain of each trade in review, floored at zero,
+ * summed over trades. A trade executes or fails as a unit and its outgoing
+ * players are frozen (they cannot leave any other way), so the roster after
+ * any subset of these trades executes is at most the current size plus this
+ * sum. Counting incoming players alone over-reserved: a team at 14 with a
+ * 1-for-1 in review was held at 15 and could not accept a second 1-for-1.
+ *
+ * An outgoing player who sits in `week`'s IR slot frees the IR slot, not an
+ * active spot, so he does not offset an incoming player.
+ *
+ * `excludeTradeId` leaves one trade out — the accept re-check of a trade must
+ * not reserve against itself.
  */
-export async function incomingReservedCount(db: EngineDb, teamId: number): Promise<number> {
-  const inReview = await db
-    .select()
-    .from(trades)
-    .where(
-      and(
-        eq(trades.status, "accepted"),
-        or(eq(trades.proposerTeamId, teamId), eq(trades.counterpartyTeamId, teamId)),
-      ),
-    );
+export async function incomingReservedCount(
+  db: EngineDb,
+  teamId: number,
+  week: number,
+  excludeTradeId?: number,
+): Promise<number> {
+  const conditions: Array<SQL<unknown> | undefined> = [
+    eq(trades.status, "accepted"),
+    or(eq(trades.proposerTeamId, teamId), eq(trades.counterpartyTeamId, teamId)),
+  ];
+  if (excludeTradeId !== undefined) conditions.push(ne(trades.id, excludeTradeId));
+  const inReview = await db.select().from(trades).where(and(...conditions));
+  const ir = await irOccupant(db, teamId, week);
   let count = 0;
   for (const t of inReview) {
-    // proposer receives get-side; counterparty receives give-side
-    count += t.proposerTeamId === teamId ? t.getPlayerIds.length : t.givePlayerIds.length;
+    // proposer receives get-side and sends give-side; counterparty the reverse
+    const incoming = t.proposerTeamId === teamId ? t.getPlayerIds : t.givePlayerIds;
+    const outgoing = t.proposerTeamId === teamId ? t.givePlayerIds : t.getPlayerIds;
+    const outgoingActive = outgoing.filter((p) => p !== ir).length;
+    count += Math.max(0, incoming.length - outgoingActive);
   }
   return count;
 }
