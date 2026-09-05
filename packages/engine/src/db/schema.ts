@@ -58,7 +58,8 @@ export type TradeStatus =
   | "rejected"
   | "countered"
   | "cancelled"
-  | "expired";
+  | "expired"
+  | "superseded";
 export type StartingSlot = "QB" | "RB1" | "RB2" | "WR1" | "WR2" | "TE" | "FLEX" | "DST" | "K";
 export type LineupSlot = StartingSlot | "IR";
 export type TransactionType =

@@ -36,6 +36,7 @@ import {
   runWaivers,
   submitWaiverClaims,
 } from "../src/waivers.ts";
+import { proposeTrade, resolveEndedReviews, respondToTrade } from "../src/trades.ts";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -402,18 +403,20 @@ describe("addFreeAgent (§7.2)", () => {
     expect(await db.select().from(rosterEntries).where(eq(rosterEntries.teamId, t1!))).toHaveLength(14);
   });
 
-  it("counts incoming players of a trade in review toward the 14-active limit", async () => {
+  it("reserves the net gain of a trade in review toward the 14-active limit", async () => {
     await seedLeague(db);
     const [t1, t2] = await seedTeams(db);
     const clock = new FixedClock("2026-09-15T12:00:00Z");
     const mine = await rosterN(t1!, 13, "mine"); // 13 active
-    const give = await makePlayer(db, { playerId: "give1", nflTeam: "GB" });
-    await rosterPlayer(db, t2!, give);
-    // t2 → t1 trade in review: t1 (counterparty) is due the give side (1 player)
+    const give1 = await makePlayer(db, { playerId: "give1", nflTeam: "GB" });
+    const give2 = await makePlayer(db, { playerId: "give2", nflTeam: "GB" });
+    await rosterPlayer(db, t2!, give1);
+    await rosterPlayer(db, t2!, give2);
+    // t2 → t1 2-for-1 in review: t1 (counterparty) is due 2 and sends 1 → net +1
     await db.insert(trades).values({
       proposerTeamId: t2!,
       counterpartyTeamId: t1!,
-      givePlayerIds: [give],
+      givePlayerIds: [give1, give2],
       getPlayerIds: [mine[0]!],
       status: "accepted",
       proposedAt: clock.now(),
@@ -425,6 +428,73 @@ describe("addFreeAgent (§7.2)", () => {
     // (mine[0] is frozen as the accepted trade's get side, so drop another)
     const r = await addFreeAgent(db, clock, t1!, fa, mine[1]!);
     expect(r.ok).toBe(true);
+  });
+
+  it("a 1-for-1 trade in review reserves nothing: its outgoing player leaves when its incoming one arrives", async () => {
+    await seedLeague(db);
+    const [t1, t2] = await seedTeams(db);
+    const clock = new FixedClock("2026-09-15T12:00:00Z");
+    const mine = await rosterN(t1!, 13, "mine"); // 13 active
+    const give = await makePlayer(db, { playerId: "give1", nflTeam: "GB" });
+    await rosterPlayer(db, t2!, give);
+    await db.insert(trades).values({
+      proposerTeamId: t2!,
+      counterpartyTeamId: t1!,
+      givePlayerIds: [give],
+      getPlayerIds: [mine[0]!],
+      status: "accepted",
+      proposedAt: clock.now(),
+    });
+    const fa = await makePlayer(db, { playerId: "fa1", nflTeam: "GB" });
+    // 13 + 1 add + 0 reserved = 14 → ok, whether or not the trade later executes
+    expect((await addFreeAgent(db, clock, t1!, fa)).ok).toBe(true);
+    expect(await db.select().from(rosterEntries).where(eq(rosterEntries.teamId, t1!))).toHaveLength(14);
+  });
+
+  it("an outgoing IR occupant frees the IR slot, not an active spot, so the incoming player is still reserved", async () => {
+    await seedLeague(db);
+    const [t1, t2] = await seedTeams(db);
+    const clock = new FixedClock("2026-09-15T12:00:00Z");
+    await rosterN(t1!, 13, "mine"); // 13 active
+    const irP = await makePlayer(db, { playerId: "irp", nflTeam: "NO", injuryStatus: "IR" });
+    await rosterPlayer(db, t1!, irP);
+    await setLineupEntry(db, t1!, 1, irP, "IR"); // 13 active + 1 IR
+    const give = await makePlayer(db, { playerId: "give1", nflTeam: "GB" });
+    await rosterPlayer(db, t2!, give);
+    // t1 sends its IR player and receives an active one → 14 active once it executes
+    await db.insert(trades).values({
+      proposerTeamId: t2!,
+      counterpartyTeamId: t1!,
+      givePlayerIds: [give],
+      getPlayerIds: [irP],
+      status: "accepted",
+      proposedAt: clock.now(),
+    });
+    const fa = await makePlayer(db, { playerId: "fa1", nflTeam: "GB" });
+    // 13 + 1 add + 1 reserved = 15 > 14: the add would make the trade fail at execution
+    expect(await addFreeAgent(db, clock, t1!, fa)).toMatchObject({ ok: false, error: "roster_full" });
+  });
+
+  it("a free-agent add beside a 1-for-1 in review never blocks that trade from executing", async () => {
+    await seedLeague(db);
+    const ids = await seedTeams(db);
+    const [t1, t2] = ids;
+    const clock = new FixedClock("2026-09-15T12:00:00Z");
+    const mine = await rosterN(t1!, 13, "mine");
+    const give = await makePlayer(db, { playerId: "give1", nflTeam: "GB" });
+    await rosterPlayer(db, t2!, give);
+    const p = await proposeTrade(db, clock, t2!, { toTeamId: t1!, givePlayerIds: [give], getPlayerIds: [mine[0]!] });
+    expect(p.ok).toBe(true);
+    if (!p.ok) return;
+    expect((await respondToTrade(db, clock, t1!, p.value.tradeId, "accept")).ok).toBe(true);
+    const fa = await makePlayer(db, { playerId: "fa1", nflTeam: "GB" });
+    expect((await addFreeAgent(db, clock, t1!, fa)).ok).toBe(true); // 14 active
+    clock.advance(25 * 3600_000); // past the 24 h review
+    const resolved = await resolveEndedReviews(db, clock);
+    expect(resolved.ok).toBe(true);
+    const row = (await db.select().from(trades).where(eq(trades.id, p.value.tradeId)))[0]!;
+    expect(row.status).toBe("executed");
+    expect(await db.select().from(rosterEntries).where(eq(rosterEntries.teamId, t1!))).toHaveLength(14);
   });
 });
 
