@@ -4066,3 +4066,101 @@ Decisions:
 - **Choices**:
   - Unit tests run against **PGlite** (in-memory Postgres) so `packages/engine` is fully testable with no server and no network; the same Drizzle schema runs on Neon PG 18 in deploys. Live-API tests are tagged and skipped when the key/fixture is absent (CLAUDE.md convention).
   - The starter app is Next 16.2.4 (React 19.2, Tailwind 4) — per `AGENTS.md`, Next 16 has breaking changes; I read `node_modules/next/dist/docs/` before writing any `apps/web` code (M3+/M5).
+
+## 2026-09-05 — Custom events on Vercel Web Analytics
+
+Four custom events now go to Web Analytics from the public site, next to the
+page views the 2026-08-29 entry added. They fire only on deliberate reader
+actions, never on scroll, poll, or render, because every custom event is
+billed like a page view.
+
+- `Filter` — any URL-state change from `useUrlState.set` (the filter selects,
+  the sessions chips, the spend sort). Properties: `page`, `key`. The value
+  is not sent: one row per team slug answers nothing the page count does not.
+- `Show more` — the long-list button. Properties: `page`, `noun`.
+- `Compare` — a model picked in the home-page compare panel. Properties:
+  `left`, `right` (model names).
+- `Toggle steps` — "Expand all" / "Collapse all" on a session transcript.
+  Properties: `open`, `steps`.
+
+Code: `apps/web/lib/analytics.ts` is the pure part (vocabulary, `buildEvent`,
+`pageOf`) and is unit-tested; `apps/web/lib/track.ts` is the one-line client
+wrapper over `track()` from `@vercel/analytics` (the package root, as the docs
+say; `/next` exports only the component). `apps/web/test/customEvents.test.ts`
+guards the plan limit, the value types, the 255-character caps, and that every
+call site sends at most two properties.
+
+**Pricing** (Vercel docs `/docs/analytics/limits-and-pricing`, checked
+2026-09-05; the team `jake-moses-personal` is on Pro):
+
+- A custom event costs the same as a page view: **$0.03 per 1,000 events**,
+  metered per team, no included allowance on Pro, on top of the Pro plan's
+  monthly usage credit. No separate fee to turn custom events on.
+- Pro allows **2 properties per custom event**. Web Analytics Plus
+  (**$10/month per team**) raises that to 8, extends the reporting window from
+  12 to 24 months, and adds UTM parameters. Hobby gets no custom events at all.
+- Order of magnitude: 10,000 reader actions a month is $0.30. Not worth the
+  Plus add-on; `MAX_PROPERTIES` is 2 for that reason and would move to 8 with
+  it.
+- Vercel drops properties past the plan limit without an error, so the cap is
+  enforced in `buildEvent` where a test can see it.
+- Development mode logs each event to the console via the debug script and
+  records nothing, same as page views.
+
+## 2026-09-05 — beforeSend filter and three more custom events
+
+`<Analytics />` moved into `apps/web/components/analytics.tsx` (`SiteAnalytics`)
+so it can carry a `beforeSend` rule; the root layout is a server component and
+cannot pass a function. The rule, `filterUrl` in `lib/analytics.ts`, is pure and
+tested:
+
+- **`/admin/*` page views are dropped.** One reader behind a login, paid for
+  and mixed into the public numbers otherwise.
+- **Query strings and anchors are stripped.** Filter state lives in the URL, so
+  `/trades?team=…` would be a row per combination. The `Filter` event already
+  records that a filter was used.
+
+Three events added to the vocabulary, all on deliberate reader actions:
+
+- `Step opened` — a transcript step card opened by hand. Properties: `page`,
+  `kind` (decision, write, brief, turn). The cards are server-rendered
+  `<details>` that React never owns, so `StepOpenTracker` is one delegated
+  `click` listener on the document: a click on the summary of a card that is
+  closed at click time. Not `toggle` — the reviewer caught that `toggle` also
+  fires when the rail's "Expand all" sets `open`, and when the live view moves
+  the anchored decision card as steps arrive on every poll, which would have
+  billed a "reader opened a step" per poll per open tab.
+- `Live watched` — a reader kept a running session or the running draft
+  visible for 30 s (`useLiveWatched`). The timer runs only while the tab is
+  visible (a background tab is not watching), fires at most once per mount (a
+  draft pausing and resuming under a reader does not count twice), and is
+  cancelled if they leave or the session ends; never per poll.
+- `Notes expanded` — "Read the full notes" on a team's scratchpad card.
+  Properties: `page`, `model`.
+
+`Filter` now fires only when the URL state actually changed: a sessions chip
+that is already lit can be clicked again, a select cannot re-fire its value.
+
+Review round 1 found the three behaviour bugs above plus an untested
+`beforeSend`; all fixed, `beforeSend` exported and tested directly.
+
+Review round 2: `pageOf` now folds `/teams/[slug]/week/[week]` and
+`/spend/[slug]` (the team week page renders the same scratchpad card, so
+`Notes expanded` would have fanned out to a row per team per week);
+`queryChanged` re-serialises both sides so a linked-in `?team=a&` is not a
+change; `Live watched` on a session requires `running`, not `queued` (a reader
+on the waiting card is not watching an agent think); the sessions list's own
+"Show N more" button now sends `Show more` too. The click handler is exported
+and tested against the real nested-`<details>` structure under `happy-dom`
+(new dev dependency; `test/stepOpenTracker.dom.test.ts`). Known and accepted:
+a legacy `?status=timed_out` link lights the "failed" chip, and clicking that
+lit chip rewrites the URL to `status=failed` and counts one `Filter`.
+
+Not added, on purpose: nav/footer clicks (page views already count them), poll
+ticks and scroll (no reader action, pure cost), anything under `/admin`,
+per-row table clicks (each row is a link), server-side events for league
+actions (the database already has them in full), and the Web Analytics API on
+`/about` (a vanity number for another token).
+
+Still for Jake, a dashboard setting not code: a Spend Management alert on the
+Vercel team, since Pro meters events with no cap.

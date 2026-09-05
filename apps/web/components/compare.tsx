@@ -1,6 +1,8 @@
 "use client";
 
 import { useId, useState } from "react";
+import { EVENTS } from "@/lib/analytics";
+import { trackEvent } from "@/lib/track";
 
 /**
  * Pick two models and see the gap.
@@ -103,8 +105,14 @@ export function ComparePanel({ teams }: { teams: CompareTeam[] }) {
       <p className="mt-1.5 text-[13px] text-band-muted">Same league. Same facts. Pick any two.</p>
 
       <div className="mt-[18px] grid grid-cols-2 gap-3">
-        {select(leftId, "Left", leftIndex, setLeftIndex)}
-        {select(rightId, "Right", rightIndex, setRightIndex)}
+        {select(leftId, "Left", leftIndex, (i) => {
+          setLeftIndex(i);
+          trackEvent(EVENTS.compare, { left: teams[i]?.model ?? "", right: right.model });
+        })}
+        {select(rightId, "Right", rightIndex, (i) => {
+          setRightIndex(i);
+          trackEvent(EVENTS.compare, { left: left.model, right: teams[i]?.model ?? "" });
+        })}
       </div>
 
       <div className="mt-5 flex flex-col gap-3.5">
