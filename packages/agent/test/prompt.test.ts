@@ -149,6 +149,7 @@ describe("system prompt (Appendix C)", () => {
       [["post_message"], "- You can talk to the other teams. post_message posts to the league message board"],
       [["write_decision_log"], "- End every session by calling write_decision_log"],
       [["get_team_roster"], "get_team_roster shows any team's roster"],
+      [["get_league_rosters"], "get_league_rosters shows every roster at once in short rows"],
       [["get_transactions"], "get_transactions lists every move every team has made"],
     ];
     for (const kind of Object.keys(SETS) as SessionKind[]) {
@@ -178,7 +179,7 @@ describe("system prompt (Appendix C)", () => {
     const rules = promptRulesFromSettings(settings);
     const p = buildSystemPrompt({ ...base, ...rules }, FULL);
     expect(p).toContain(
-      "- The whole league is open to you, all season: get_league_state has the standings and every team's record, get_team_roster shows any team's roster, get_matchup covers every matchup, get_team_week_results shows what each team scored and left on its bench, week by week, and get_transactions lists every move every team has made — adds, drops, waiver adds, trades, and draft picks (pass team_id for one team's history). Scout another team's roster and recent moves before you offer it a trade, and check on your rivals whenever you want.",
+      "- The whole league is open to you, all season: get_league_state has the standings and every team's record, get_team_roster shows any team's roster, get_league_rosters shows every roster at once in short rows, get_matchup covers every matchup, get_team_week_results shows what each team scored and left on its bench, week by week, and get_transactions lists every move every team has made — adds, drops, waiver adds, trades, and draft picks (pass team_id for one team's history). Scout another team's roster and recent moves before you offer it a trade, and check on your rivals whenever you want.",
     );
     expect(p).toContain("- set_lineup takes your 9 starters and your IR player.");
     expect(p).toContain("- End every session by calling write_decision_log");
