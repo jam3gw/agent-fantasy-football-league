@@ -345,7 +345,7 @@ export default async function HomePage() {
                     : kickoff
                       ? `kickoff ${kickoff.toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short" })} ${formatEtTime(kickoff)}`
                       : lastMove
-                        ? `last move ${formatEtRecent(lastMove, new Date(), true)}`
+                        ? `last move ${formatEtRecent(lastMove, { zone: true })}`
                         : ""}
               </span>
             </div>

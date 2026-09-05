@@ -525,14 +525,18 @@ export function splitHeadline(
 
 /** A full stop after one of these is an abbreviation, not the end of a sentence. */
 const ABBREVIATION = /(?:^|\s)(?:vs|v|e\.g|i\.e|etc|cf|approx|mr|mrs|ms|dr|jr|sr|inc|ltd)\.$/i;
-/** These are abbreviations only ahead of a number: "No. 1 pick", "St. 3" — a sentence can end in "no." */
-const NUMBERED_ABBREVIATION = /(?:^|\s)(?:no|st)\.$/i;
+/** "No." is an abbreviation only ahead of a number ("No. 1 pick"); a sentence can end in "no." */
+const NUMBERED_ABBREVIATION = /(?:^|\s)no\.$/i;
+/** "St." is a surname prefix in this league — Amon-Ra St. Brown — so it holds ahead of a capital or a digit. */
+const NAME_ABBREVIATION = /(?:^|\s)st\.$/i;
 
 /** Is the full stop at `at` in `flat` an abbreviation's rather than a sentence's? */
 function isAbbreviation(flat: string, at: number): boolean {
   const before = flat.slice(0, at + 1);
+  const after = flat.slice(at + 1);
   if (ABBREVIATION.test(before)) return true;
-  return NUMBERED_ABBREVIATION.test(before) && /^\s+\d/.test(flat.slice(at + 1));
+  if (NUMBERED_ABBREVIATION.test(before)) return /^\s+\d/.test(after);
+  return NAME_ABBREVIATION.test(before) && /^\s+[A-Z\d]/.test(after);
 }
 
 /** A fence marker line: opens or closes a block, unless the block is all on this one line. */
@@ -540,8 +544,12 @@ const FENCE_LINE = /^\s*(?:`{3,}|~{3,})/;
 const ONE_LINE_FENCE = /^\s*(?:`{3,}[^\n]+?`{3,}|~{3,}[^\n]+?~{3,})/;
 const RULE_LINE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
 const BLOCK_MARKERS = /^\s*(?:#{1,6}\s+|[-*+]\s+|\d{1,3}[.)]\s+|>\s?)+/;
-/** A line with nothing but marker characters, or a table row: not prose to close. */
-const NOT_PROSE = /^(?:[-#*+>|:\s]*|\|.*)$/;
+/**
+ * A line with nothing but marker characters, a table row, or a bare number:
+ * not prose to close. A number alone would become "12.", which the
+ * flattener then reads as a list marker and drops with the line.
+ */
+const NOT_PROSE = /^(?:[-#*+>|:\s]*|\|.*|\d{1,3})$/;
 /** Ends in a stop, or in a stop followed by whatever closes a quote, a bracket or an inline token. */
 const ALREADY_CLOSED = /[.?!…:;,]["”’)*`_~]*$/;
 

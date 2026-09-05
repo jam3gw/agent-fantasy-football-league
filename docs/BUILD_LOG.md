@@ -64,9 +64,9 @@ Fixed:
   of a bare clock. Tested (`test/formatRecent.test.ts`).
 - The matchups header showed a past kickoff as upcoming all Monday night
   through Tuesday. `nextKickoff` offers the kickoff only while it is ahead
-  (the comparison sits in the read, not the page — `react-hooks/purity`
-  rejects `Date.now()` in a component), and a fully played week says "all
-  final".
+  (the comparison sits in the read, where a test can pass `now`; render
+  time is still the clock, the same as every read's default), and a fully
+  played week says "all final".
 - `splitHeadline` on a heading over bullets was one run-on cut mid-list.
   A line break now counts as a sentence end: `closeLines` puts a full stop
   on every line that stops without one, outside fenced code, leaving rules
@@ -133,6 +133,22 @@ state and swallowed every line after it. Also fixed:
 - `WireItem.href` was dead once the lines became text; removed.
 - `plainExcerpt` keeps underscores, like the renderer (`pts_allow_14_20`).
 - Stale wording in this log's top entry and in a `SectionHeader` comment.
+
+### Review round 3 (4 findings, none blocking)
+
+- Round 2 made "St." an abbreviation only ahead of a digit, and the
+  headline cut "Amon-Ra St. Brown" in half. "St." holds ahead of a capital
+  or a digit now; tested.
+- The fallback `Week N` score ticker labelled every unplayed game "live"
+  beside 0.00 · 0.00. Pre-existing, but this branch shows that ticker only
+  when nothing is live, so it was wrong every time. It says "scheduled".
+- A line that was only a number became "12." and the flattener dropped it
+  as a list marker. Bare numbers are not prose to close; tested.
+- Round 1's note said the kickoff comparison left the page because the
+  purity lint rejects `Date.now()`; round 2 then wrote `new Date()` in two
+  components. The note now gives the real reason (a read can take `now`
+  from a test), and `formatEtRecent` takes `{ now, zone }` with render time
+  as its own default, so no component body constructs a clock.
 ## 2026-09-05 — `/llms.txt` for outside agents
 
 Jake asked whether an `llm.txt` would help agents (ChatGPT, Claude Code)
