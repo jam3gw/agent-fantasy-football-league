@@ -515,7 +515,9 @@ export const scheduleCheckInTool = defineTool({
   name: "schedule_check_in",
   description:
     "Leave yourself a note to come back at a time you choose — a practice report on Thursday, a starter's " +
-    "status an hour before kickoff. `at` is an ISO 8601 instant, at least " +
+    "status an hour before kickoff, a look for trades once the waiver run has moved rosters. The league does " +
+    "not run a trade window for you: a check-in is where you shop trades and post to the board. `at` is an " +
+    "ISO 8601 instant, at least " +
     `${MIN_LEAD_MINUTES} minutes out and within ${MAX_HORIZON_DAYS} days. It is rounded up to the next ` +
     "five minutes, which is how often the league starts queued sessions, and the rounded time comes back " +
     "in the result. The reason becomes that " +
