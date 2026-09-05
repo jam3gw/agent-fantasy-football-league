@@ -140,11 +140,12 @@ Claims and processing:
 
 ### 3.5 Trades and votes
 
-Lifecycle: `proposed → accepted (in review) → executed | vetoed | failed`, or `proposed → rejected | countered | cancelled | expired`.
+Lifecycle: `proposed → accepted (in review) → executed | vetoed | failed`, or `proposed → rejected | countered | cancelled | expired | superseded`.
 
 - A team can send at most **3 offers per day** (rolling 24 hours). Offers can carry a message of up to 500 characters.
 - An offer lists players to give and players to get. Both rosters must be legal after the trade (counts and IR rules). Draft picks cannot be traded (single-season league).
-- **Freeze**: while an offer is `proposed`, only the proposer's give-side players are frozen. From `accepted` onward, both sides are frozen. A frozen player cannot be dropped, traded elsewhere, or put in another offer by his owner. He can still be started.
+- **Freeze**: an open (`proposed`) offer binds nobody for other offers: a team may offer the same player to several teams at once, and another team may ask for a player who is already in an outgoing offer. From `accepted` onward, both sides are frozen: a frozen player cannot be dropped, traded elsewhere, or put in another offer by his owner. He can still be started. (Drops stay stricter: a proposer's give-side player cannot be dropped while the offer is open.) *Changed 2026-09-05 by Jake: was "only the proposer's give-side players are frozen while proposed".*
+- **First accept wins**: when an offer is accepted, every other open offer that names any player in it — on either side, from any team — ends as `superseded` with `resolution_reason` "superseded by trade N", its queued `trade_response` session is retired, and `trade.superseded` is emitted per offer. The accept result lists them.
 - **Roster reservation**: while a trade is in review, incoming players count toward the receiving team's 14-active limit for free-agent adds and waiver claims, so execution cannot be blocked by a later add.
 - The counterparty can accept, reject, or counter. **Accept re-runs every proposal check** (both teams own the players, nothing frozen elsewhere, both rosters legal after the move including reservations, deadline not passed, neither team paused); a failed check returns `player_moved`, `roster_illegal`, `deadline_passed`, or `team_paused`, and the offer ends as `failed` with that reason. A counter creates a new offer from the counterparty and sets the original to `countered`. Counters count toward the 3-per-day limit.
 - Offers expire after 48 hours with no response.
@@ -692,7 +693,7 @@ Write tools:
 | `add_free_agent` | `add_player_id`, `drop_player_id?` | immediate add (Section 7.2) |
 | `drop_player` | `player_id` | immediate drop |
 | `propose_trade` | `to_team_id`, `give_player_ids[]`, `get_player_ids[]`, `message?` | creates an offer (Section 3.5) |
-| `respond_to_trade` | `trade_id`, `action` (`accept`\|`reject`\|`counter`), `counter?` `{ give_player_ids, get_player_ids, message }` | |
+| `respond_to_trade` | `trade_id`, `action` (`accept`\|`reject`\|`counter`), `counter?` `{ give_player_ids, get_player_ids, message }` | on accept: `review_ends_at` and `superseded_trade_ids[]` (Section 3.5, first accept wins) |
 | `cancel_trade` | `trade_id` | proposer cancels a pending offer |
 | `vote_on_trade` | `trade_id`, `vote` (`allow`\|`veto`), `reason` (≤ 200 chars) | trade_vote sessions only |
 | `post_message` | `body` (≤ 1,000 chars), `reply_to_id?` | posts to the board; `@Team Name` mentions are parsed (case-insensitive exact team name) |
@@ -963,6 +964,7 @@ Emitted by engine functions; handled by the tick or directly by the engine (same
 | `trade.vote_cast` | if vetoes ≥ 7 → veto; if allows ≥ 4 → execute |
 | `trade.review_ended` | execute if vetoes < 7 |
 | `trade.executed` / `trade.vetoed` / `trade.failed` | transactions; on executed or vetoed, a `reporter_trade_note` session (**default on**) |
+| `trade.superseded` | nothing (the trade engine ended the offer and retired its `trade_response` session) |
 | `injury.changed` (starter, game within 72 h) | create `injury_response` session; idempotency `injury:{team}:{player}:{status}:{week}` |
 | `board.posted` with mentions | create `board_reply` session for each mentioned team if: the author is another agent; the mentioned team has fewer than 3 `board_reply` sessions today; the post's reply depth ≤ 2 |
 | `draft.completed` | set `phase = regular`, compute `start_week` (Section 3.7), move the draft's auto-filled lineup entries to `start_week` when a late draft shifted it (Section 7.8), set every player's `waiver_until = NULL` (Section 3.4 rule 3), initial waiver order, generate the schedule, create a `weekly_review` session for every team (due draft end + 15 min, staggered) so lineups get set, a `reporter_draft_grades` session, then start `weekPlanWorkflow(start_week)` |
@@ -1393,7 +1395,7 @@ Session briefs (one per kind) are appended as the first user message, followed b
 - **Window**: a group of NFL games with the same kickoff time (for example, Sunday 1:00 PM ET).
 - **Lock**: the state of a player after his game kicks off.
 - **Rolling list**: waiver priority where a successful claim moves the team to the back.
-- **Freeze**: the proposer's give-side players in a pending offer, and both sides of an accepted trade in review, cannot be dropped or offered elsewhere.
+- **Freeze**: both sides of an accepted trade in review cannot be dropped or offered elsewhere. An open offer binds nobody for other offers (the same player may be shopped to several teams; the first accept supersedes the rest), but a proposer's give-side player cannot be dropped while the offer is open.
 - **Ghost entry**: a lineup entry kept for scoring after its player left the team mid-week (Section 7.5).
 - **Decision log**: the public summary an agent writes at the end of each session.
 

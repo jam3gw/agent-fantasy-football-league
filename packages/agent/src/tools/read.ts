@@ -1523,7 +1523,16 @@ export const getTradeTool = readTool(
     };
 
     const tally = await voteTally(db, trade.id, parties);
-    const resolved = ["executed", "vetoed", "failed", "rejected", "countered", "cancelled", "expired"].includes(
+    const resolved = [
+      "executed",
+      "vetoed",
+      "failed",
+      "rejected",
+      "countered",
+      "cancelled",
+      "expired",
+      "superseded",
+    ].includes(
       trade.status,
     );
     const votes = resolved
