@@ -89,6 +89,25 @@ export function filterUrl(url: string): string | null {
 }
 
 /**
+ * Whether a click on a `<details>` summary is a reader opening a step: the
+ * card must be a step card and closed at click time. A click that closes a
+ * card is not reading, and a card React or the rail opened never goes through
+ * here at all.
+ */
+export function countsAsStepOpen(card: { stepCard: boolean; open: boolean }): boolean {
+  return card.stepCard && !card.open;
+}
+
+/**
+ * Whether a URL-state write changed anything. A chip that is already lit can
+ * be clicked again; a select cannot re-fire its own value. Only a real change
+ * is a "Filter" event.
+ */
+export function queryChanged(before: string, after: string): boolean {
+  return before.replace(/^\?/, "") !== after.replace(/^\?/, "");
+}
+
+/**
  * The page a browser event happened on, as the App Router route where one
  * is known. `/matchups/3` and `/matchups/12` are one page, not two.
  */

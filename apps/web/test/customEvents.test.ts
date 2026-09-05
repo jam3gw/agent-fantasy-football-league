@@ -8,7 +8,18 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { EVENTS, LIVE_WATCH_SECONDS, MAX_LENGTH, MAX_PROPERTIES, buildEvent, filterUrl, pageOf } from "@/lib/analytics";
+import {
+  EVENTS,
+  LIVE_WATCH_SECONDS,
+  MAX_LENGTH,
+  MAX_PROPERTIES,
+  buildEvent,
+  countsAsStepOpen,
+  filterUrl,
+  pageOf,
+  queryChanged,
+} from "@/lib/analytics";
+import { beforeSend } from "@/components/analytics";
 
 const appRoot = fileURLToPath(new URL("..", import.meta.url));
 const read = (p: string) => readFileSync(`${appRoot}${p}`, "utf8");
@@ -93,26 +104,60 @@ describe("filterUrl (beforeSend)", () => {
 });
 
 describe("live watch", () => {
-  it("waits long enough that a bounce does not count, once per visit", () => {
+  it("waits long enough that a bounce does not count, once per mount, visible tab only", () => {
     expect(LIVE_WATCH_SECONDS).toBeGreaterThanOrEqual(30);
     const hook = read("lib/useLiveWatched.ts");
     expect(hook).toMatch(/setTimeout/);
     expect(hook).not.toMatch(/setInterval/);
+    expect(hook).toMatch(/const fired = useRef\(false\)/);
+    expect(hook).toMatch(/fired\.current = true/);
+    expect(hook).toMatch(/document\.visibilityState !== "visible"\) return;/);
+    expect(hook).toMatch(/addEventListener\("visibilitychange"/);
     expect(read("app/sessions/[id]/live.tsx")).toMatch(/useLiveWatched\("session", active\)/);
     expect(read("app/draft/live.tsx")).toMatch(/useLiveWatched\("draft", state\?\.status === "running"\)/);
   });
 });
 
 describe("step opened", () => {
-  it("is mounted on the transcript and skips bulk toggles from the rail", () => {
+  it("counts a click on a closed step card's summary and nothing else", () => {
+    expect(countsAsStepOpen({ stepCard: true, open: false })).toBe(true);
+    expect(countsAsStepOpen({ stepCard: true, open: true })).toBe(false);
+    expect(countsAsStepOpen({ stepCard: false, open: false })).toBe(false);
+  });
+
+  it("listens for clicks, not toggle, so React and the rail opening cards are not counted", () => {
     expect(read("components/session-view.tsx")).toMatch(/<StepOpenTracker \/>/);
     expect(read("components/session-steps.tsx")).toMatch(/data-step-kind=/);
-    const rail = read("components/session-rail.tsx");
-    expect(rail).toMatch(/card\.setAttribute\(BULK_TOGGLE_FLAG, ""\);\n\s+card\.open = next;/);
     const tracker = read("components/step-open-tracker.tsx");
-    expect(tracker).toMatch(/card\.hasAttribute\(BULK_TOGGLE_FLAG\)/);
-    expect(tracker).toMatch(/card\.removeAttribute\(BULK_TOGGLE_FLAG\)/);
-    expect(tracker).toMatch(/if \(!card\.open \|\| bulk\) return;/);
+    expect(tracker).toMatch(/addEventListener\("click", onClick, true\)/);
+    expect(tracker).not.toMatch(/"toggle"/);
+    expect(tracker).toMatch(/closest\("summary"\)/);
+    expect(read("components/session-rail.tsx")).not.toMatch(/step-open-tracker/);
+  });
+});
+
+describe("filter change", () => {
+  it("fires only when the URL state actually changed", () => {
+    expect(queryChanged("?team=a", "team=a")).toBe(false);
+    expect(queryChanged("", "")).toBe(false);
+    expect(queryChanged("?team=a", "team=b")).toBe(true);
+    expect(queryChanged("", "team=a")).toBe(true);
+    expect(read("components/list-controls.tsx")).toMatch(/if \(key && queryChanged\(before, query\)\) trackEvent/);
+  });
+});
+
+describe("beforeSend", () => {
+  it("drops admin events and rewrites the URL on the rest, keeping the event type", () => {
+    expect(beforeSend({ type: "event", url: "https://x/admin/health" })).toBeNull();
+    expect(beforeSend({ type: "pageview", url: "https://x/admin" })).toBeNull();
+    expect(beforeSend({ type: "pageview", url: "https://x/trades?team=a" })).toEqual({
+      type: "pageview",
+      url: "https://x/trades",
+    });
+    expect(beforeSend({ type: "event", url: "https://x/sessions/3#step-2" })).toEqual({
+      type: "event",
+      url: "https://x/sessions/3",
+    });
   });
 });
 
