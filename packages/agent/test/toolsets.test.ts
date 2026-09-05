@@ -72,7 +72,7 @@ describe("tool sets (§8.6)", () => {
   it("reporter kinds get reporter tools and read tools, but no team write tools", () => {
     for (const kind of ALL_KINDS.filter((k) => k.startsWith("reporter_"))) {
       const n = names(kind);
-      expect(n, kind).toContain("publish_report");
+      expect(n, kind).toContain(kind === "reporter_power_rankings" ? "publish_power_rankings" : "publish_report");
       expect(n, kind).toContain("get_session_transcript");
       expect(n, kind).toContain("get_team_scratchpad");
       // no team writes
@@ -171,13 +171,30 @@ describe("§8.10 — check-in tools", () => {
   });
 
   it("no reporter kind can schedule or cancel a check-in", () => {
-    for (const kind of ["reporter_draft_grades", "reporter_recap", "reporter_preview", "reporter_trade_note"] as const) {
+    for (const kind of REPORTER_KINDS) {
       const names = toolsForKind(kind).map((t) => t.name);
       expect(names).not.toContain("schedule_check_in");
       expect(names).not.toContain("cancel_check_in");
     }
   });
+
+  it("each reporter kind has exactly one ending tool, and the rankings kind cannot publish a post (§11)", () => {
+    for (const kind of REPORTER_KINDS) {
+      const names = toolsForKind(kind).map((t) => t.name);
+      const enders = names.filter((n) => n.startsWith("publish_"));
+      expect(enders, kind).toEqual([kind === "reporter_power_rankings" ? "publish_power_rankings" : "publish_report"]);
+      expect(names, kind).toContain("get_power_rankings");
+    }
+  });
 });
+
+const REPORTER_KINDS = [
+  "reporter_draft_grades",
+  "reporter_recap",
+  "reporter_preview",
+  "reporter_trade_note",
+  "reporter_power_rankings",
+] as const;
 
 describe("tool names are unique", () => {
   it("no two tools share a name", () => {

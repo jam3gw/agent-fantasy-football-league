@@ -67,6 +67,7 @@ describe("draft.completed (§9.3)", () => {
     const reviews = created.filter((s) => s.kind === "weekly_review");
     expect(reviews).toHaveLength(12);
     expect(created.filter((s) => s.kind === "reporter_draft_grades")).toHaveLength(1);
+    expect(created.filter((s) => s.kind === "reporter_power_rankings")).toHaveLength(1);
     // ...staggered, not all at once (§9.3).
     const dueTimes = new Set(reviews.map((r) => r.createdAt.getTime()));
     expect(dueTimes.size).toBeGreaterThan(0);

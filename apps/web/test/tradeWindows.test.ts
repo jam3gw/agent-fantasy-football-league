@@ -41,9 +41,9 @@ describe("no scheduled trade window (§2, 2026-09-05)", () => {
     expect(sync).toEqual(["2026-09-07T07:00:00.000Z"]);
   });
 
-  it("a trade_window booking row books no sessions when it fires, and fails loudly", async () => {
+  it("a trade_window booking row already on the calendar books no sessions when it fires", async () => {
     const clock = new FixedClock("2026-09-09T16:00:00Z"); // Wed noon ET
-    await expect(runJob(db, clock, "sessions.book", { kind: "trade_window" })).rejects.toThrow(/retired/);
+    await runJob(db, clock, "sessions.book", { kind: "trade_window" });
     expect(await db.select().from(sessions)).toEqual([]);
 
     await runJob(db, clock, "sessions.book", { kind: "post_waivers" });
@@ -81,5 +81,33 @@ describe("prices.sync job (§8.7)", () => {
       if (savedKey === undefined) delete process.env.AI_GATEWAY_API_KEY;
       else process.env.AI_GATEWAY_API_KEY = savedKey;
     }
+  });
+});
+
+describe("reporter bookings (§11)", () => {
+  it("books the rankings edition ahead of the recap on Tuesday", async () => {
+    const clock = new FixedClock("2026-09-07T04:05:00Z"); // Monday 00:05 ET
+    await bookRecurringJobs(db, clock);
+    const reporter = (await db.select().from(scheduledJobs).where(eq(scheduledJobs.type, "reporter.run")))
+      .map((j) => [j.payload.kind, j.dueAt.toISOString()])
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1])));
+    expect(reporter).toEqual([
+      ["reporter_power_rankings", "2026-09-08T14:30:00.000Z"],
+      ["reporter_recap", "2026-09-08T15:00:00.000Z"],
+      ["reporter_preview", "2026-09-10T14:00:00.000Z"],
+    ]);
+  });
+
+  it("a second rankings booking in the same week is a new session; a second recap is not", async () => {
+    await runJob(db, new FixedClock("2026-09-05T18:00:00Z"), "reporter.run", { kind: "reporter_power_rankings" }, { id: 1 });
+    await runJob(db, new FixedClock("2026-09-08T14:30:00Z"), "reporter.run", { kind: "reporter_power_rankings" }, { id: 2 });
+    // The same job row run twice (a stale claim released and re-run) is one session.
+    await runJob(db, new FixedClock("2026-09-08T15:05:00Z"), "reporter.run", { kind: "reporter_power_rankings" }, { id: 2 });
+    await runJob(db, new FixedClock("2026-09-08T15:00:00Z"), "reporter.run", { kind: "reporter_recap" });
+    await runJob(db, new FixedClock("2026-09-08T16:00:00Z"), "reporter.run", { kind: "reporter_recap" });
+    const booked = await db.select().from(sessions);
+    expect(booked.filter((s) => s.kind === "reporter_power_rankings")).toHaveLength(2);
+    expect(booked.filter((s) => s.kind === "reporter_recap")).toHaveLength(1);
+    expect(booked.every((s) => s.teamId === null)).toBe(true);
   });
 });

@@ -34,18 +34,101 @@ equal, the use of it is the agent's.
   page, and tests updated. `pnpm check` green: 868 tests.
 - Review round 1 (fresh reviewer): fixed stale comments in `jobs.ts`,
   `context.test.ts`, `watchdogs.test.ts`; dropped `trade_window` from the
-  `/admin/jobs` kind list and made a `sessions.book` row for it throw so it
-  lands in failed jobs instead of a silent `done`; the check-in brief now says
+  `/admin/jobs` kind list so no admin path books one; the check-in brief now says
   to skip trades after the deadline (the engine refuses them anyway); added
   `self_check_in` rows to the §8.3 and §8.6 tables (a pre-existing gap); a
   test that `propose_trade` and `post_message` reach the engine from a
   `self_check_in` session; §15.3 and Appendix F wording. Not changed: the
   "3 offers per rolling 24 hours" literal in the brief mirrors the
   `trade_window` brief and the system prompt renders the setting too.
+- Review round 2: the round-1 version made a queued `trade_window` booking row
+  throw, which would have put the one row already on the production calendar
+  under "Failed jobs" on `/admin/health` for a week. Reverted to "books
+  nothing" with a log line: the row was queued before the change, no admin
+  path can queue another, and a false failure is noise for Jake.
 - Cost: Appendix F's note updated. If agents do not book trade looks at all,
   the saving is the whole trade-window share (about 44% of tokens before this
   morning's cut). If every agent books five check-ins a week for trades it is
   a net increase over two windows, which the `agent_week` alarm will show.
+
+## 2026-09-05 — Jake: the reporter ranks the teams, with a reason for every place
+
+Jake looked at the home page's power rankings — "The Grimm Reapers, 1: spends
+the most in the league at $20.25, for 0.0 points" — and asked whether the
+reporter should be ranking the teams instead, with reasoning. It should; §11
+had said so since v1 and the page had quietly grown its own formula on
+2026-08-29 (win rate 0.5, points 0.35, lineup efficiency 0.15) because the
+redesign wanted a rankings block before the first recap existed. Before a game
+is played every input is zero, so the order was team-id order, and the "note"
+under each team was a fact chosen from a fixed list (spend, bad tool calls,
+bench points) that has nothing to do with why a team is ranked where it is.
+
+**What changed.**
+
+- A new reporter session kind, `reporter_power_rankings`, whose only ending
+  tool is `publish_power_rankings`: every team once, ranks 1–12 with no
+  repeats, one or two sentences of reasoning each (≤ 400 chars). The engine
+  validates the whole set and writes it as one edition in one transaction;
+  a session publishes once. `publish_report` is not in this kind's set, and
+  `publish_power_rankings` is not in the post kinds' sets, so no session can
+  end on the wrong tool (`toolsets.test.ts` walks every reporter kind).
+- `get_power_rankings` (all reporter kinds): the newest edition with each
+  team's reason and its movement, so the reporter can explain what changed
+  and the recap can point at the list instead of repeating it. The recap brief
+  loses its "rankings 1–12" item.
+- Booked Tuesday 10:30 AM ET, ahead of the 11:00 recap and the 11:30 digest,
+  and once after `draft.completed` (20 minutes after the grades) for a
+  preseason edition. The site shows the newest edition; movement is against
+  the one before, so an arrow means the reporter changed its mind.
+- The home page reads the edition (all twelve, with the reason as the line
+  under each team and a link to the session that decided it); `/report`
+  carries the same list above the posts. `powerScore` and `rankingBefore`
+  and their tests are gone. `benchmarkRows()` is still read once for the
+  leaderboard band.
+- Table `power_rankings` (migration 0007): unique on `(session_id, team_id)`
+  and `(session_id, rank)`. `pulse` includes its max id so the pages refresh
+  when an edition lands.
+
+**Choices.** An edition is keyed by session, not by week, so a re-run never
+overwrites and a preseason edition and a Tuesday edition in the same fantasy
+week both survive. `week` on the row is the week in play when it was
+published, for the heading. The reporter is told to rank on results, roster,
+moves, and lineup management — and, before the first game, on the draft and
+the trades — and to read its previous edition first. It is not shown the
+retired formula.
+
+**Review round (fresh context).** Two real findings, both fixed. (1) A
+rankings session was keyed by week like the recap, and `createSession` is
+on-conflict-do-nothing — so next Tuesday's 10:30 run, in the same fantasy
+week as today's edition, would have created nothing, silently, and so would
+the runbook's "book it again". Rankings sessions now key on the booking
+minute; post kinds keep the week key. Test added. (2) A session interrupted
+between the engine insert and the recorded tool result would resume, call
+`publish_power_rankings` again, be refused, and fail `no_report` with a live
+edition on the site. The engine now returns the edition already under that
+session as a success (`already_published: true`); the check moved inside the
+transaction. Spec §8.2 step 4 and the §9.3 `draft.completed` row now name the
+new kind. Round two: keying on the booking minute reopened a narrower hole
+— a `reporter.run` row the tick re-runs after a stale-claim release would
+have booked a second edition — so a rankings session is keyed to its job
+row (`job<id>`), with the minute only as the fallback for a direct call; and
+the edition-on-file check now runs before validation, so a resumed model
+that resends a broken set still ends on the edition it already published.
+Both have tests, including the resume itself in `session.test.ts`. Not done, recorded: the write records no `transactions` row and
+emits no event — the same as `reporter_posts`, since a ranking is the
+reporter's opinion and not league state; the zod cap of 12 mirrors the
+league's fixed size (§2) while the engine checks against the real team count.
+
+**Today's edition.** Jake asked for a ranking now, since the draft and six
+trades are in. Booked `reporter.run` with kind `reporter_power_rankings` on
+production after the deploy; the result is on `/` and `/report`.
+
+## 2026-09-05 — Sitemap: dropped the `/players` index URL
+
+The sitemap listed `/players`, but no players index page exists. Only
+`/players/[id]` does, and SPEC §12.1 specifies only the player card. The
+URL returned a 404 to crawlers. Removed `/players` from the sitemap's page
+list. No index page was built: the spec does not ask for one.
 
 ## 2026-09-05 — `/llms.txt` for outside agents
 
@@ -4242,5 +4325,10 @@ per-row table clicks (each row is a link), server-side events for league
 actions (the database already has them in full), and the Web Analytics API on
 `/about` (a vanity number for another token).
 
-Still for Jake, a dashboard setting not code: a Spend Management alert on the
-Vercel team, since Pro meters events with no cap.
+Jake has set a Spend Management alert on the Vercel team (a dashboard
+setting, not code), since Pro meters events with no cap. Nothing open.
+
+Merged to `main` as `fa7e353` after three review rounds (the third found
+nothing new) and green CI. Production confirmed: `/api/healthz` ok, and the
+client chunk served on `league.jake-moses.com` carries both the event
+vocabulary and the `/admin/` drop in `beforeSend`.

@@ -100,6 +100,7 @@ export const KIND_LABEL: Record<string, string> = {
   reporter_recap: "Weekly recap",
   reporter_preview: "Week preview",
   reporter_trade_note: "Trade note",
+  reporter_power_rankings: "Power rankings",
 };
 
 /** Every value the `kind` URL parameter accepts: the chips and the raw kinds. */

@@ -57,6 +57,13 @@ const LOG = ["write_decision_log"];
  */
 const CHECK_IN = ["schedule_check_in", "cancel_check_in", "list_check_ins"];
 
+/**
+ * The reporter's read tools (§8.4 table 3). Each reporter kind adds exactly
+ * one ending tool: a post kind gets `publish_report`, the rankings kind gets
+ * `publish_power_rankings`, so a session can never end on the wrong one.
+ */
+const REPORTER_READ = REPORTER_TOOLS.map((t) => t.name).filter((n) => !n.startsWith("publish_"));
+
 /** Read tools minus the scratchpad reader, which the scratchpad group re-adds. */
 const READ_ONLY_NO_PAD = READ.filter((n) => n !== "read_scratchpad");
 
@@ -183,10 +190,12 @@ export const SETS: Record<SessionKind, string[]> = {
     "read_scratchpad",
   ],
   smoke: ["get_league_state", ...LOG],
-  reporter_draft_grades: [...READ_ONLY_NO_PAD, ...REPORTER_TOOLS.map((t) => t.name)],
-  reporter_recap: [...READ_ONLY_NO_PAD, ...REPORTER_TOOLS.map((t) => t.name)],
-  reporter_preview: [...READ_ONLY_NO_PAD, ...REPORTER_TOOLS.map((t) => t.name)],
-  reporter_trade_note: [...READ_ONLY_NO_PAD, ...REPORTER_TOOLS.map((t) => t.name)],
+  reporter_draft_grades: [...READ_ONLY_NO_PAD, ...REPORTER_READ, "publish_report"],
+  reporter_recap: [...READ_ONLY_NO_PAD, ...REPORTER_READ, "publish_report"],
+  reporter_preview: [...READ_ONLY_NO_PAD, ...REPORTER_READ, "publish_report"],
+  reporter_trade_note: [...READ_ONLY_NO_PAD, ...REPORTER_READ, "publish_report"],
+  // The rankings session ends with publish_power_rankings, not a post (§11).
+  reporter_power_rankings: [...READ_ONLY_NO_PAD, ...REPORTER_READ, "publish_power_rankings"],
 };
 
 /** The tools a session of this kind may call. */

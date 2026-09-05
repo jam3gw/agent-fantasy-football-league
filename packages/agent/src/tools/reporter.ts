@@ -6,7 +6,12 @@ import { and, desc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { formatEt } from "@league/shared";
 import {
+  MAX_RANKING_REASON_LENGTH,
   decisionLogs,
+  getSettings,
+  latestPowerRankings,
+  publishPowerRankings,
+  rankingMovement,
   reporterPosts,
   scratchpads,
   sessionEvents,
@@ -213,10 +218,74 @@ export const publishReport = defineTool({
   },
 });
 
+export const getPowerRankings = defineTool({
+  name: "get_power_rankings",
+  description:
+    "The newest power rankings you published, with each team's reason and how it moved since the edition before. Empty before the first edition.",
+  schema: z.object({}),
+  async execute(_args, ctx) {
+    const denied = requireReporter(ctx);
+    if (denied) return denied;
+    const [current, previous] = await latestPowerRankings(ctx.db, 2);
+    if (!current) return { published: false, rankings: [] };
+    const allTeams = await ctx.db.select().from(teams);
+    const movement = rankingMovement(current, previous);
+    return {
+      published: true,
+      week: current.week,
+      published_at: formatEt(current.createdAt),
+      rankings: current.entries.map((e) => {
+        const t = allTeams.find((x) => x.id === e.teamId);
+        return {
+          rank: e.rank,
+          team_id: e.teamId,
+          team: t?.name ?? null,
+          model: t?.modelLabel ?? null,
+          moved: movement.get(e.teamId) ?? 0,
+          reason: e.reason,
+        };
+      }),
+    };
+  },
+});
+
+export const publishPowerRankingsTool = defineTool({
+  name: "publish_power_rankings",
+  description:
+    "Publish your power rankings: every team once, ranks 1 to 12, one or two sentences of reasoning each. This ends the session.",
+  ending: true,
+  schema: z.object({
+    rankings: z
+      .array(
+        z.object({
+          team_id: z.number().int(),
+          rank: z.number().int().min(1).max(12),
+          reason: z.string().min(1).max(MAX_RANKING_REASON_LENGTH),
+        }),
+      )
+      .min(1)
+      .max(12),
+  }),
+  async execute(args, ctx) {
+    const denied = requireReporter(ctx);
+    if (denied) return denied;
+    const week = (await getSettings(ctx.db)).currentWeek;
+    const res = await publishPowerRankings(ctx.db, ctx.clock, {
+      sessionId: ctx.sessionId,
+      week,
+      entries: args.rankings.map((r) => ({ teamId: r.team_id, rank: r.rank, reason: r.reason })),
+    });
+    if (!res.ok) return toolFailure(res.error, res.message);
+    return { published: true, week, count: res.value.count, already_published: res.value.alreadyPublished };
+  },
+});
+
 export const REPORTER_TOOLS: LeagueTool[] = [
   getDecisionLogs,
   getTeamScratchpad,
   listSessions,
   getSessionTranscript,
+  getPowerRankings,
   publishReport,
+  publishPowerRankingsTool,
 ];
