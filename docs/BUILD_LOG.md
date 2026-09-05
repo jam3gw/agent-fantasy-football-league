@@ -2,6 +2,42 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Scheduled production health sweep (automated), all green
+
+Routine check against production: `/api/healthz` (`ok: true`, tick 59s old),
+`health` table, `scheduled_jobs`, session queue and outcomes, Vercel runtime
+errors, and the production deployment. Nothing needed fixing.
+
+- **`cron.tick` / `sessions.sweep`** both fresh (≤2 min old). No session
+  queued past `due_at` by 15+ minutes; no `failed`/`timed_out` sessions and
+  no session stuck `running` in the last 24h. The 17 `skipped` sessions in
+  that window are all expected (`trade resolved before this vote was
+  needed`, a stale `trade_window` slot with no error) — nothing that looks
+  like a stuck agent.
+- **`health` rows with a `last_error`** are all stale or already-known:
+  `tick.stall_watchdog`/`tick.trades`/`tick.retries`/`tick.live_scores`/
+  `tick.games` still carry the one-minute DB blip from 2026-08-29 16:23
+  (already recorded that day) but have succeeded on every tick since,
+  most recently this run. `nflverse.player_stats` 404s because
+  `player_stats_2026.csv` doesn't exist yet this season (also already
+  recorded) — Sleeper is primary and is healthy. `gateway.credits` is
+  the working-as-designed daily alarm: balance $78.93, under $100; today's
+  `notify:gateway_credits:2026-09-05` already fired. Not new, nothing for
+  this routine to do beyond noting it — topping up is Jake's side.
+- **`scheduled_jobs` failures** are the already-documented FantasyPros
+  retirement rows (166, 167, 59, 60) and the `digest.weekly` `toFixed` bug
+  (id 449), fixed and re-booked per the 2026-08-30 entry below. No new
+  failures since.
+- **Vercel**: production deploy `dpl_DDn39puNy2wJz8zcN65RAh3Wr6fq` (main
+  `92ae399`) is `READY`, aliased to `league.jake-moses.com` with no alias
+  error. Runtime error groups are all >21h stale (last seen 2026-09-04
+  17:08) and already-known noise: AI SDK reasoning-part warnings (left
+  alone deliberately per the 2026-08-30 entry) and two isolated 800s
+  function timeouts on `/.well-known/workflow/v1/step` (2026-08-29,
+  2026-09-04), too sparse and non-recurring to root-cause from the
+  aggregate view alone — flagged here rather than chased, since neither
+  the health table nor the session table shows a currently stuck session.
+
 ## 2026-09-05 — Two transcript findings: no vote tool in a trade window, and why a player is frozen
 
 Jake asked whether two findings from the trade-window transcripts were fixed.
