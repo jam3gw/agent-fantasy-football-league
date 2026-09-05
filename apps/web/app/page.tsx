@@ -40,8 +40,8 @@ import {
   leagueClockState,
   powerRankings,
   seasonTimeline,
+  nextKickoff,
   teamName,
-  weekKickoff,
   type ActivityItem,
   type GameCard,
 } from "@/lib/broadcast";
@@ -181,7 +181,7 @@ export default async function HomePage() {
     safe(latestReporterPost, undefined),
     rowsPromise,
     safe(() => liveStatus(), { liveGames: 0, lastUpdateAt: null, delayed: false }),
-    weekKickoff(week, season),
+    nextKickoff(week, season),
     lastMoveAt(),
   ]);
 
@@ -191,7 +191,11 @@ export default async function HomePage() {
   const [lead, ...stream] = activity;
   const leadBy = lead ? byline(lead, teamsById) : null;
   const isLive = live.liveGames > 0;
-  const liveCards = cards.filter((c) => gameStatus(c.final, c.slotsToPlay, c.started) === "live").length;
+  const statuses = cards.map((c) => gameStatus(c.final, c.slotsToPlay, c.started));
+  const liveCards = statuses.filter((s) => s === "live").length;
+  // The header's stamp: how many games are on; else that the week is done;
+  // else the kickoff, which `nextKickoff` only offers while it is ahead.
+  const weekDone = cards.length > 0 && statuses.every((s) => s === "final");
 
   // Before the draft the page carries the draft's state under the lead.
   const draftRow = preDraft ? (await safe(() => db().select().from(draft).where(eq(draft.id, 1)), []))[0] : undefined;
@@ -216,9 +220,13 @@ export default async function HomePage() {
       <Container className="pt-10">
         {lead ? (
           <div>
+            {/* A failure is the newest thing often enough that the lead must
+                not dress it in the site's "good" green with a live dot. */}
             <div className="flex items-center gap-2.5">
-              <LiveDot />
-              <span className="text-[12px] font-bold uppercase tracking-[0.12em] text-accent">
+              {lead.bad ? null : <LiveDot />}
+              <span
+                className={`text-[12px] font-bold uppercase tracking-[0.12em] ${lead.bad ? "text-danger" : "text-accent"}`}
+              >
                 Latest · {lead.kind} · {formatEtRecent(lead.at)}
               </span>
             </div>
@@ -326,17 +334,19 @@ export default async function HomePage() {
 
           <div>
             <div className="flex items-baseline justify-between gap-3 border-b-2 border-foreground pb-2.5">
-              <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">
+              <h2 className="text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">
                 Week {week} matchups
-              </span>
+              </h2>
               <span className="text-[11px] text-faint">
                 {isLive
                   ? `${liveCards} of ${cards.length} live`
-                  : kickoff
-                    ? `kickoff ${kickoff.toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short" })} ${formatEtTime(kickoff)}`
-                    : lastMove
-                      ? `last move ${formatEtTime(lastMove)}`
-                      : ""}
+                  : weekDone
+                    ? "all final"
+                    : kickoff
+                      ? `kickoff ${kickoff.toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short" })} ${formatEtTime(kickoff)}`
+                      : lastMove
+                        ? `last move ${formatEtRecent(lastMove)} ET`
+                        : ""}
               </span>
             </div>
             {cards.length === 0 ? (
@@ -438,7 +448,7 @@ export default async function HomePage() {
       {/* The season so far, with the rest of the site along the top. */}
       <Container className="pb-14 pt-12">
         <div className="mb-[18px] flex flex-wrap items-baseline justify-between gap-x-5 gap-y-2">
-          <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">Season so far</span>
+          <h2 className="text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">Season so far</h2>
           <nav className="flex flex-wrap gap-x-5 gap-y-1 text-[13px]" aria-label="Around the league">
             {SEASON_LINKS.map(([href, label]) => (
               <Link key={href} href={href} className="text-muted hover:text-accent">

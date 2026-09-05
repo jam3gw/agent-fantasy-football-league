@@ -22,6 +22,7 @@ import {
   summarizeBody,
   teamName,
   transactionPlayerIds,
+  truncateFlat,
   remainingPoints,
   winChanceFromMargin,
   winChancePercent,
@@ -649,12 +650,48 @@ describe("a headline out of an agent's paragraph", () => {
     expect(headline).not.toMatch(/^[^*]*\*\*[^*]*$/);
   });
 
-  it("flattens block markdown first, so a heading is not a headline with hashes", () => {
-    expect(splitHeadline("## The plan\n- Start **Gibbs**.").headline).toBe("The plan Start **Gibbs**.");
+  it("treats a line break as a sentence end, so a heading over bullets is not one run-on", () => {
+    // Models write summaries as a heading and a list as often as prose;
+    // flattening alone joined these with a space and the h1 was cut mid-list.
+    const text =
+      "## Week 1 plan\n- Start **Gibbs** at RB1 because the matchup is soft\n- Bench Wright until the bye is over\n- Claim Allgeier";
+    expect(splitHeadline(text)).toEqual({
+      headline: "Week 1 plan. Start **Gibbs** at RB1 because the matchup is soft.",
+      body: "Bench Wright until the bye is over. Claim Allgeier.",
+    });
+    expect(splitHeadline("## The plan\n- Start **Gibbs**.").headline).toBe("The plan. Start **Gibbs**.");
+  });
+
+  it("leaves a line that runs on by intent alone, and fenced code to the flattener", () => {
+    expect(splitHeadline("My plan:\n- Start Gibbs,\n- and bench Wright\n```\nnot prose\n```\nDone").headline).toBe(
+      "My plan: Start Gibbs, and bench Wright. Done.",
+    );
+    expect(splitHeadline("Above\n---\nBelow").headline).toBe("Above. Below.");
+  });
+
+  it("does not take an abbreviation for a sentence end", () => {
+    const text =
+      "Sat Rice over Jennings in the FLEX vs. the Chargers because the snap share favours him. Jennings stays on the bench.";
+    expect(splitHeadline(text).headline).toBe(
+      "Sat Rice over Jennings in the FLEX vs. the Chargers because the snap share favours him.",
+    );
   });
 
   it("returns an empty headline for text that is all fenced code, for the caller to fill", () => {
     expect(splitHeadline("```\ncode\n```")).toEqual({ headline: "", body: "" });
+  });
+});
+
+describe("truncating text that is already one line", () => {
+  it("does not strip a marker-shaped opening the way a second flatten would", () => {
+    // The body under a headline is a slice of flattened text; the "2." that
+    // starts it is what is left of a numbered list, not a list marker.
+    expect(truncateFlat("2. Dropped Wright.", 100)).toBe("2. Dropped Wright.");
+    expect(truncateFlat("- item one", 100)).toBe("- item one");
+  });
+
+  it("cuts the same way the excerpts do", () => {
+    expect(truncateFlat("a".repeat(200), 50)).toHaveLength(51);
   });
 });
 
@@ -701,12 +738,22 @@ describe("what the wire says", () => {
     );
   });
 
-  it("has a line for every way an offer can end, and none of them carries the message", () => {
-    for (const status of ["rejected", "countered", "cancelled", "expired", "failed", "superseded", "new"]) {
-      const line = describeTradeWire({ ...deal, status });
-      expect(line).toContain("Second Overall");
-      expect(line).not.toMatch(/undefined|null/);
-    }
+  it("has a line for every way an offer can end", () => {
+    const line = (status: string) => describeTradeWire({ ...deal, status });
+    expect(line("rejected")).toBe("Terra Nova turns down Second Overall: Alvin Kamara for Garrett Wilson");
+    expect(line("countered")).toBe("Terra Nova counters Second Overall's offer of Alvin Kamara for Garrett Wilson");
+    expect(line("cancelled")).toBe("Second Overall withdraws its offer to Terra Nova");
+    expect(line("expired")).toBe("Second Overall's offer to Terra Nova expires unanswered");
+    expect(line("failed")).toBe("Second Overall–Terra Nova falls through: Alvin Kamara for Garrett Wilson");
+    expect(line("new")).toBe("Second Overall and Terra Nova: Alvin Kamara for Garrett Wilson");
+  });
+
+  it("does not credit the proposer with an action when the engine supersedes its offer", () => {
+    // trades.ts marks an open offer superseded when a different trade in
+    // review takes one of its players; nobody replaced anything.
+    expect(describeTradeWire({ ...deal, status: "superseded" })).toBe(
+      "Second Overall's offer to Terra Nova lapses: a player in it is in a trade under review",
+    );
   });
 
   it("reads a processed claim either way it went", () => {
@@ -725,8 +772,8 @@ describe("what the wire says", () => {
   });
 
   it("counts a waiver run", () => {
-    expect(describeWaiverRunWire(1, 9, 7)).toBe("Week 1 waivers ran: 9 claims, 7 landed");
-    expect(describeWaiverRunWire(null, 1, 1)).toBe("Waivers ran: 1 claim, 1 landed");
-    expect(describeWaiverRunWire(null, 0, 0)).toBe("Waivers ran: no claims");
+    expect(describeWaiverRunWire(9, 7)).toBe("Waivers ran: 9 claims, 7 landed");
+    expect(describeWaiverRunWire(1, 1)).toBe("Waivers ran: 1 claim, 1 landed");
+    expect(describeWaiverRunWire(0, 0)).toBe("Waivers ran: no claims");
   });
 });

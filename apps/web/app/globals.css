@@ -3,8 +3,7 @@
 /*
  * The Jake Moses design system (`_ds/.../tokens/*.css` in the design handoff):
  * warm paper rather than white, a golf-course green accent, and a near-black
- * band colour that the masthead, the leaderboard and the matchup hero all sit
- * on. Single theme by design decision — the system removed its dark tokens and
+ * band colour that the masthead and the matchup hero sit on. Single theme by design decision — the system removed its dark tokens and
  * its theme toggle, so there is no `prefers-color-scheme` branch here either.
  *
  * The semantic names below (`--background`, `--surface`, `--muted`, …) are the
@@ -123,8 +122,8 @@ a:hover {
   overscroll-behavior-x: contain;
 }
 
-/* Same rule for the horizontal strips the broadcast layout scrolls: the
-   season timeline and the leaderboard's metric tabs. */
+/* Same rule for the horizontal strips the broadcast layout scrolls, such as
+   the season timeline. */
 .scroll-x {
   overflow-x: auto;
   min-width: 0;
@@ -159,6 +158,13 @@ a:hover {
   display: flex;
   width: max-content;
   animation: ticker-slide 52s linear infinite;
+}
+
+/* A reader who puts the pointer on a line, or tabs to the viewport, is
+   reading it: the track holds still until they leave. */
+.ticker-viewport:hover .ticker-track,
+.ticker-viewport:focus-within .ticker-track {
+  animation-play-state: paused;
 }
 
 .live-dot {

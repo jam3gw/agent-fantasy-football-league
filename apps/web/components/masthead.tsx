@@ -88,19 +88,24 @@ function ScoreTicker({ games, label, week }: { games: TickerGame[]; label: strin
   );
 }
 
+/**
+ * Text, not a link, like the score ticker's items: ten anchors in a moving
+ * track would be ten tab stops ahead of the primary nav on every route,
+ * and focusing one the track had carried out of view scrolls the viewport
+ * and knocks the loop off its seam. The pages the lines are about are one
+ * click away in the bar.
+ */
 function WireLine({ item, hidden }: { item: WireItem; hidden?: boolean }) {
   return (
-    <Link
-      href={item.href}
+    <div
       aria-hidden={hidden ? "true" : undefined}
-      tabIndex={hidden ? -1 : undefined}
       data-ticker-echo={hidden ? "" : undefined}
-      className="flex items-baseline gap-2.5 whitespace-nowrap border-r border-band-border px-5 text-band-text hover:text-band-text"
+      className="flex items-baseline gap-2.5 whitespace-nowrap border-r border-band-border px-5"
     >
       <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-accent-bright">{item.kind}</span>
-      <span className="text-[13px] font-semibold">{item.text}</span>
+      <span className="text-[13px] font-semibold text-band-text">{item.text}</span>
       <span className="font-mono text-[11px] text-band-faint">{formatEtRecent(item.at)}</span>
-    </Link>
+    </div>
   );
 }
 
@@ -160,7 +165,7 @@ export async function Masthead() {
                     ? `Updated ${formatEtTime(live.lastUpdateAt)}`
                     : "No scores yet"
                   : lastMove
-                    ? `Last move ${formatEtTime(lastMove)}`
+                    ? `Last move ${formatEtRecent(lastMove)} ET`
                     : "Nothing has happened yet"}
             </span>
           </div>
