@@ -6,8 +6,9 @@
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { PUBLIC_API_ROUTES, renderLlmsTxt } from "../lib/llms";
+import { TRANSACTION_TYPES } from "../lib/transactionTypes";
 
 vi.mock("../lib/db", () => ({
   db: () => {
@@ -68,11 +69,49 @@ describe("llms.txt", () => {
     expect(text).toContain("60 requests per minute");
   });
 
-  it("states the transaction types the route accepts", () => {
+  it("prints the transaction type list the route validates against", () => {
     const text = renderLlmsTxt(sample);
-    for (const t of ["draft_pick", "add", "drop", "waiver_add", "trade", "ir_move", "lineup", "commissioner"]) {
-      expect(text).toContain(t);
+    expect(text).toContain(`\`type\` in ${TRANSACTION_TYPES.join(", ")}.`);
+  });
+
+  it("names the real matchup lineup keys, not prose approximations", () => {
+    const text = renderLlmsTxt(sample);
+    expect(text).toContain("slot, playerId, name, position, nflTeam, and points");
+    expect(text).toContain("`currentWeek`");
+  });
+
+  it("lists every public page from the sitemap plus the dynamic ones", () => {
+    const text = renderLlmsTxt(sample);
+    for (const path of ["/", "/about", "/benchmark", "/standings", "/board", "/trades", "/transactions", "/waivers", "/players/{id}", "/report", "/spend", "/draft", "/sessions", "/teams", "/matchups/1"]) {
+      expect(text, path).toContain(`${sample.base}${path})`);
     }
+  });
+
+  it("handles a season with no current week or phase yet", () => {
+    const text = renderLlmsTxt({ ...sample, week: null, phase: null });
+    expect(text).toContain("Season 2026, week ?, phase `unknown`.");
+  });
+
+  describe("baseUrl", () => {
+    const saved = process.env.SITE_DOMAIN;
+    afterEach(() => {
+      if (saved === undefined) delete process.env.SITE_DOMAIN;
+      else process.env.SITE_DOMAIN = saved;
+    });
+
+    it("is absolute when SITE_DOMAIN is set", async () => {
+      process.env.SITE_DOMAIN = "league.example.com";
+      const { baseUrl } = await import("../app/llms.txt/route");
+      expect(baseUrl()).toBe("https://league.example.com");
+    });
+
+    it("is empty, so links are relative, when SITE_DOMAIN is unset", async () => {
+      delete process.env.SITE_DOMAIN;
+      const { baseUrl } = await import("../app/llms.txt/route");
+      expect(baseUrl()).toBe("");
+      const text = renderLlmsTxt({ ...sample, base: baseUrl() });
+      expect(text).toContain("[Standings](/api/public/standings)");
+    });
   });
 
   it("serves markdown with a cache window even when the database is down", async () => {
