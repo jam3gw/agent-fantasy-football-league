@@ -654,3 +654,65 @@ describe("accept re-validation (§3.5)", () => {
     expect((await dropPlayer(db, clock, ids[1]!, b)).ok).toBe(true);
   });
 });
+
+describe("roster reservation across trades in review (§3.1, §3.5)", () => {
+  /** Fill `teamId` to 14 active with unlocked players named `${prefix}0..13`. */
+  async function fill(teamId: number, prefix: string): Promise<string[]> {
+    const ids: string[] = [];
+    for (let i = 0; i < 14; i++) ids.push(await owned(teamId, `${prefix}${i}`));
+    return ids;
+  }
+
+  it("a team at 14 with a 1-for-1 in review can still accept a second 1-for-1", async () => {
+    // Production week 1: a 1-for-1 accept failed with 'roster_illegal' at 15
+    // because the counterparty's other 1-for-1 in review reserved its incoming
+    // player without crediting the outgoing one.
+    const ids = await setup();
+    const clock = new FixedClock(T0);
+    const a = await fill(ids[0]!, "a");
+    const b = await fill(ids[1]!, "b");
+    const c = await fill(ids[2]!, "c");
+
+    // ids[1] ↔ ids[2] 1-for-1, accepted into review
+    const first = await proposeTrade(db, clock, ids[2]!, { toTeamId: ids[1]!, givePlayerIds: [c[0]!], getPlayerIds: [b[0]!] });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect((await respondToTrade(db, clock, ids[1]!, first.value.tradeId, "accept")).ok).toBe(true);
+
+    // ids[0] → ids[1] 1-for-1 while the first is in review: both rosters stay at 14
+    const second = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[1]!, givePlayerIds: [a[0]!], getPlayerIds: [b[1]!] });
+    expect(second.ok).toBe(true);
+    if (!second.ok) return;
+    const acc = await respondToTrade(db, clock, ids[1]!, second.value.tradeId, "accept");
+    expect(acc.ok).toBe(true);
+    expect((await tradeRow(second.value.tradeId)).status).toBe("accepted");
+  });
+
+  it("a 2-for-1 in review still reserves its net gain of one spot", async () => {
+    const ids = await setup();
+    const clock = new FixedClock(T0);
+    const a: string[] = [];
+    for (let i = 0; i < 13; i++) a.push(await owned(ids[0]!, `a${i}`)); // 13 active
+    const b0 = await owned(ids[1]!, "b0");
+    const b1 = await owned(ids[1]!, "b1");
+    const c0 = await owned(ids[2]!, "c0");
+    const c1 = await owned(ids[2]!, "c1");
+
+    // ids[0] gives 1, gets 2 → net +1 held while in review: 13 + 1 = 14 on paper
+    const first = await proposeTrade(db, clock, ids[1]!, {
+      toTeamId: ids[0]!,
+      givePlayerIds: [b0, b1],
+      getPlayerIds: [a[0]!],
+    });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    expect((await respondToTrade(db, clock, ids[0]!, first.value.tradeId, "accept")).ok).toBe(true);
+
+    // a further 1-for-1 is fine: 13 − 1 + 1 + 1 reserved = 14
+    const swap = await proposeTrade(db, clock, ids[2]!, { toTeamId: ids[0]!, givePlayerIds: [c0], getPlayerIds: [a[1]!] });
+    expect(swap.ok).toBe(true);
+    // a 1-for-0 gift is not: 13 + 1 + 1 reserved = 15
+    const gift = await proposeTrade(db, clock, ids[2]!, { toTeamId: ids[0]!, givePlayerIds: [c1], getPlayerIds: [] });
+    expect(gift).toMatchObject({ ok: false, error: "roster_illegal" });
+  });
+});

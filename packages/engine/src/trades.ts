@@ -15,7 +15,7 @@ import type { EngineErrorCode, EngineFailure, EngineResult } from "./errors.ts";
 import { fail, ok } from "./errors.ts";
 import { handleEvent } from "./events.ts";
 import { lockedPlayerIds } from "./locks.ts";
-import { irOccupant, maxActiveRoster } from "./roster.ts";
+import { incomingReservedCount, irOccupant, maxActiveRoster } from "./roster.ts";
 import type { LeagueSettings } from "./settings.ts";
 import { getSettings } from "./settings.ts";
 import { recordTransaction } from "./transactions.ts";
@@ -82,25 +82,6 @@ export async function frozenPlayerIdsExcluding(
   return frozen;
 }
 
-/** roster.ts `incomingReservedCount` with one trade excluded. */
-async function incomingReservedExcluding(
-  tx: EngineDb,
-  teamId: number,
-  excludeTradeId?: number,
-): Promise<number> {
-  const conditions: Array<SQL<unknown> | undefined> = [
-    eq(trades.status, "accepted"),
-    or(eq(trades.proposerTeamId, teamId), eq(trades.counterpartyTeamId, teamId)),
-  ];
-  if (excludeTradeId !== undefined) conditions.push(ne(trades.id, excludeTradeId));
-  const inReview = await tx.select().from(trades).where(and(...conditions));
-  let count = 0;
-  for (const t of inReview) {
-    count += t.proposerTeamId === teamId ? t.getPlayerIds.length : t.givePlayerIds.length;
-  }
-  return count;
-}
-
 /** Subset of `playerIds` NOT on `teamId`'s roster. */
 async function notOwned(tx: EngineDb, teamId: number, playerIds: string[]): Promise<string[]> {
   if (playerIds.length === 0) return [];
@@ -134,7 +115,7 @@ async function activeAfterTrade(
   const size = roster.filter((r) => !out.has(r.playerId)).length + incoming.length;
   const ir = await irOccupant(tx, teamId, week);
   const irFilled = ir !== null && !out.has(ir) && roster.some((r) => r.playerId === ir);
-  const reserved = await incomingReservedExcluding(tx, teamId, excludeTradeId);
+  const reserved = await incomingReservedCount(tx, teamId, week, excludeTradeId);
   return size - (irFilled ? 1 : 0) + reserved;
 }
 
