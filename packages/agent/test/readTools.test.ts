@@ -909,7 +909,25 @@ describe("get_pending_trades", () => {
     const json = JSON.stringify(res);
     expect(json).not.toContain("COLLUSION SUSPECTED");
     expect(json).not.toContain("fine by me");
-    expect(review.i_can_vote).toBe(true);
+    // c already voted, and this is a lineup_check: no vote here.
+    expect(review.my_vote).toBe("cast");
+    expect(review.i_can_vote).toBe(false);
+    expect(res.votes_note).toBeUndefined();
+
+    // A team that still owes the vote is told where it is cast, outside trade_vote...
+    const [, , , , e] = teamIds as number[];
+    const owed = ok(await getPendingTradesTool.execute({}, ctxFor({ teamId: e, kind: "trade_window" as SessionKind })));
+    const owedRow = (owed.trades_in_review as Array<Record<string, unknown>>)[0]!;
+    expect(owedRow.my_vote).toBe("owed");
+    expect(owedRow.i_can_vote).toBe(false);
+    expect(owed.votes_note).toContain("separate trade_vote session");
+    // ...and can vote in the trade_vote session itself.
+    const inVote = ok(await getPendingTradesTool.execute({}, ctxFor({ teamId: e, kind: "trade_vote" as SessionKind })));
+    expect((inVote.trades_in_review as Array<Record<string, unknown>>)[0]!.i_can_vote).toBe(true);
+    expect(inVote.votes_note).toBeUndefined();
+    // A party never votes.
+    const asParty = ok(await getPendingTradesTool.execute({}, ctxFor({ teamId: a })));
+    expect((asParty.trades_in_review as Array<Record<string, unknown>>)[0]!.my_vote).toBe("not_a_voter");
   });
 
   it("separates offers to me from offers I sent", async () => {
