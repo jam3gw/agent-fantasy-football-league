@@ -11,6 +11,7 @@ import { FixedClock } from "@league/shared";
 import {
   decisionLogs,
   initLeagueSettings,
+  powerRankings,
   sessionEvents,
   sessions,
   spendLedger,
@@ -20,6 +21,7 @@ import {
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { runSession, endingToolFor, type ModelStepResult, type RunSessionDeps } from "../src/session.ts";
 import { defineTool, type LeagueTool, type ToolContext } from "../src/tools/types.ts";
+import { publishPowerRankingsTool } from "../src/tools/reporter.ts";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -552,6 +554,64 @@ describe("§4.1 — resuming a session that died mid-batch", () => {
     expect(result.status).toBe("succeeded");
     expect(result.endedBy).toBe("ending_tool");
     expect(toolRuns).toEqual([]);
+  });
+
+  it("a rankings session interrupted after the insert but before the result ends on the resend (§11)", async () => {
+    // The transcript shows the call with no result, and the edition is on
+    // file under this session: the process died between the two writes.
+    const rows = await db
+      .insert(sessions)
+      .values({
+        teamId: null,
+        kind: "reporter_power_rankings",
+        trigger: "test",
+        idempotencyKey: "rankings-resume",
+        modelId: "test/model",
+        status: "running",
+        context: { deadline_at: new Date(clock.now().getTime() + 3600_000).toISOString(), tool_call_ceiling: 5 },
+      })
+      .returning({ id: sessions.id });
+    const sessionId = rows[0]!.id;
+    const [team] = await db
+      .insert(teams)
+      .values({ slug: "r1", name: "Ranked", modelId: "test/model", modelLabel: "Test", provider: "test", tiebreakRand: 0.5 })
+      .returning({ id: teams.id });
+    const args = { rankings: [{ team_id: team!.id, rank: 1, reason: "Only team." }] };
+    await db.insert(powerRankings).values({ week: 2, teamId: team!.id, rank: 1, reason: "Only team.", sessionId });
+    await db.insert(sessionEvents).values([
+      { sessionId, seq: 0, type: "system", content: { prompt: "system" } },
+      { sessionId, seq: 1, type: "user", content: { brief: "brief", snapshot: {} } },
+      {
+        sessionId,
+        seq: 2,
+        type: "assistant",
+        content: {
+          text: "ranking",
+          tool_calls: [{ name: "publish_power_rankings", args, id: "c1" }],
+          raw: {
+            role: "assistant",
+            content: [{ type: "tool-call", toolCallId: "c1", toolName: "publish_power_rankings", input: args }],
+          },
+        },
+      },
+    ]);
+
+    const result = await runSession(sessionId, {
+      ...deps([
+        step({
+          toolCalls: [{ toolCallId: "c2", toolName: "publish_power_rankings", args }],
+          assistantMessage: {
+            role: "assistant",
+            content: [{ type: "tool-call", toolCallId: "c2", toolName: "publish_power_rankings", input: args }],
+          } as never,
+        }),
+      ]),
+      tools: [publishPowerRankingsTool],
+    });
+    expect(result.status).toBe("succeeded");
+    expect(result.endedBy).toBe("ending_tool");
+    // One edition, not two.
+    expect(await db.select().from(powerRankings).where(eq(powerRankings.sessionId, sessionId))).toHaveLength(1);
   });
 
   it("a session that already published is not recorded skipped when its window has closed", async () => {

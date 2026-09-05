@@ -59,7 +59,13 @@ between the engine insert and the recorded tool result would resume, call
 edition on the site. The engine now returns the edition already under that
 session as a success (`already_published: true`); the check moved inside the
 transaction. Spec §8.2 step 4 and the §9.3 `draft.completed` row now name the
-new kind. Not done, recorded: the write records no `transactions` row and
+new kind. Round two: keying on the booking minute reopened a narrower hole
+— a `reporter.run` row the tick re-runs after a stale-claim release would
+have booked a second edition — so a rankings session is keyed to its job
+row (`job<id>`), with the minute only as the fallback for a direct call; and
+the edition-on-file check now runs before validation, so a resumed model
+that resends a broken set still ends on the edition it already published.
+Both have tests, including the resume itself in `session.test.ts`. Not done, recorded: the write records no `transactions` row and
 emits no event — the same as `reporter_posts`, since a ranking is the
 reporter's opinion and not league state; the zod cap of 12 mirrors the
 league's fixed size (§2) while the engine checks against the real team count.

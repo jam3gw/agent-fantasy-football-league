@@ -42,6 +42,15 @@ export async function publishPowerRankings(
   clock: Clock,
   args: { sessionId: number; week: number; entries: PowerRankingEntry[] },
 ): Promise<EngineResult<{ count: number; alreadyPublished: boolean }>> {
+  // The resumed-session case first (§8.2): the insert landed, the recorded
+  // tool result did not, and the model is calling again — possibly with a
+  // different set. The edition on file is the answer, whatever it sent.
+  const already = await db
+    .select({ id: powerRankings.id })
+    .from(powerRankings)
+    .where(eq(powerRankings.sessionId, args.sessionId));
+  if (already.length > 0) return ok({ count: already.length, alreadyPublished: true });
+
   const allTeams = await db.select({ id: teams.id, name: teams.name }).from(teams);
   const teamIds = new Set(allTeams.map((t) => t.id));
   const seenTeams = new Set<number>();
@@ -68,10 +77,7 @@ export async function publishPowerRankings(
 
   const now = clock.now();
   return db.transaction(async (tx) => {
-    // A session publishes once. An edition already under this session is the
-    // interrupted-and-resumed case (§8.2): the insert landed, the tool result
-    // did not, and the model is calling again — that is a success, not a
-    // second edition, so the session can end on it.
+    // Re-checked inside the transaction for the concurrent-call case.
     const existing = await tx
       .select({ id: powerRankings.id })
       .from(powerRankings)
