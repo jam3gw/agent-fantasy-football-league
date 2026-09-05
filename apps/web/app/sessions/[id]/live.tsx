@@ -13,6 +13,7 @@
  * stands as the complete record.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLiveWatched } from "@/lib/useLiveWatched";
 import useSWR from "swr";
 import { LiveDot } from "@/components/broadcast";
 import { SessionFacts, SessionHeader, SessionTranscript } from "@/components/session-view";
@@ -125,6 +126,7 @@ export default function LiveSession({
 
   const active = ACTIVE_STATUSES.has(summary.status);
   const elapsed = useElapsed(summary.startedAt, active);
+  useLiveWatched("session", active);
 
   const fetchLive = useCallback(async (): Promise<LiveResponse> => {
     const res = await fetch(`/api/public/sessions/${sessionId}/live?after=${after.current}`, {

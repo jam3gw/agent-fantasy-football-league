@@ -17,6 +17,7 @@
 import { useEffect, useState } from "react";
 import { EVENTS } from "@/lib/analytics";
 import { trackEvent } from "@/lib/track";
+import { BULK_TOGGLE_FLAG } from "@/components/step-open-tracker";
 
 export interface RailStep {
   n: number;
@@ -58,6 +59,10 @@ export function SessionRail({ steps, note }: { steps: RailStep[]; note?: string 
   const toggleAll = () => {
     const next = !allOpen;
     document.querySelectorAll<HTMLDetailsElement>("[data-step-card]").forEach((card) => {
+      if (card.open === next) return;
+      // `toggle` fires later, as its own task; the mark tells StepOpenTracker
+      // this one was not a reader opening a step, and it clears the mark.
+      card.setAttribute(BULK_TOGGLE_FLAG, "");
       card.open = next;
     });
     setAllOpen(next);
