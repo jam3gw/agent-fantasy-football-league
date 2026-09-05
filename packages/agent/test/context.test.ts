@@ -8,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
-import { playerWeekProj, players, scheduleCheckIn, sessions, teams } from "@league/engine";
+import { playerWeekProj, players, scheduleCheckIn, sessions, teams, trades } from "@league/engine";
 import { buildContextSnapshot } from "../src/context.ts";
 import type { ToolContext } from "../src/tools/types.ts";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
@@ -190,5 +190,35 @@ describe("scheduled sessions in the snapshot (§8.5, §8.10)", () => {
 
     const snapshot = await buildContextSnapshot(ctxFor({ teamId: a, clock }));
     expect(snapshot.scheduled_sessions!.league_sessions_for_me).toEqual([]);
+  });
+});
+
+describe("votes owed outside a trade_vote session (§8.6)", () => {
+  it("says the vote happens in a separate session, and says nothing in the vote session itself", async () => {
+    await seedLeague(db);
+    const [a, b, c] = (await seedTeams(db)) as [number, number, number];
+    await db.insert(trades).values({
+      proposerTeamId: b,
+      counterpartyTeamId: c,
+      givePlayerIds: ["x2"],
+      getPlayerIds: ["y2"],
+      status: "accepted",
+      proposedAt: new Date("2026-09-13T10:00:00.000Z"),
+      reviewEndsAt: new Date("2026-09-14T10:00:00.000Z"),
+    });
+
+    const window = await buildContextSnapshot(ctxFor({ teamId: a, kind: "trade_window" as SessionKind }));
+    expect(window.pending!.votes_owed).toHaveLength(1);
+    expect(window.pending!.votes_note).toContain("separate trade_vote session");
+    expect(window.pending!.votes_note).toContain("no vote tool");
+
+    const vote = await buildContextSnapshot(ctxFor({ teamId: a, kind: "trade_vote" as SessionKind }));
+    expect(vote.pending!.votes_owed).toHaveLength(1);
+    expect(vote.pending!.votes_note).toBeUndefined();
+
+    // A party to the trade owes no vote and gets no note.
+    const party = await buildContextSnapshot(ctxFor({ teamId: b, kind: "trade_window" as SessionKind }));
+    expect(party.pending!.votes_owed).toHaveLength(0);
+    expect(party.pending!.votes_note).toBeUndefined();
   });
 });

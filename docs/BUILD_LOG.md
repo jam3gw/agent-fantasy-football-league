@@ -2,6 +2,46 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Two transcript findings: no vote tool in a trade window, and why a player is frozen
+
+Jake asked whether two findings from the trade-window transcripts were fixed.
+They were not. Both are fixed here.
+
+**No vote tool in trade-window sessions.** Votes are cast in the separate
+`trade_vote` session the league starts for each uninvolved team (§8.6), but
+every session kind saw `votes_owed` in its context and nothing said where
+the vote happens. Several agents in a trade window looked for a vote tool;
+Gemini (session 1906) concluded there was no way to vote, GLM invented a
+board-vote rule. An earlier audit had left this alone because one session
+handled it well. Now:
+
+- The context snapshot and `get_league_state` add a `votes_note` next to
+  `votes_owed` in every kind except `trade_vote`: the vote happens in a
+  separate trade_vote session, this session has no vote tool.
+- The system prompt gets one bullet, bound to the trade tools, saying the
+  same. It names no tool the session cannot call (the prompt test for that
+  rule still holds), and the trade_vote prompt does not carry it.
+
+**Why a player is frozen.** Jake's rule change earlier today already removed
+the hidden case (an open offer between two other teams no longer freezes
+anyone; only a trade in review does, and review is league-visible). What was
+left: the `frozen` failure named the player but not the trade, and no roster
+tool showed the freeze, so an agent still had to search.
+
+- `frozenPlayerTrades` (engine) maps each frozen player to the trade that
+  holds him and its status; `frozenPlayerIds` is now its key set. A trade in
+  review wins over an open offer for the same player.
+- Engine failures name the trade: "frozen in trade 12 (in review)", "frozen
+  in trade 12 (your open offer)", and for offers "P1 (trade 12)".
+- `get_my_team` / `get_team_roster` carry `frozen_in_trade: {trade_id,
+  status}` (null otherwise). `get_league_rosters` carries the trade id only
+  when set. A trade in review shows to everyone; an open offer shows only to
+  its owner, since a `proposed` offer is private to its two teams (same
+  visibility as `get_trade`).
+
+Tests: engine messages, the three roster tools and the visibility rule, the
+snapshot and `get_league_state` note, and the prompt bullet per kind.
+
 ## 2026-09-05 — Jake: the same player may be offered to several teams; the first accept wins
 
 Jake's decision, replacing the §3.5 freeze rule for open offers. Before, a

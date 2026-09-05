@@ -70,23 +70,32 @@ const maxActive = maxActiveRoster;
  * `frozenPlayerIds` still holds a proposer's give-side while an offer is open,
  * so a player is never dropped out from under the offers he is in.)
  */
-export async function frozenPlayerIdsExcluding(
+export async function frozenPlayerTradesExcluding(
   db: EngineDb,
   teamId: number,
   excludeTradeId?: number,
-): Promise<Set<string>> {
+): Promise<Map<string, number>> {
   const conditions: Array<SQL<unknown> | undefined> = [
     eq(trades.status, "accepted"),
     or(eq(trades.proposerTeamId, teamId), eq(trades.counterpartyTeamId, teamId)),
   ];
   if (excludeTradeId !== undefined) conditions.push(ne(trades.id, excludeTradeId));
   const inReview = await db.select().from(trades).where(and(...conditions));
-  const frozen = new Set<string>();
+  const frozen = new Map<string, number>();
   for (const t of inReview) {
-    if (t.proposerTeamId === teamId) for (const p of t.givePlayerIds) frozen.add(p);
-    if (t.counterpartyTeamId === teamId) for (const p of t.getPlayerIds) frozen.add(p);
+    if (t.proposerTeamId === teamId) for (const p of t.givePlayerIds) frozen.set(p, t.id);
+    if (t.counterpartyTeamId === teamId) for (const p of t.getPlayerIds) frozen.set(p, t.id);
   }
   return frozen;
+}
+
+/** The player ids of `frozenPlayerTradesExcluding`. */
+export async function frozenPlayerIdsExcluding(
+  db: EngineDb,
+  teamId: number,
+  excludeTradeId?: number,
+): Promise<Set<string>> {
+  return new Set((await frozenPlayerTradesExcluding(db, teamId, excludeTradeId)).keys());
 }
 
 /**
@@ -273,15 +282,17 @@ async function checkProposal(
     return fail("not_on_roster", `get-side player(s) not on the counterparty's roster: ${missingGet.join(", ")}`);
   }
 
-  const frozenGive = await frozenPlayerIdsExcluding(tx, p.proposerTeamId, opts.excludeTradeId);
+  const frozenGive = await frozenPlayerTradesExcluding(tx, p.proposerTeamId, opts.excludeTradeId);
   const giveFrozen = p.givePlayerIds.filter((id) => frozenGive.has(id));
   if (giveFrozen.length > 0) {
-    return fail("frozen", `give-side player(s) frozen in another trade: ${giveFrozen.join(", ")}`);
+    const list = giveFrozen.map((id) => `${id} (trade ${frozenGive.get(id)})`).join(", ");
+    return fail("frozen", `give-side player(s) frozen in a trade in review: ${list}`);
   }
-  const frozenGet = await frozenPlayerIdsExcluding(tx, p.counterpartyTeamId, opts.excludeTradeId);
+  const frozenGet = await frozenPlayerTradesExcluding(tx, p.counterpartyTeamId, opts.excludeTradeId);
   const getFrozen = p.getPlayerIds.filter((id) => frozenGet.has(id));
   if (getFrozen.length > 0) {
-    return fail("frozen", `get-side player(s) frozen in another trade: ${getFrozen.join(", ")}`);
+    const list = getFrozen.map((id) => `${id} (trade ${frozenGet.get(id)})`).join(", ");
+    return fail("frozen", `get-side player(s) frozen in a trade in review: ${list}`);
   }
 
   const cap = maxActive(settings);
