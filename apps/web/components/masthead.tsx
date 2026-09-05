@@ -165,7 +165,7 @@ export async function Masthead() {
                     ? `Updated ${formatEtTime(live.lastUpdateAt)}`
                     : "No scores yet"
                   : lastMove
-                    ? `Last move ${formatEtRecent(lastMove)} ET`
+                    ? `Last move ${formatEtRecent(lastMove, new Date(), true)}`
                     : "Nothing has happened yet"}
             </span>
           </div>

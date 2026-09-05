@@ -30,7 +30,8 @@ off the page". Implemented as designed; the pieces:
   swaps fully back to scores with the "N games live" pill; before the wire
   has anything to say the week's games are the fallback so the band is not
   empty in week 1. The masthead stamp reads "Last move 10:14 AM ET" between
-  games (`lastMoveAt`, four one-row reads) and "Updated …" during them.
+  games (`lastMoveAt`, one statement of scalar subqueries) and "Updated …"
+  during them.
 - **Leaderboard band removed** (`components/leaderboard.tsx` deleted). It was
   the home page's standings surface; §12.1's row for `/` is updated, and the
   standings are one click away in the bar and in the "Season so far" links.
@@ -109,6 +110,29 @@ Not fixed, and why:
   own tests and is not this change's.
 - `decision_logs` has no `created_at` index; `leagueActivity` sorted on it
   before this change too. Worth an index migration on its own.
+
+### Review round 2 (11 findings, none blocking)
+
+Two were regressions from round 1's `closeLines`, both fixed and tested:
+a stop inside a closing token (`**Start Gibbs.**`) got a second stop after
+it, and a one-line fence (```` ```quick``` aside ````) flipped the fence
+state and swallowed every line after it. Also fixed:
+
+- "No." and "St." are abbreviations only ahead of a number, so a sentence
+  can end in "no.". Marker-only lines and table rows get no stop.
+- `nextKickoff` is now the week's next unplayed kickoff, not only the
+  first: on a Saturday the matchups header says "kickoff Sun 1:00 PM ET"
+  rather than falling back to the last move.
+- "Last move Aug 28 ET" no more: `formatEtRecent` takes the zone itself and
+  adds it only to the forms that carry a clock.
+- `lastMoveAt` also covers failed sessions and waiver runs — the two
+  sources the stream and the wire read that it missed — and is split into
+  `readLastMove(db)`, exercised against a real schema in
+  `test/lastMove.test.ts` source by source (the correlated-subquery trap),
+  and the cached, degrading `lastMoveAt` the pages call.
+- `WireItem.href` was dead once the lines became text; removed.
+- `plainExcerpt` keeps underscores, like the renderer (`pts_allow_14_20`).
+- Stale wording in this log's top entry and in a `SectionHeader` comment.
 ## 2026-09-05 — `/llms.txt` for outside agents
 
 Jake asked whether an `llm.txt` would help agents (ChatGPT, Claude Code)
