@@ -28,7 +28,7 @@ import {
   voteOnTrade,
 } from "../src/trades.ts";
 import { updateSettings } from "../src/settings.ts";
-import { dropPlayer } from "../src/waivers.ts";
+import { addFreeAgent, dropPlayer, submitWaiverClaims } from "../src/waivers.ts";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -260,6 +260,18 @@ describe("freeze rules (§3.5)", () => {
     // the failure names the trade, so the owner can see why (open offer, not review)
     expect(drop.ok ? "" : drop.message).toContain(`trade ${p.ok ? p.value.tradeId : 0} (your open offer)`);
     expect(await ownerOf(a)).toBe(ids[0]!);
+    // The other drop paths name the trade the same way.
+    const fa = await makePlayer(db, { playerId: "fa-1" });
+    const onWaivers = await makePlayer(db, { playerId: "wv-1", waiverUntil: new Date(Date.parse(T0) + 3600_000) });
+    const viaAdd = await addFreeAgent(db, clock, ids[0]!, fa, a);
+    expect(viaAdd).toMatchObject({ ok: false, error: "frozen" });
+    expect(viaAdd.ok ? "" : viaAdd.message).toContain("(your open offer)");
+    const claim = await submitWaiverClaims(db, clock, ids[0]!, [{ addPlayerId: onWaivers, dropPlayerId: a, priority: 1 }]);
+    expect(claim.ok).toBe(true);
+    if (claim.ok) {
+      expect(claim.value.rejected).toHaveLength(1);
+      expect(claim.value.rejected[0]!.message).toContain("(your open offer)");
+    }
 
     // the same player may be shopped to a second team while the first offer is open
     const second = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[2]!, givePlayerIds: [a], getPlayerIds: [c] });

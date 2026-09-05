@@ -439,6 +439,18 @@ describe("frozen_in_trade (§3.5)", () => {
     const rows = new Map((other.players as Array<Record<string, unknown>>).map((r) => [r.player_id as string, r]));
     expect(rows.get(a2)!.frozen_in_trade).toEqual({ trade_id: review.value.tradeId, status: "in_review" });
     expect(rows.get(a1)!.frozen_in_trade).toBeNull();
+
+    // The reporter (no team) sees the review, never the open offer.
+    const reporter = ok(await getTeamRosterTool.execute({ team_id: a }, ctxFor({ teamId: null })));
+    const rRows = new Map((reporter.players as Array<Record<string, unknown>>).map((r) => [r.player_id as string, r]));
+    expect(rRows.get(a2)!.frozen_in_trade).toEqual({ trade_id: review.value.tradeId, status: "in_review" });
+    expect(rRows.get(a1)!.frozen_in_trade).toBeNull();
+
+    // A team_ids subset that leaves out the proposer still marks the counterparty's side.
+    const subset = ok(await getLeagueRostersTool.execute({ team_ids: [b] }, ctxFor({ teamId: null })));
+    const subItems = subset.items as Array<{ team_id: number; players: Array<Record<string, unknown>> }>;
+    expect(subItems.map((t) => t.team_id)).toEqual([b]);
+    expect(subItems[0]!.players.find((r) => r.id === b1)!.frozen_in_trade).toBe(review.value.tradeId);
   });
 });
 

@@ -21,7 +21,12 @@ import {
   frozenPlayerIds,
   frozenPlayerTrades,
   frozenReason,
-  incomingReservedCount, irOccupant, isIrIllegal, maxActiveRoster, rosteredBy } from "./roster.ts";
+  incomingReservedCount,
+  irOccupant,
+  isIrIllegal,
+  maxActiveRoster,
+  rosteredBy,
+} from "./roster.ts";
 import type { LeagueSettings } from "./settings.ts";
 import { getSettings } from "./settings.ts";
 import { recordTransaction } from "./transactions.ts";
@@ -148,7 +153,7 @@ export async function submitWaiverClaims(
     const teamRows = await tx.select({ id: teams.id }).from(teams).where(eq(teams.id, teamId));
     if (teamRows.length === 0) return fail("not_found", `team ${teamId} not found`);
 
-    const frozen = await frozenPlayerIds(tx, teamId);
+    const frozen = await frozenPlayerTrades(tx, teamId);
     const rosterRows = await tx
       .select({ playerId: rosterEntries.playerId })
       .from(rosterEntries)
@@ -206,7 +211,7 @@ export async function submitWaiverClaims(
             index,
             addPlayerId: claim.addPlayerId,
             error: "invalid_drop",
-            message: `drop player ${claim.dropPlayerId} is frozen in a trade`,
+            message: `drop player ${claim.dropPlayerId} is frozen in ${frozenReason(frozen.get(claim.dropPlayerId)!)}`,
           });
         } else if (lockedDrops.has(claim.dropPlayerId)) {
           failures.push({

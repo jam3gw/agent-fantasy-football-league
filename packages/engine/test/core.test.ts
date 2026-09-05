@@ -4,7 +4,7 @@ import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { makeGame, makePlayer, rosterPlayer, seedFullRoster, seedLeague, seedTeams, SEASON } from "./helpers/factories.ts";
 import { getSettings } from "../src/settings.ts";
 import { isPlayerLocked, lockedPlayerIds } from "../src/locks.ts";
-import { activeCount, frozenPlayerIds, isIrIllegal } from "../src/roster.ts";
+import { activeCount, frozenPlayerIds, frozenPlayerTrades, frozenPlayerTradesForTeams, frozenReason, isIrIllegal } from "../src/roster.ts";
 import { setLineupEntry } from "./helpers/factories.ts";
 import { trades } from "../src/db/schema.ts";
 
@@ -100,5 +100,34 @@ describe("roster helpers", () => {
     await db.update(trades).set({ status: "accepted" }).where(eq(trades.proposerTeamId, t1!));
     expect([...(await frozenPlayerIds(db, t1!))]).toEqual([a]);
     expect([...(await frozenPlayerIds(db, t2!))]).toEqual([b]);
+  });
+
+  it("frozenPlayerTrades names one stable trade per player: review over open offer, oldest open offer first", async () => {
+    await seedLeague(db);
+    const [t1, t2, t3] = await seedTeams(db);
+    const a = await makePlayer(db, { playerId: "a" });
+    await rosterPlayer(db, t1!, a);
+    const row = (to: number, status: "proposed" | "accepted") => ({
+      proposerTeamId: t1!,
+      counterpartyTeamId: to,
+      givePlayerIds: [a],
+      getPlayerIds: [],
+      status,
+      proposedAt: new Date(),
+    });
+    const [first] = await db.insert(trades).values(row(t2!, "proposed")).returning({ id: trades.id });
+    await db.insert(trades).values(row(t3!, "proposed"));
+    expect((await frozenPlayerTrades(db, t1!)).get(a)).toEqual({ tradeId: first!.id, status: "proposed" });
+
+    // A review (inserted last, so it is not the lowest id) wins over both open offers.
+    const [review] = await db.insert(trades).values(row(t3!, "accepted")).returning({ id: trades.id });
+    expect((await frozenPlayerTrades(db, t1!)).get(a)).toEqual({ tradeId: review!.id, status: "accepted" });
+    expect(frozenReason({ tradeId: review!.id, status: "accepted" })).toBe(`trade ${review!.id} (in review)`);
+    expect(frozenReason({ tradeId: first!.id, status: "proposed" })).toBe(`trade ${first!.id} (your open offer)`);
+
+    // Teams outside the asked-for set are not built, and a team with nothing frozen gets an empty map.
+    const only = await frozenPlayerTradesForTeams(db, [t2!]);
+    expect(only.has(t1!)).toBe(false);
+    expect(only.get(t2!)!.size).toBe(0);
   });
 });
