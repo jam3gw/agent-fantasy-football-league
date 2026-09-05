@@ -4197,8 +4197,8 @@ per-row table clicks (each row is a link), server-side events for league
 actions (the database already has them in full), and the Web Analytics API on
 `/about` (a vanity number for another token).
 
-Still for Jake, a dashboard setting not code: a Spend Management alert on the
-Vercel team, since Pro meters events with no cap.
+Jake has set a Spend Management alert on the Vercel team (a dashboard
+setting, not code), since Pro meters events with no cap. Nothing open.
 
 Merged to `main` as `fa7e353` after three review rounds (the third found
 nothing new) and green CI. Production confirmed: `/api/healthz` ok, and the
