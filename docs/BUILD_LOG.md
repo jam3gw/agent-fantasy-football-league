@@ -4144,6 +4144,18 @@ that is already lit can be clicked again, a select cannot re-fire its value.
 Review round 1 found the three behaviour bugs above plus an untested
 `beforeSend`; all fixed, `beforeSend` exported and tested directly.
 
+Review round 2: `pageOf` now folds `/teams/[slug]/week/[week]` and
+`/spend/[slug]` (the team week page renders the same scratchpad card, so
+`Notes expanded` would have fanned out to a row per team per week);
+`queryChanged` re-serialises both sides so a linked-in `?team=a&` is not a
+change; `Live watched` on a session requires `running`, not `queued` (a reader
+on the waiting card is not watching an agent think); the sessions list's own
+"Show N more" button now sends `Show more` too. The click handler is exported
+and tested against the real nested-`<details>` structure under `happy-dom`
+(new dev dependency; `test/stepOpenTracker.dom.test.ts`). Known and accepted:
+a legacy `?status=timed_out` link lights the "failed" chip, and clicking that
+lit chip rewrites the URL to `status=failed` and counts one `Filter`.
+
 Not added, on purpose: nav/footer clicks (page views already count them), poll
 ticks and scroll (no reader action, pure cost), anything under `/admin`,
 per-row table clicks (each row is a link), server-side events for league

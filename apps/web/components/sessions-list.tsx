@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 import { CardLink, Nothing } from "@/components/broadcast";
 import { useUrlState } from "@/components/list-controls";
+import { EVENTS } from "@/lib/analytics";
+import { currentPage, trackEvent } from "@/lib/track";
 import { SessionRow, useNow } from "@/components/session-rows";
 import { readParam } from "@/lib/listControls";
 import {
@@ -195,7 +197,10 @@ export function SessionsList({
                       type="button"
                       aria-expanded={false}
                       aria-controls={`sessions-${g.key}-rows`}
-                      onClick={() => setExpanded((e) => ({ ...e, [g.key]: true }))}
+                      onClick={() => {
+                        trackEvent(EVENTS.showMore, { page: currentPage(), noun: "sessions" });
+                        setExpanded((e) => ({ ...e, [g.key]: true }));
+                      }}
                       className="rounded-md border border-border-strong bg-transparent px-4 py-1.5 text-[13px] font-medium text-foreground transition-colors duration-300 hover:border-accent hover:bg-accent-soft hover:text-accent"
                     >
                       Show {more} more

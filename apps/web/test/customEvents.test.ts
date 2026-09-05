@@ -61,12 +61,13 @@ describe("buildEvent", () => {
       "components/session-rail.tsx",
       "components/step-open-tracker.tsx",
       "components/team-page.tsx",
+      "components/sessions-list.tsx",
       "lib/useLiveWatched.ts",
     ]
       .map(read)
       .join("\n");
     const calls = [...sources.matchAll(/trackEvent\(EVENTS\.\w+, \{([^}]*)\}\)/g)];
-    expect(calls.length).toBeGreaterThanOrEqual(7);
+    expect(calls.length).toBeGreaterThanOrEqual(8);
     for (const [, props] of calls) {
       const keys = props.split(",").filter((s) => s.trim().length > 0);
       expect(keys.length).toBeLessThanOrEqual(MAX_PROPERTIES);
@@ -113,7 +114,7 @@ describe("live watch", () => {
     expect(hook).toMatch(/fired\.current = true/);
     expect(hook).toMatch(/document\.visibilityState !== "visible"\) return;/);
     expect(hook).toMatch(/addEventListener\("visibilitychange"/);
-    expect(read("app/sessions/[id]/live.tsx")).toMatch(/useLiveWatched\("session", active\)/);
+    expect(read("app/sessions/[id]/live.tsx")).toMatch(/useLiveWatched\("session", summary\.status === "running"\)/);
     expect(read("app/draft/live.tsx")).toMatch(/useLiveWatched\("draft", state\?\.status === "running"\)/);
   });
 });
@@ -129,7 +130,7 @@ describe("step opened", () => {
     expect(read("components/session-view.tsx")).toMatch(/<StepOpenTracker \/>/);
     expect(read("components/session-steps.tsx")).toMatch(/data-step-kind=/);
     const tracker = read("components/step-open-tracker.tsx");
-    expect(tracker).toMatch(/addEventListener\("click", onClick, true\)/);
+    expect(tracker).toMatch(/addEventListener\("click", onDocumentClick, true\)/);
     expect(tracker).not.toMatch(/"toggle"/);
     expect(tracker).toMatch(/closest\("summary"\)/);
     expect(read("components/session-rail.tsx")).not.toMatch(/step-open-tracker/);
@@ -169,13 +170,14 @@ describe("track wrapper", () => {
     expect(wrapper).not.toMatch(/@vercel\/analytics\/(next|server)/);
   });
 
-  it("is used from the four interactive components and nowhere on the server", () => {
+  it("is used from the interactive client components and nowhere on the server", () => {
     for (const file of [
       "components/list-controls.tsx",
       "components/compare.tsx",
       "components/session-rail.tsx",
       "components/step-open-tracker.tsx",
       "components/team-page.tsx",
+      "components/sessions-list.tsx",
     ]) {
       const src = read(file);
       expect(src).toMatch(/^"use client";/);
