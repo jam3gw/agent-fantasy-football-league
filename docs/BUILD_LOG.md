@@ -46,6 +46,12 @@ equal, the use of it is the agent's.
   under "Failed jobs" on `/admin/health` for a week. Reverted to "books
   nothing" with a log line: the row was queued before the change, no admin
   path can queue another, and a false failure is noise for Jake.
+- Not run: the review loop's live session against the preview. This session
+  has no `.env.local` and no admin credential, so it cannot open a `manual`
+  or check-in session on the preview. The tool path is covered by
+  `writeTools.test.ts` (propose and post from a `self_check_in`), and the
+  first real check-in that shops a trade will show on `/sessions`; I will
+  read that transcript when it lands.
 - Cost: Appendix F's note updated. If agents do not book trade looks at all,
   the saving is the whole trade-window share (about 44% of tokens before this
   morning's cut). If every agent books five check-ins a week for trades it is
