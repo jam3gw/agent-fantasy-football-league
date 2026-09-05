@@ -37,6 +37,14 @@ window session today at 12:00 PM ET with `drop_player` and `propose_trade`.
 Also not changed: a lineup change can move a frozen IR occupant out of IR
 without any reservation check; that was true before and is out of scope.
 
+Checked on request: the same player offered to two different teams at once.
+The engine already refuses the second offer with `frozen` (§3.5: a
+proposer's give-side player is frozen while the offer is `proposed`), and
+refuses a third team asking for him. The freeze lifts when the first offer is
+rejected, countered, cancelled or expires. Production has no case of two open
+offers sharing a give-side player. Added an explicit test that names the
+scenario and checks the player is offerable again after the first offer ends.
+
 ## 2026-09-04 — Speed Insights: the four pages under 90
 
 Vercel Speed Insights put `/matchups/[week]` at 56, `/benchmark` at 61,

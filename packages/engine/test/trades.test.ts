@@ -272,6 +272,30 @@ describe("freeze rules (§3.5)", () => {
     expect(ok.ok).toBe(true);
   });
 
+  it("the same player cannot be offered to two teams at once; once the first offer ends he can be offered again", async () => {
+    const ids = await setup();
+    const clock = new FixedClock(T0);
+    const a = await owned(ids[0]!, "a1");
+    const b = await owned(ids[1]!, "b1");
+    const c = await owned(ids[2]!, "c1");
+
+    const first = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[1]!, givePlayerIds: [a], getPlayerIds: [b] });
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    // a is frozen in the first offer: the same player to a different team is refused
+    const second = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[2]!, givePlayerIds: [a], getPlayerIds: [c] });
+    expect(second).toMatchObject({ ok: false, error: "frozen" });
+    // and ids[2] cannot ask for him either while he is frozen elsewhere
+    const ask = await proposeTrade(db, clock, ids[2]!, { toTeamId: ids[0]!, givePlayerIds: [c], getPlayerIds: [a] });
+    expect(ask).toMatchObject({ ok: false, error: "frozen" });
+
+    // the first offer is rejected → the freeze lifts and the second team can have the offer
+    expect((await respondToTrade(db, clock, ids[1]!, first.value.tradeId, "reject")).ok).toBe(true);
+    const again = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[2]!, givePlayerIds: [a], getPlayerIds: [c] });
+    expect(again.ok).toBe(true);
+  });
+
   it("the counterparty's get-side player is free while 'proposed' but frozen once 'accepted'", async () => {
     const ids = await setup();
     const clock = new FixedClock(T0);
