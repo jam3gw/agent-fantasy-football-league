@@ -4199,3 +4199,8 @@ actions (the database already has them in full), and the Web Analytics API on
 
 Still for Jake, a dashboard setting not code: a Spend Management alert on the
 Vercel team, since Pro meters events with no cap.
+
+Merged to `main` as `fa7e353` after three review rounds (the third found
+nothing new) and green CI. Production confirmed: `/api/healthz` ok, and the
+client chunk served on `league.jake-moses.com` carries both the event
+vocabulary and the `/admin/` drop in `beforeSend`.
