@@ -255,7 +255,10 @@ describe("freeze rules (§3.5)", () => {
     const p = await proposeTrade(db, clock, ids[0]!, { toTeamId: ids[1]!, givePlayerIds: [a], getPlayerIds: [b] });
     expect(p.ok).toBe(true);
 
-    expect(await dropPlayer(db, clock, ids[0]!, a)).toMatchObject({ ok: false, error: "frozen" });
+    const drop = await dropPlayer(db, clock, ids[0]!, a);
+    expect(drop).toMatchObject({ ok: false, error: "frozen" });
+    // the failure names the trade, so the owner can see why (open offer, not review)
+    expect(drop.ok ? "" : drop.message).toContain(`trade ${p.ok ? p.value.tradeId : 0} (your open offer)`);
     expect(await ownerOf(a)).toBe(ids[0]!);
 
     // the same player may be shopped to a second team while the first offer is open
@@ -427,7 +430,11 @@ describe("freeze rules (§3.5)", () => {
       getPlayerIds: [c],
     });
     expect(afterAccept).toMatchObject({ ok: false, error: "frozen" });
-    expect(await dropPlayer(db, clock, ids[1]!, b)).toMatchObject({ ok: false, error: "frozen" });
+    // both failures name the trade in review, so a third team can look it up
+    expect(afterAccept.ok ? "" : afterAccept.message).toContain(`${b} (trade ${p.value.tradeId})`);
+    const dropB = await dropPlayer(db, clock, ids[1]!, b);
+    expect(dropB).toMatchObject({ ok: false, error: "frozen" });
+    expect(dropB.ok ? "" : dropB.message).toContain(`trade ${p.value.tradeId} (in review)`);
     // the proposer's side stays frozen too
     expect(await dropPlayer(db, clock, ids[0]!, a)).toMatchObject({ ok: false, error: "frozen" });
   });

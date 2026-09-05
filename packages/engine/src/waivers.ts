@@ -17,7 +17,11 @@ import type { EngineErrorCode, EngineResult } from "./errors.ts";
 import { fail, ok } from "./errors.ts";
 import { handleEvent } from "./events.ts";
 import { lockedPlayerIds } from "./locks.ts";
-import { frozenPlayerIds, incomingReservedCount, irOccupant, isIrIllegal, maxActiveRoster, rosteredBy } from "./roster.ts";
+import {
+  frozenPlayerIds,
+  frozenPlayerTrades,
+  frozenReason,
+  incomingReservedCount, irOccupant, isIrIllegal, maxActiveRoster, rosteredBy } from "./roster.ts";
 import type { LeagueSettings } from "./settings.ts";
 import { getSettings } from "./settings.ts";
 import { recordTransaction } from "./transactions.ts";
@@ -308,8 +312,8 @@ export async function addFreeAgent(
       if (dropOwner !== teamId) return fail("not_on_roster", `drop player ${dropPlayerId} is not on your roster`);
       const lockedDrop = await lockedPlayerIds(tx, clock, settings.season, week, [dropPlayerId]);
       if (lockedDrop.has(dropPlayerId)) return fail("locked", `drop player ${dropPlayerId} is locked (game started)`);
-      const frozen = await frozenPlayerIds(tx, teamId);
-      if (frozen.has(dropPlayerId)) return fail("frozen", `drop player ${dropPlayerId} is frozen in a trade`);
+      const frozenBy = (await frozenPlayerTrades(tx, teamId)).get(dropPlayerId);
+      if (frozenBy) return fail("frozen", `drop player ${dropPlayerId} is frozen in ${frozenReason(frozenBy)}`);
     }
     const cap = maxActive(settings);
     const active = await simulatedActiveAfterAdd(tx, teamId, week, dropPlayerId ?? null);
@@ -346,8 +350,8 @@ export async function dropPlayer(
     if (owner !== teamId) return fail("not_on_roster", `player ${playerId} is not on your roster`);
     const locked = await lockedPlayerIds(tx, clock, settings.season, week, [playerId]);
     if (locked.has(playerId)) return fail("locked", `player ${playerId} is locked (game started)`);
-    const frozen = await frozenPlayerIds(tx, teamId);
-    if (frozen.has(playerId)) return fail("frozen", `player ${playerId} is frozen in a trade`);
+    const frozenBy = (await frozenPlayerTrades(tx, teamId)).get(playerId);
+    if (frozenBy) return fail("frozen", `player ${playerId} is frozen in ${frozenReason(frozenBy)}`);
     const waiverUntil = await applyDrop(tx, settings, teamId, playerId, clock.now(), "drop");
     return ok({ playerId, waiverUntil });
   });

@@ -27,12 +27,14 @@ import {
 } from "drizzle-orm";
 import { z } from "zod";
 import { formatEt } from "@league/shared";
-import type { EngineDb, LeagueSettings, LineupSlot } from "@league/engine";
+import type { EngineDb, FrozenBy, LeagueSettings, LineupSlot } from "@league/engine";
 import {
   STARTING_SLOTS,
   activeCount,
   boardPosts,
   computeStandings,
+  frozenPlayerTrades,
+  frozenPlayerTradesForTeams,
   getRoster,
   getSettings,
   isIrIllegal,
@@ -56,7 +58,7 @@ import {
   waiverRuns,
 } from "@league/engine";
 import type { LeagueTool, ToolContext, ToolResult } from "./types.ts";
-import { extraPositions, pageRows, toolFailure } from "./types.ts";
+import { VOTES_ELSEWHERE_NOTE, extraPositions, pageRows, toolFailure } from "./types.ts";
 
 /* ------------------------------------------------------------------ *
  * shared helpers
@@ -340,7 +342,7 @@ async function rosterPayload(
   const roster = await getRoster(db, teamId);
   const ids = roster.map((r) => r.playerId);
   const now = ctx.clock.now();
-  const [{ byTeam }, byes, slots, pts, seasonPts, proj, locked] = await Promise.all([
+  const [{ byTeam }, byes, slots, pts, seasonPts, proj, locked, frozen] = await Promise.all([
     weekGames(db, season, week, now),
     byeWeeks(db, season),
     lineupSlots(db, teamId, week),
@@ -348,6 +350,7 @@ async function rosterPayload(
     seasonPoints(db, season, ids),
     weekProjections(db, season, week, ids),
     lockedPlayerIds(db, ctx.clock, season, week, ids),
+    frozenPlayerTrades(db, teamId),
   ]);
 
   const rows = roster.map((p) => {
@@ -368,6 +371,11 @@ async function rosterPayload(
       status: p.status,
       injury_status: p.injuryStatus,
       locked: locked.has(p.playerId),
+      // Why a player cannot be dropped or offered elsewhere (§3.5): the trade
+      // that holds him. Another team's open offer is private, but a trade in
+      // review is league-visible, so the id is always something the reader
+      // can look up with get_trade.
+      frozen_in_trade: frozenInTrade(frozen.get(p.playerId), ctx.teamId === teamId),
       points_this_week: stat?.pts ?? null,
       points_final: stat?.final ?? false,
       season_points: seasonPts.get(p.playerId) ?? 0,
@@ -547,6 +555,9 @@ export const getLeagueStateTool = readTool(
           .map((t) => ({ trade_id: t.id, review_ends_at: iso(t.reviewEndsAt), review_ends_et: et(t.reviewEndsAt) })),
         roster_flags: await rosterFlags(ctx, settings, myId, week),
       };
+      if ((pending.votes_owed as unknown[]).length > 0 && ctx.kind !== "trade_vote") {
+        pending.votes_note = VOTES_ELSEWHERE_NOTE;
+      }
       const claims = await db
         .select()
         .from(waiverClaims)
@@ -600,9 +611,23 @@ export const getLeagueStateTool = readTool(
  * get_my_team / get_team_roster
  * ------------------------------------------------------------------ */
 
+/**
+ * The `frozen_in_trade` field of a roster row (§3.5). A trade in review is
+ * visible to every team; a `proposed` offer is only between its two teams, so
+ * the drop-only freeze from the owner's open offer shows to the owner alone.
+ */
+function frozenInTrade(
+  by: FrozenBy | undefined,
+  mine: boolean,
+): { trade_id: number; status: "in_review" | "my_open_offer" } | null {
+  if (!by) return null;
+  if (by.status === "accepted") return { trade_id: by.tradeId, status: "in_review" };
+  return mine ? { trade_id: by.tradeId, status: "my_open_offer" } : null;
+}
+
 export const getMyTeamTool = readTool(
   "get_my_team",
-  "Your roster for a week: slot, position, NFL team, opponent, kickoff, bye, injury status, locked flag, points so far, season points, and projection.",
+  "Your roster for a week: slot, position, NFL team, opponent, kickoff, bye, injury status, locked flag, frozen_in_trade (the trade that holds a player: in_review, or my_open_offer which blocks drops only), points so far, season points, and projection.",
   weekArg,
   async (args, ctx) => {
     if (ctx.teamId === null) return toolFailure("not_found", "this session has no team", NO_TEAM_HINT);
@@ -685,6 +710,10 @@ export const getLeagueRostersTool = readTool(
     const now = ctx.clock.now();
     const locked = await lockedPlayerIds(db, ctx.clock, season, week, ids);
     const gamesThisWeek = await weekGames(db, season, week, now);
+    const frozenByTeam = await frozenPlayerTradesForTeams(
+      db,
+      teamRows.map((t) => t.id),
+    );
 
     const items = teamRows.map((t) => {
       const record = standings.find((s) => s.teamId === t.id);
@@ -708,6 +737,7 @@ export const getLeagueRostersTool = readTool(
               : {}),
             ...(pts > 0 ? { season_pts: pts } : {}),
             ...(locked.has(e.playerId) ? { locked: true } : {}),
+            ...frozenShort(frozenByTeam.get(t.id)?.get(e.playerId), ctx.teamId === t.id),
           };
         })
         .sort((a, b) => slotOrder(a.slot) - slotOrder(b.slot) || (b.proj ?? -1) - (a.proj ?? -1));
@@ -722,10 +752,19 @@ export const getLeagueRostersTool = readTool(
     });
     return pageRows(items, args.offset ?? 0, items.length, {
       week,
-      note: "Starters first, then BN, then IR. inj, bye, season_pts and locked appear only when set.",
+      note:
+        "Starters first, then BN, then IR. inj, bye, season_pts, locked and frozen_in_trade appear only when set. " +
+        "frozen_in_trade is the id of the trade in review that holds the player (get_trade shows it); on your own " +
+        "team it can also be your open offer, which blocks drops only.",
     });
   },
 );
+
+/** The short-row form of `frozenInTrade` for get_league_rosters: the trade id alone, only when set. */
+function frozenShort(by: FrozenBy | undefined, mine: boolean): { frozen_in_trade?: number } {
+  const f = frozenInTrade(by, mine);
+  return f ? { frozen_in_trade: f.trade_id } : {};
+}
 
 /** Starting slots in lineup order, then the bench, then IR. */
 function slotOrder(slot: string): number {
