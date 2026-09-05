@@ -140,6 +140,7 @@ export async function runJob(
       // /admin/settings books nothing (2026-09-05: the Sat 2026-09-05 row was
       // already on the calendar when the count went from four to two).
       if (String(payload.kind) === "trade_window" && !isTradeWindowDay(settings, String(payload.date ?? ""))) {
+        console.info(`sessions.book: ${String(payload.date)} is not a trade-window day any more; nothing booked`);
         return;
       }
       await bookSessionsForKind(db, clock, String(payload.kind), payload);
