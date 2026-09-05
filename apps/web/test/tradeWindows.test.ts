@@ -115,8 +115,10 @@ describe("reporter bookings (§11)", () => {
   });
 
   it("a second rankings booking in the same week is a new session; a second recap is not", async () => {
-    await runJob(db, new FixedClock("2026-09-05T18:00:00Z"), "reporter.run", { kind: "reporter_power_rankings" });
-    await runJob(db, new FixedClock("2026-09-08T14:30:00Z"), "reporter.run", { kind: "reporter_power_rankings" });
+    await runJob(db, new FixedClock("2026-09-05T18:00:00Z"), "reporter.run", { kind: "reporter_power_rankings" }, { id: 1 });
+    await runJob(db, new FixedClock("2026-09-08T14:30:00Z"), "reporter.run", { kind: "reporter_power_rankings" }, { id: 2 });
+    // The same job row run twice (a stale claim released and re-run) is one session.
+    await runJob(db, new FixedClock("2026-09-08T15:05:00Z"), "reporter.run", { kind: "reporter_power_rankings" }, { id: 2 });
     await runJob(db, new FixedClock("2026-09-08T15:00:00Z"), "reporter.run", { kind: "reporter_recap" });
     await runJob(db, new FixedClock("2026-09-08T16:00:00Z"), "reporter.run", { kind: "reporter_recap" });
     const booked = await db.select().from(sessions);

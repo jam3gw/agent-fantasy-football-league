@@ -79,6 +79,9 @@ describe("power rankings (§11)", () => {
     expect(first).toMatchObject({ ok: true, value: { count: 12, alreadyPublished: false } });
     const again = await publishPowerRankings(db, clock, { sessionId: 1, week: 1, entries: full([...ids].reverse()) });
     expect(again).toMatchObject({ ok: true, value: { count: 12, alreadyPublished: true } });
+    // Even an invalid resend: the edition on file is the answer.
+    const bad = await publishPowerRankings(db, clock, { sessionId: 1, week: 1, entries: full(ids).slice(0, 3) });
+    expect(bad).toMatchObject({ ok: true, value: { alreadyPublished: true } });
     // The first edition stands; nothing was added.
     const [edition] = await latestPowerRankings(db);
     expect(edition?.entries.map((e) => e.teamId)).toEqual(ids);

@@ -71,6 +71,8 @@ export async function runJob(
   clock: Clock,
   type: string,
   payload: Record<string, unknown>,
+  /** The `scheduled_jobs` row being run, when the tick is the caller. */
+  job: { id: number } | null = null,
 ): Promise<void> {
   const settings = await getSettings(db);
   const season = settings.season;
@@ -168,7 +170,7 @@ export async function runJob(
     }
     case "reporter.run": {
       if (!inSeason(settings)) return; // §4.3 job gating
-      await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek));
+      await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek), job);
       return;
     }
     case "ingest.rankings": {
@@ -359,6 +361,7 @@ async function bookReporterSession(
   clock: Clock,
   kind: string,
   week: number,
+  job: { id: number } | null,
 ): Promise<void> {
   const settings = await getSettings(db);
   const now = clock.now();
@@ -366,8 +369,11 @@ async function bookReporterSession(
   // alone, so a second booking is a no-op. A rankings edition is append-only
   // and the site shows the newest, so a re-run (the runbook's "fresh edition
   // on demand", or the Tuesday run in a week that already has the preseason
-  // edition) must create a new session: key it to the booking minute.
-  const suffix = kind === "reporter_power_rankings" ? `${week}:${now.toISOString().slice(0, 16)}` : week;
+  // edition) must create a new session. Key it to the job row, so a row the
+  // tick re-runs after a stale-claim release books the same session again
+  // rather than a second one; without a row (a direct call), the minute.
+  const suffix =
+    kind === "reporter_power_rankings" ? `${week}:${job ? `job${job.id}` : now.toISOString().slice(0, 16)}` : week;
   await createSession(db, settings, {
     teamId: null,
     kind: kind as never,
