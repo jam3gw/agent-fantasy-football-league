@@ -639,6 +639,32 @@ describe("billing: the gateway pays unless the provider is BYOK (2026-08-29)", (
       null,
     );
     expect(priced.costUsd).toBeCloseTo(0.01 + 0.008, 9); // 200 at $10/M + 800 at $20/M
+
+    // Reasoning cheaper than output: the share is repriced down, never below zero.
+    await db.insert(modelPrices).values({
+      modelId: "test/cheap-reasoning",
+      inputUsdPerM: 1,
+      outputUsdPerM: 10,
+      reasoningUsdPerM: 2,
+      cachedInputUsdPerM: 0.1,
+      source: "test",
+    });
+    const cheap = await computeStepCost(
+      db,
+      "test/cheap-reasoning",
+      { inputTokens: 0, outputTokens: 1000, reasoningTokens: 800, cachedInputTokens: 0 },
+      null,
+    );
+    expect(cheap.costUsd).toBeCloseTo(0.002 + 0.0016, 9); // 200 at $10/M + 800 at $2/M
+
+    // Reasoning reported beyond the output count is still billed, not dropped.
+    const excess = await computeStepCost(
+      db,
+      "test/thinker",
+      { inputTokens: 0, outputTokens: 100, reasoningTokens: 300, cachedInputTokens: 0 },
+      null,
+    );
+    expect(excess.costUsd).toBeCloseTo(0.001 + 0.002, 9); // 100 output + 200 excess reasoning at $10/M
   });
 
   it("and the ledger row actually persists it", async () => {

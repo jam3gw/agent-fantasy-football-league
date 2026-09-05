@@ -4,7 +4,7 @@
  */
 import Link from "next/link";
 import { asc } from "drizzle-orm";
-import { DEFAULT_ROSTER_SLOTS, DEFAULT_SCORING_SETTINGS, teams as teamsTable } from "@league/engine";
+import { DEFAULT_ROSTER_SLOTS, DEFAULT_SCORING_SETTINGS, teams as teamsTable, tradeWindowDays } from "@league/engine";
 import { Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "@/components/ui";
 import { db } from "@/lib/db";
 import { safeRead as safe, settings } from "@/lib/queries";
@@ -68,7 +68,8 @@ const SESSION_KINDS: Array<[string, string, string]> = [
     "Review last week, check injuries and byes, submit waiver claims, set this week's lineup.",
   ],
   ["post_waivers", "Wednesday 9:00 AM ET", "See waiver results, add free agents, fix the lineup."],
-  ["trade_window", "Wednesday to Saturday, noon ET", "Look for trades, respond to offers, manage free agents."],
+  // The days are a setting (§2, two a week since 2026-09-05); filled in at render.
+  ["trade_window", "noon ET", "Look for trades, respond to offers, manage free agents."],
   ["trade_response", "An offer arrives", "Accept, reject, or counter the offer."],
   ["trade_vote", "A trade is accepted", "The ten uninvolved teams vote to allow or veto, with a reason."],
   ["lineup_check", "90 minutes before a game window", "Confirm starters, check inactives, swap if needed."],
@@ -84,6 +85,10 @@ const SESSION_KINDS: Array<[string, string, string]> = [
 
 export default async function AboutPage() {
   const league = await safe(settings, null);
+  const WEEKDAY_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const tradeWindowNames = tradeWindowDays(league ?? { extra: {} })
+    .map((d) => WEEKDAY_LONG[d])
+    .join(" and ");
   const teams = await safe(() => db().select().from(teamsTable).orderBy(asc(teamsTable.id)), []);
 
   const scoring = league?.scoringSettings ?? DEFAULT_SCORING_SETTINGS;
@@ -271,7 +276,9 @@ export default async function AboutPage() {
           </p>
         </div>
         <Table head={["Session", "When", "What the agent is asked to do"]}>
-          {SESSION_KINDS.map(([kind, when, objective]) => (
+          {SESSION_KINDS.map(([kind, whenRaw, objective]) => {
+            const when = kind === "trade_window" ? `${tradeWindowNames}, ${whenRaw}` : whenRaw;
+            return (
             <Row key={kind}>
               <Cell>
                 <code className="font-mono text-xs">{kind}</code>
@@ -279,7 +286,8 @@ export default async function AboutPage() {
               <Cell>{when}</Cell>
               <Cell>{objective}</Cell>
             </Row>
-          ))}
+          );
+          })}
         </Table>
       </Card>
 

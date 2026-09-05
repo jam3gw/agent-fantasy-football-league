@@ -347,6 +347,25 @@ describe("get_league_rosters", () => {
     expect((bad as { error: string }).error).toBe("not_found");
   });
 
+  it("works for the reporter, for a past week, and when the caller lists its own team", async () => {
+    await seedLeague(db, { currentWeek: 2 });
+    const [a] = (await seedTeams(db)) as [number];
+    await seedWeek1Games();
+    const p = await makePlayer(db, { nflTeam: "KC", position: "RB" });
+    await rosterPlayer(db, a, p);
+    await db.insert(lineupEntries).values({ teamId: a, week: 1, playerId: p, slot: "RB1" });
+
+    const reporter = ok(await getLeagueRostersTool.execute({ week: 1 }, ctxFor({ teamId: null })));
+    const items = reporter.items as Array<Record<string, unknown>>;
+    expect(items.every((t) => t.mine === undefined)).toBe(true);
+    expect(reporter.week).toBe(1);
+    const teamA = items.find((t) => t.team_id === a)!;
+    expect((teamA.players as Array<{ slot: string }>)[0]!.slot).toBe("RB1"); // week 1's lineup, not week 2's
+
+    const own = ok(await getLeagueRostersTool.execute({ team_ids: [a] }, ctxFor({ teamId: a })));
+    expect((own.items as Array<Record<string, unknown>>)[0]!.mine).toBe(true);
+  });
+
   it("stays under the §8.2 page cap with twelve full rosters", async () => {
     await seedLeague(db);
     const teamIds = await seedTeams(db);

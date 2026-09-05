@@ -84,6 +84,10 @@ export async function computeStepCost(
     (usage.outputTokens * p.outputUsdPerM) / 1_000_000 +
     (Math.min(usage.reasoningTokens, usage.outputTokens) *
       ((p.reasoningUsdPerM ?? p.outputUsdPerM) - p.outputUsdPerM)) /
+      1_000_000 +
+    // Reasoning a provider reports *outside* its output count (none does
+    // today) is still paid for; it is not silently free.
+    (Math.max(0, usage.reasoningTokens - usage.outputTokens) * (p.reasoningUsdPerM ?? p.outputUsdPerM)) /
       1_000_000;
   return { costUsd: round6(cost), source: "price_table" };
 }
