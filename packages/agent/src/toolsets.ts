@@ -153,8 +153,9 @@ export const SETS: Record<SessionKind, string[]> = {
   /**
    * §8.10. A check-in exists to answer the question the agent left itself and
    * act on the answer, so it can do anything time-sensitive: the lineup, the
-   * wire, a trade waiting on a reply. It cannot *propose* a trade or post to
-   * the board — those have their own windows and their own limits — and it
+   * wire, a trade. Since 2026-09-05 there is no scheduled trade window, so a
+   * check-in is also where an agent shops a trade or posts to the board — the
+   * per-day offer limit (§3.5) and the check-in limits (§8.10) bound both. It
    * cannot book another check-in, so it can never become a way to run a
    * second weekly review or to keep going past the ceiling.
    */
@@ -167,7 +168,10 @@ export const SETS: Record<SessionKind, string[]> = {
     "drop_player",
     "submit_waiver_claims",
     "cancel_waiver_claims",
+    "propose_trade",
     "respond_to_trade",
+    "cancel_trade",
+    "post_message",
     ...SCRATCHPAD,
     ...LOG,
   ],

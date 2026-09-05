@@ -122,7 +122,7 @@ describe("scheduled sessions in the snapshot (§8.5, §8.10)", () => {
     ]);
     expect(sched.note).toContain("90 minutes");
     // The trade-window days come from the setting, never a literal (§2, 2026-09-05).
-    expect(sched.note).toContain("trade windows (Wed, Fri)");
+    expect(sched.note).toContain("no trade window");
   });
 
   it("shows a lineup check once when the week plan has already booked it", async () => {

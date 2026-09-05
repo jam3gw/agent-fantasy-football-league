@@ -1,15 +1,15 @@
 /**
- * Trade windows are a setting (§2, two a week since 2026-09-05): the booking
- * loop reads it, and a `sessions.book` row already on the calendar for a day
- * the commissioner has since removed books nothing when it fires.
+ * Scheduled trade windows are retired (§2, 2026-09-05): the booking loop books
+ * none, and a `sessions.book` row for one already on the calendar books nothing
+ * when it fires. Agents shop trades in a check-in they book themselves (§8.10).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
-import { health, initLeagueSettings, scheduledJobs, sessions, updateSettings } from "@league/engine";
+import { health, initLeagueSettings, scheduledJobs, sessions } from "@league/engine";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
 import { seedTeams } from "../../../packages/engine/test/helpers/factories";
-import { bookRecurringJobs, isTradeWindowDay, runJob } from "../lib/jobs";
+import { bookRecurringJobs, runJob } from "../lib/jobs";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -23,49 +23,33 @@ afterEach(async () => {
   await close();
 });
 
-describe("trade windows as a setting", () => {
-  it("isTradeWindowDay reads the ET calendar date against the setting", () => {
-    // 2026-09-05 is a Saturday, 2026-09-09 a Wednesday, 2026-09-11 a Friday.
-    expect(isTradeWindowDay({ extra: {} }, "2026-09-05")).toBe(false);
-    expect(isTradeWindowDay({ extra: {} }, "2026-09-09")).toBe(true);
-    expect(isTradeWindowDay({ extra: {} }, "2026-09-11")).toBe(true);
-    expect(isTradeWindowDay({ extra: { tradeWindowDays: [6] } }, "2026-09-05")).toBe(true);
-    expect(isTradeWindowDay({ extra: {} }, "not a date")).toBe(false);
-  });
-
-  it("books trade windows only on the configured days, and none past the deadline", async () => {
+describe("no scheduled trade window (§2, 2026-09-05)", () => {
+  it("the booking pass books no trade_window sessions, and still books the rest of the week", async () => {
     // Monday 2026-09-07 00:05 ET.
     const clock = new FixedClock("2026-09-07T04:05:00Z");
     await bookRecurringJobs(db, clock);
-    const booked = (await db.select().from(scheduledJobs).where(eq(scheduledJobs.type, "sessions.book")))
-      .filter((j) => j.payload.kind === "trade_window")
-      .map((j) => j.payload.date)
-      .sort();
-    expect(booked).toEqual(["2026-09-09", "2026-09-11"]);
+    const booked = (await db.select().from(scheduledJobs).where(eq(scheduledJobs.type, "sessions.book"))).map(
+      (j) => j.payload.kind,
+    );
+    expect(booked).not.toContain("trade_window");
+    expect(booked).toContain("weekly_review");
+    expect(booked).toContain("post_waivers");
     // §8.7: the weekly price sync rides the same booking pass (next Monday 3:00 AM ET; the clock is Monday 00:05 ET, so today).
     const sync = (await db.select().from(scheduledJobs).where(eq(scheduledJobs.type, "prices.sync"))).map((j) =>
       j.dueAt.toISOString(),
     );
     expect(sync).toEqual(["2026-09-07T07:00:00.000Z"]);
-
-    await db.delete(scheduledJobs);
-    await updateSettings(db, { tradeDeadlineWeek: 0 });
-    await bookRecurringJobs(db, clock);
-    const none = (await db.select().from(scheduledJobs).where(eq(scheduledJobs.type, "sessions.book"))).filter(
-      (j) => j.payload.kind === "trade_window",
-    );
-    expect(none).toEqual([]);
   });
 
-  it("a booked row for a removed day books no sessions when it fires", async () => {
-    const clock = new FixedClock("2026-09-05T16:00:00Z"); // Sat noon ET
-    await runJob(db, clock, "sessions.book", { kind: "trade_window", date: "2026-09-05" });
+  it("a trade_window booking row already on the calendar books no sessions when it fires", async () => {
+    const clock = new FixedClock("2026-09-09T16:00:00Z"); // Wed noon ET
+    await runJob(db, clock, "sessions.book", { kind: "trade_window", date: "2026-09-09" });
     expect(await db.select().from(sessions)).toEqual([]);
 
-    await runJob(db, clock, "sessions.book", { kind: "trade_window", date: "2026-09-09" });
+    await runJob(db, clock, "sessions.book", { kind: "post_waivers" });
     const rows = await db.select().from(sessions);
     expect(rows.length).toBe(12);
-    expect(rows.every((r) => r.kind === "trade_window")).toBe(true);
+    expect(rows.every((r) => r.kind === "post_waivers")).toBe(true);
   });
 });
 

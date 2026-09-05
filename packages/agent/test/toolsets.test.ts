@@ -136,15 +136,24 @@ describe("tool sets (§8.6)", () => {
 });
 
 describe("§8.10 — check-in tools", () => {
-  it("a check-in cannot book another check-in, or start a trade, or post", () => {
+  it("a check-in cannot book another check-in, but can shop a trade and post", () => {
     const names = toolsForKind("self_check_in").map((t) => t.name);
     // The chaining guard, at the tool set as well as in the engine.
     expect(names).not.toContain("schedule_check_in");
-    // Proposing a trade and posting to the board have their own windows.
-    expect(names).not.toContain("propose_trade");
-    expect(names).not.toContain("post_message");
-    // But it can act on what it finds — that is the point of booking it.
-    for (const tool of ["set_lineup", "add_free_agent", "drop_player", "submit_waiver_claims", "respond_to_trade"]) {
+    expect(names).not.toContain("vote_on_trade");
+    // It can act on what it finds — that is the point of booking it. Since
+    // 2026-09-05 there is no scheduled trade window, so trades and the board
+    // are here too.
+    for (const tool of [
+      "set_lineup",
+      "add_free_agent",
+      "drop_player",
+      "submit_waiver_claims",
+      "propose_trade",
+      "respond_to_trade",
+      "cancel_trade",
+      "post_message",
+    ]) {
       expect(names, `a check-in needs ${tool}`).toContain(tool);
     }
     expect(names).toContain("write_decision_log");

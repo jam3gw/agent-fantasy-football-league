@@ -1,4 +1,4 @@
-import { costAlarmRules, getSettings, reporterModelId, toolCosts, tradeWindowDays, DEFAULT_SESSION_GUARDS } from "@league/engine";
+import { costAlarmRules, getSettings, reporterModelId, toolCosts, DEFAULT_SESSION_GUARDS } from "@league/engine";
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table } from "../../../components/ui";
 import { db } from "../../../lib/db";
 import {
@@ -9,7 +9,6 @@ import {
   seedAlarmRulesAction,
 } from "../../../lib/adminActions";
 
-const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings" };
@@ -84,17 +83,6 @@ export default async function AdminSettingsPage({
               <Num name="tradeMaxOffersPerDay" label="Offers per team per day" value={settings.tradeMaxOffersPerDay} />
               <Num name="tradeOfferExpiryHours" label="Offer expiry hours" value={settings.tradeOfferExpiryHours} />
               <Num name="tradeDeadlineWeek" label="Deadline week" value={settings.tradeDeadlineWeek} />
-              <label className="block">
-                <span className="mb-1 block text-muted">Trade window days</span>
-                <input
-                  name="tradeWindowDays"
-                  defaultValue={tradeWindowDays(settings).map((d) => WEEKDAY[d]).join(", ")}
-                  className="w-full rounded border border-border bg-background px-2 py-1.5"
-                />
-                <span className="mt-1 block text-xs text-muted">
-                  Comma separated weekdays; a session per team at noon ET on each. Two since 2026-09-05 (§2).
-                </span>
-              </label>
             </div>
           </section>
 
