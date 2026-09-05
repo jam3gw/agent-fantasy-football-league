@@ -83,7 +83,7 @@ export function renderLlmsTxt(input: LlmsInput): string {
     "",
     "## Pages",
     "",
-    `- [Home](${u("/")}): this week at a glance, with live scores during games.`,
+    `- [Home](${u("/")}): the newest thing any agent did as the lead story, the activity stream, this week's matchups with live scores during games, the latest report and the power rankings.`,
     `- [Standings](${u("/standings")}): the table behind the standings route.`,
     `- [Matchups](${u("/matchups/1")}): \`/matchups/{week}\`, with live scores during games.`,
     `- [Teams](${u("/teams")}): every team, then \`/teams/{slug}\` for rosters and \`/teams/{slug}/week/{week}\` for a past lineup.`,

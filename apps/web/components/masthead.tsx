@@ -1,6 +1,11 @@
 /**
- * The broadcast masthead: who is playing, whether anything is live, a ticker
- * of this week's scores, and the six-link bar.
+ * The broadcast masthead: who is playing, whether anything is live, a ticker,
+ * and the nine-link bar.
+ *
+ * The ticker is the wire — trades, waivers and the reporter's headlines —
+ * for the six days a week nothing is being played, and swaps fully to this
+ * week's scores while an NFL game is on. A score ticker on a Wednesday was
+ * twelve identical zeros; the wire is what actually moved.
  *
  * It reads the league's live state itself rather than taking it from each
  * page, so every route carries the same banner. It exports no `revalidate` of
@@ -8,8 +13,9 @@
  * window, and §12.1 wants 30 s on the live pages and 5 min on the rest.
  */
 import Link from "next/link";
-import { LiveDot, Container, formatEtTime } from "./broadcast";
+import { LiveDot, Container, formatEtRecent, formatEtTime } from "./broadcast";
 import { PrimaryNav } from "./nav";
+import { lastMoveAt, leagueWire, type WireItem } from "@/lib/broadcast";
 import { allTeams, liveStatus, safeRead as safe, settings, weekMatchups } from "@/lib/queries";
 
 interface TickerGame {
@@ -21,9 +27,17 @@ interface TickerGame {
   final: boolean;
 }
 
-function TickerItem({ game, hidden }: { game: TickerGame; hidden?: boolean }) {
+/**
+ * `live` is whether this ticker is the live one. The fallback `Week N`
+ * ticker shows the same games while no NFL game is on, and a scheduled game
+ * must not be labelled "live" beside 0.00 · 0.00; one with points on the
+ * board between windows is in progress, not scheduled.
+ */
+function TickerItem({ game, live, hidden }: { game: TickerGame; live: boolean; hidden?: boolean }) {
   const awayLeads = game.awayPoints > game.homePoints;
   const homeLeads = game.homePoints > game.awayPoints;
+  const started = game.awayPoints > 0 || game.homePoints > 0;
+  const state = game.final ? "final" : live ? "live" : started ? "in progress" : "scheduled";
   return (
     <div
       aria-hidden={hidden ? "true" : undefined}
@@ -45,11 +59,60 @@ function TickerItem({ game, hidden }: { game: TickerGame; hidden?: boolean }) {
       </span>
       <span
         className={`text-[10px] font-bold uppercase tracking-[0.1em] ${
-          game.final ? "text-band-faint" : "text-accent-bright"
+          game.final || !live ? "text-band-faint" : "text-accent-bright"
         }`}
       >
-        {game.final ? "final" : "live"}
+        {state}
       </span>
+    </div>
+  );
+}
+
+function ScoreTicker({ games, label, week, live }: { games: TickerGame[]; label: string; week: number; live: boolean }) {
+  return (
+    <div className="flex h-[42px] items-center overflow-hidden border-y border-band-border">
+      <div className="flex flex-shrink-0 items-center self-stretch bg-accent px-4 text-[11px] font-bold uppercase tracking-[0.14em] text-band-text">
+        {label}
+      </div>
+      <div
+        className="ticker-viewport flex-1 overflow-hidden"
+        tabIndex={0}
+        role="group"
+        aria-label={`Week ${week} scores`}
+      >
+        {/* The week's games twice over, so translating the track by half
+            its width loops without a seam. The copy is hidden from
+            assistive tech so the scores are announced once. */}
+        <div className="ticker-track">
+          {games.map((g) => (
+            <TickerItem key={g.id} game={g} live={live} />
+          ))}
+          {games.map((g) => (
+            <TickerItem key={`echo-${g.id}`} game={g} live={live} hidden />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Text, not a link, like the score ticker's items: ten anchors in a moving
+ * track would be ten tab stops ahead of the primary nav on every route,
+ * and focusing one the track had carried out of view scrolls the viewport
+ * and knocks the loop off its seam. The pages the lines are about are one
+ * click away in the bar.
+ */
+function WireLine({ item, hidden }: { item: WireItem; hidden?: boolean }) {
+  return (
+    <div
+      aria-hidden={hidden ? "true" : undefined}
+      data-ticker-echo={hidden ? "" : undefined}
+      className="flex items-baseline gap-2.5 whitespace-nowrap border-r border-band-border px-5"
+    >
+      <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-accent-bright">{item.kind}</span>
+      <span className="text-[13px] font-semibold text-band-text">{item.text}</span>
+      <span className="font-mono text-[11px] text-band-faint">{formatEtRecent(item.at)}</span>
     </div>
   );
 }
@@ -59,11 +122,14 @@ export async function Masthead() {
   const season = league?.season ?? null;
   const week = league?.currentWeek ?? 1;
 
-  const [teams, weekly, live] = await Promise.all([
+  const [teams, weekly, live, wire, lastMove] = await Promise.all([
     safe(allTeams, []),
     safe(() => weekMatchups(week), []),
     safe(() => liveStatus(), { liveGames: 0, lastUpdateAt: null, delayed: false }),
+    safe(() => leagueWire(10), []),
+    safe(lastMoveAt, null),
   ]);
+  const isLive = live.liveGames > 0;
   const nameOf = new Map(teams.map((t) => [t.id, t.name ?? t.modelLabel ?? t.slug]));
 
   const games: TickerGame[] = weekly.map((m) => ({
@@ -88,7 +154,7 @@ export async function Masthead() {
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-            {live.liveGames > 0 ? (
+            {isLive ? (
               <div className="flex items-center gap-2 rounded-full bg-[rgba(122,184,111,0.14)] px-[11px] py-[5px]">
                 <LiveDot className="bg-accent-bright" />
                 <span className="text-[12px] font-semibold uppercase tracking-[0.06em] text-accent-bright">
@@ -96,41 +162,50 @@ export async function Masthead() {
                 </span>
               </div>
             ) : null}
+            {/* While games are on the stamp is about the scores; between them
+                it is about the agents, whose last move is the thing that
+                actually changed. */}
             <span className="text-[13px] text-band-muted">
               {live.delayed
                 ? "Live scores delayed — showing the last we received"
-                : live.lastUpdateAt
-                  ? `Updated ${formatEtTime(live.lastUpdateAt)}`
-                  : "No scores yet"}
+                : isLive
+                  ? live.lastUpdateAt
+                    ? `Updated ${formatEtTime(live.lastUpdateAt)}`
+                    : "No scores yet"
+                  : lastMove
+                    ? `Last move ${formatEtRecent(lastMove, { zone: true })}`
+                    : "Nothing has happened yet"}
             </span>
           </div>
         </div>
       </Container>
 
-      {games.length > 0 ? (
+      {/* Scores while a game is on. The wire otherwise — and, before the
+          wire has anything to say, the week's games as a fallback so an
+          empty band does not sit under the masthead in week 1. */}
+      {isLive && games.length > 0 ? (
+        <ScoreTicker games={games} label="Live" week={week} live />
+      ) : wire.length > 0 ? (
         <div className="flex h-[42px] items-center overflow-hidden border-y border-band-border">
           <div className="flex flex-shrink-0 items-center self-stretch bg-accent px-4 text-[11px] font-bold uppercase tracking-[0.14em] text-band-text">
-            {live.liveGames > 0 ? "Live" : `Week ${week}`}
+            The wire
           </div>
-          <div
-            className="ticker-viewport flex-1 overflow-hidden"
-            tabIndex={0}
-            role="group"
-            aria-label={`Week ${week} scores`}
-          >
-            {/* The week's games twice over, so translating the track by half
-                its width loops without a seam. The copy is hidden from
-                assistive tech so the scores are announced once. */}
-            <div className="ticker-track">
-              {games.map((g) => (
-                <TickerItem key={g.id} game={g} />
+          <div className="ticker-viewport flex-1 overflow-hidden" tabIndex={0} role="group" aria-label="The wire">
+            {/* The wire twice over, so translating the track by half its
+                width loops without a seam; the copy is hidden from assistive
+                tech. A longer loop than the scores: these are sentences. */}
+            <div className="ticker-track" style={{ animationDuration: "64s" }}>
+              {wire.map((item, i) => (
+                <WireLine key={i} item={item} />
               ))}
-              {games.map((g) => (
-                <TickerItem key={`echo-${g.id}`} game={g} hidden />
+              {wire.map((item, i) => (
+                <WireLine key={`echo-${i}`} item={item} hidden />
               ))}
             </div>
           </div>
         </div>
+      ) : games.length > 0 ? (
+        <ScoreTicker games={games} label={`Week ${week}`} week={week} live={false} />
       ) : null}
 
       <Container>

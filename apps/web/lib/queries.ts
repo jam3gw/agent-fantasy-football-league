@@ -3,6 +3,7 @@ import "server-only";
  * Read helpers shared by the public pages. Pages are server components that
  * read the database directly; nothing here is exposed to the client.
  */
+import { cache } from "react";
 import { and, desc, eq, inArray, ne } from "drizzle-orm";
 import {
   boardPosts,
@@ -27,17 +28,23 @@ import type { SessionListRow } from "./sessionsFilter";
 
 export type TeamRow = typeof teams.$inferSelect;
 
-export async function allTeams(): Promise<TeamRow[]> {
+/**
+ * `cache`d per request (React's request memo, a no-op outside a render):
+ * the masthead runs on every route and the page under it reads the same
+ * teams, settings and live status, so each is one query per request rather
+ * than one per caller.
+ */
+export const allTeams = cache(async (): Promise<TeamRow[]> => {
   return db().select().from(teams);
-}
+});
 
 export async function teamBySlug(slug: string): Promise<TeamRow | undefined> {
   return (await db().select().from(teams).where(eq(teams.slug, slug)))[0];
 }
 
-export async function settings() {
+export const settings = cache(async () => {
   return getSettings(db());
-}
+});
 
 export async function standings(): Promise<StandingsRow[]> {
   return computeStandings(db());
@@ -64,7 +71,7 @@ export interface LiveStatus {
   delayed: boolean;
 }
 
-export async function liveStatus(now: Date = new Date()): Promise<LiveStatus> {
+export const liveStatus = cache(async (now: Date = new Date()): Promise<LiveStatus> => {
   const current = await settings();
   const [live, poll] = await Promise.all([
     db()
@@ -80,7 +87,7 @@ export async function liveStatus(now: Date = new Date()): Promise<LiveStatus> {
     delayed:
       live.length > 0 && (lastUpdateAt === null || now.getTime() - lastUpdateAt.getTime() > LIVE_STALE_MS),
   };
-}
+});
 
 export async function latestReporterPost() {
   return (await db().select().from(reporterPosts).orderBy(desc(reporterPosts.createdAt)).limit(1))[0];

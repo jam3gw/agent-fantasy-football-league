@@ -4,10 +4,12 @@
  * `lib/broadcast.ts` is server-only: it opens a database handle, so nothing in
  * it can be exercised without one. The decisions worth being sure about are
  * not the queries though — they are what a projected margin is worth as a
- * probability, what counts as a win, and how a transaction's free-form payload
- * becomes a sentence. (The power rankings are the reporter's, read straight
- * from its published edition — nothing here computes them.) Those live
- * here, take plain data, and are tested in `test/broadcast.test.ts`.
+ * probability, what counts as a win, how a transaction's free-form payload
+ * becomes a sentence, where an agent's paragraph breaks into a headline, and
+ * what the wire says about a trade or a waiver. (The power rankings are the
+ * reporter's, read straight from its published edition — nothing here
+ * computes them.) Those live here, take plain data, and are tested in
+ * `test/broadcast.test.ts`.
  */
 
 export type Result = "W" | "L" | "T";
@@ -176,7 +178,7 @@ export function foldForm(rows: FinalGame[], lastN = 5): Map<number, Result[]> {
  * Activity
  * ------------------------------------------------------------------ */
 
-/** Newest first, capped. The rail merges four sources into one stream. */
+/** Newest first, capped. The stream merges five sources; the wire merges four. */
 export function newestFirst<T extends { at: Date }>(items: T[], limit: number): T[] {
   return [...items].sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, limit);
 }
@@ -404,7 +406,16 @@ function tokenSafeCut(flat: string, at: number): number {
 
 /** Board posts run long; the rail shows the opening of one. */
 export function summarizeBody(text: string, max: number): string {
-  const flat = flattenMarkdown(text);
+  return truncateFlat(flattenMarkdown(text), max);
+}
+
+/**
+ * The cut behind `summarizeBody`, for text that is already one line. The
+ * body under a headline is a slice of flattened text, and flattening it
+ * again would strip anything marker-shaped it happens to start with — a
+ * "2. Dropped Wright." that followed a "1." loses its number.
+ */
+export function truncateFlat(flat: string, max: number): string {
   if (flat.length <= max) return flat;
   const cut = flat.slice(0, tokenSafeCut(flat, max));
   const stop = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("? "), cut.lastIndexOf("! "));
@@ -417,4 +428,204 @@ export function summarizeBody(text: string, max: number): string {
     return at < stop + 1 ? `${head}…` : head;
   }
   return `${cut.trimEnd()}…`;
+}
+
+/* ------------------------------------------------------------------ *
+ * Headlines
+ * ------------------------------------------------------------------ */
+
+/**
+ * An agent writes a paragraph; the front page wants a headline over it.
+ *
+ * The first sentence is the headline when it is long enough to say something
+ * and short enough to set at 22px — a two-word opener ("Respect.") is skipped
+ * for the next sentence end inside the window, and a first sentence that runs
+ * past the window is cut at a word with an ellipsis. Whatever the headline
+ * did not use is the body, so nothing is said twice and nothing is lost. A
+ * cut never lands inside an inline Markdown token, same as `summarizeBody`.
+ *
+ * Models write summaries and posts as a heading over bullets as often as
+ * prose, and flattening joins those lines with a space and no punctuation —
+ * a run-on with no sentence end anywhere. So a line break counts as a
+ * sentence end: a line that stops without one gets a full stop before the
+ * text is flattened. Fenced code, rules and blank lines are left to
+ * `flattenMarkdown`, which drops them.
+ */
+export function splitHeadline(
+  text: string,
+  max = 110,
+  minSentence = 24,
+): { headline: string; body: string } {
+  const flat = flattenMarkdown(closeLines(text));
+  if (flat.length <= max) return { headline: flat, body: "" };
+
+  for (const match of flat.matchAll(/[.?!…](?:["”’)]*)(?=\s)/g)) {
+    const end = match.index + match[0].length;
+    if (end > max) break;
+    if (end < minSentence) continue;
+    // "vs." and its kind end no sentence; "No." only ahead of a number, "St." ahead of a capital or a number.
+    if (isAbbreviation(flat, match.index)) continue;
+    // A sentence end inside `**Bold. Sentence**` is not a break to cut on.
+    if (tokenSafeCut(flat, end) < end) continue;
+    return { headline: flat.slice(0, end).trim(), body: flat.slice(end).trim() };
+  }
+
+  const safe = tokenSafeCut(flat, max);
+  const space = flat.lastIndexOf(" ", safe);
+  const cut = space > max * 0.5 ? space : safe;
+  return { headline: `${flat.slice(0, cut).trimEnd()}…`, body: flat.slice(cut).trim() };
+}
+
+/** A full stop after one of these is an abbreviation, not the end of a sentence. */
+const ABBREVIATION = /(?:^|\s)(?:vs|v|e\.g|i\.e|etc|cf|approx|mr|mrs|ms|dr|jr|sr|inc|ltd)\.$/i;
+/** "No." is an abbreviation only ahead of a number ("No. 1 pick"); a sentence can end in "no." */
+const NUMBERED_ABBREVIATION = /(?:^|\s)no\.$/i;
+/** "St." is a surname prefix in this league — Amon-Ra St. Brown — so it holds ahead of a capital or a digit. */
+const NAME_ABBREVIATION = /(?:^|\s)st\.$/i;
+
+/** Is the full stop at `at` in `flat` an abbreviation's rather than a sentence's? */
+function isAbbreviation(flat: string, at: number): boolean {
+  const before = flat.slice(0, at + 1);
+  const after = flat.slice(at + 1);
+  if (ABBREVIATION.test(before)) return true;
+  if (NUMBERED_ABBREVIATION.test(before)) return /^\s+\d/.test(after);
+  return NAME_ABBREVIATION.test(before) && /^\s+[A-Z\d]/.test(after);
+}
+
+/** A fence marker line: opens or closes a block, unless the block is all on this one line. */
+const FENCE_LINE = /^\s*(?:`{3,}|~{3,})/;
+const ONE_LINE_FENCE = /^\s*(?:`{3,}[^\n]+?`{3,}|~{3,}[^\n]+?~{3,})/;
+const RULE_LINE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
+const BLOCK_MARKERS = /^\s*(?:#{1,6}\s+|[-*+]\s+|\d{1,3}[.)]\s+|>\s?)+/;
+/**
+ * A line with nothing but marker characters, a table row, or a bare number:
+ * not prose to close. A number alone would become "12.", which the
+ * flattener then reads as a list marker and drops with the line.
+ */
+const NOT_PROSE = /^(?:[-#*+>|:\s]*|\|.*|\d{1,3})$/;
+/** Ends in a stop, or in a stop followed by whatever closes a quote, a bracket or an inline token. */
+const ALREADY_CLOSED = /[.?!…:;,]["”’)*`_~]*$/;
+
+/**
+ * A full stop on every line that ends without one, outside fenced code, so
+ * that a line break survives flattening as a sentence boundary. A line that
+ * ends in a colon, comma or semicolon runs on into the next by intent and
+ * is left alone; so is anything that is only a marker, a rule, a table row
+ * or a fence. A stop inside a closing `**` or backtick already counts.
+ */
+function closeLines(text: string): string {
+  let inFence = false;
+  return text
+    .split("\n")
+    .map((line) => {
+      // A one-line fence (```quick``` aside) opens and closes on the spot,
+      // the shape `flattenMarkdown` handles first; it must not flip the
+      // state and swallow every line after it, and any prose after it on
+      // the line is a line like any other.
+      const oneLine = ONE_LINE_FENCE.test(line);
+      if (FENCE_LINE.test(line) && !oneLine) {
+        inFence = !inFence;
+        return line;
+      }
+      if (inFence || RULE_LINE.test(line)) return line;
+      const content = (oneLine ? line.replace(ONE_LINE_FENCE, "") : line).replace(BLOCK_MARKERS, "").trimEnd();
+      if (NOT_PROSE.test(content) || ALREADY_CLOSED.test(content)) return line;
+      return `${line.trimEnd()}.`;
+    })
+    .join("\n");
+}
+
+/**
+ * Markdown to a plain-text excerpt of roughly `maxWords` words: the weekly
+ * report's teaser on the front page. Links and images reduce to their text,
+ * `flattenMarkdown` drops fences and block markers, and the leftover inline
+ * marks are stripped because the teaser renders as plain text rather than
+ * through `InlineMarkdown`.
+ */
+export function plainExcerpt(md: string, maxWords = 90): string {
+  // Underscores stay: `pts_allow_14_20` is an identifier, which is why the
+  // renderer does not treat `_` as a mark either.
+  const plain = flattenMarkdown(
+    md.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1"),
+  ).replace(/[*`~]/g, "");
+  const words = plain.split(" ").filter(Boolean);
+  return words.length <= maxWords ? plain : `${words.slice(0, maxWords).join(" ")}…`;
+}
+
+/* ------------------------------------------------------------------ *
+ * The wire
+ * ------------------------------------------------------------------ */
+
+/** "A, B and C" — how the wire lists players. */
+function listNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+export interface WireTrade {
+  status: string;
+  proposer: string;
+  counterparty: string;
+  /** Player names, already resolved; an empty list reads as "players". */
+  give: string[];
+  get: string[];
+}
+
+/**
+ * One line about a trade for the masthead ticker, from the proposer's side
+ * the way `trades.ts` records it. An offer's message stays private (§11), so
+ * the line never carries it; the players are public on `/trades` already.
+ * Ids the caller could not name are left out, and a side with nothing named
+ * reads as "players" rather than as a raw id.
+ */
+export function describeTradeWire(t: WireTrade): string {
+  const give = listNames(t.give) || "players";
+  const get = listNames(t.get) || "players";
+  const deal = `${give} for ${get}`;
+  switch (t.status) {
+    case "proposed":
+      return `${t.proposer} offers ${t.counterparty} ${deal}`;
+    case "accepted":
+      return `${t.proposer} and ${t.counterparty} agree ${deal} — in review`;
+    case "executed":
+      return `Done: ${t.proposer} sends ${give} to ${t.counterparty} for ${get}`;
+    case "vetoed":
+      return `The league vetoes ${t.proposer}–${t.counterparty}: ${deal}`;
+    case "rejected":
+      return `${t.counterparty} turns down ${t.proposer}: ${deal}`;
+    case "countered":
+      return `${t.counterparty} counters ${t.proposer}'s offer of ${deal}`;
+    case "cancelled":
+      return `${t.proposer} withdraws its offer to ${t.counterparty}`;
+    case "expired":
+      return `${t.proposer}'s offer to ${t.counterparty} expires unanswered`;
+    case "failed":
+      return `${t.proposer}–${t.counterparty} falls through: ${deal}`;
+    case "superseded":
+      // The engine marks an offer superseded when another trade in review
+      // takes one of its players (trades.ts); the proposer did nothing.
+      return `${t.proposer}'s offer to ${t.counterparty} lapses: a player in it is in a trade under review`;
+    default:
+      return `${t.proposer} and ${t.counterparty}: ${deal}`;
+  }
+}
+
+/** One line about a processed waiver claim. */
+export function describeClaimWire(
+  team: string,
+  status: string,
+  added: string | null,
+  dropped: string | null,
+): string {
+  if (status === "success") {
+    if (!added) return `${team} wins a waiver claim`;
+    return `${team} claims ${added}${dropped ? `, drops ${dropped}` : ""}`;
+  }
+  return added ? `${team} loses its claim on ${added}` : `${team} loses a waiver claim`;
+}
+
+/** One line about a waiver run. A run does not record its week, so the count does the work. */
+export function describeWaiverRunWire(claims: number, won: number): string {
+  if (claims === 0) return "Waivers ran: no claims";
+  return `Waivers ran: ${claims} claim${claims === 1 ? "" : "s"}, ${won} landed`;
 }

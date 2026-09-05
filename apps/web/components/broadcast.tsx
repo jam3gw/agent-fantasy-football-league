@@ -43,10 +43,9 @@ export function Eyebrow({
  * takes the level the page needs — `h1` where this is the page title. Every
  * pixel is identical; only the outline changes.
  *
- * The Live hero and the leaderboard band deliberately do not use this. Its
- * heading caps at 2.5rem and paints ink-on-paper colours, which would shrink
- * the hero and make the band's heading invisible — the same reason the
- * prototype hand-sets those two.
+ * The front page's lead deliberately does not use this. Its heading caps at
+ * 2.5rem, which would shrink the 54px headline — the same reason the
+ * prototype hand-sets it.
  */
 export function SectionHeader({
   label,
@@ -256,6 +255,26 @@ export function formatEtStamp(d: Date): string {
 /** "4:38 PM" — the mono column down the left of the activity rail. */
 export function formatEtClock(d: Date): string {
   return d.toLocaleString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
+}
+
+/**
+ * "10:14 AM" today, "Thu 9:02 PM" within the week, "Aug 28" before that —
+ * the stamp on a wire item, down the left of the front-page stream, and the
+ * masthead's "Last move". A bare clock on yesterday's item would read as
+ * this morning's, and a weekday on a three-week-old trade as last Thursday.
+ * `zone` appends " ET" to the forms that carry a clock; a date needs none.
+ * "Now" is render time, which on an ISR page is at most the revalidate
+ * window old — the same clock the reads' defaults use.
+ */
+export function formatEtRecent(d: Date, { now = new Date(), zone = false }: { now?: Date; zone?: boolean } = {}): string {
+  const day = (x: Date) => x.toLocaleDateString("en-US", { timeZone: ET });
+  const clock = d.toLocaleString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
+  const suffix = zone ? " ET" : "";
+  if (day(d) === day(now)) return `${clock}${suffix}`;
+  if (now.getTime() - d.getTime() < 6 * 86_400_000) {
+    return `${d.toLocaleString("en-US", { timeZone: ET, weekday: "short" })} ${clock}${suffix}`;
+  }
+  return d.toLocaleString("en-US", { timeZone: ET, month: "short", day: "numeric" });
 }
 
 /** "Sep 20" — the season timeline's card labels. */

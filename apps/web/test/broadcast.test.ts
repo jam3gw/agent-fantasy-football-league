@@ -9,13 +9,19 @@ import { describe, expect, it } from "vitest";
 import {
   MARGIN_SCALE,
   cardProgress,
+  describeClaimWire,
+  describeTradeWire,
   describeTransaction,
+  describeWaiverRunWire,
   gameStatus,
   foldForm,
   newestFirst,
+  plainExcerpt,
+  splitHeadline,
   summarizeBody,
   teamName,
   transactionPlayerIds,
+  truncateFlat,
   remainingPoints,
   winChanceFromMargin,
   winChancePercent,
@@ -524,5 +530,242 @@ describe("team names", () => {
 
   it("never renders undefined for a team that is not there", () => {
     expect(teamName(undefined)).toBe("unknown");
+  });
+});
+
+describe("a headline out of an agent's paragraph", () => {
+  it("is the whole thing when it is short enough to set big", () => {
+    expect(splitHeadline("Moved Rice into the FLEX over Jennings.")).toEqual({
+      headline: "Moved Rice into the FLEX over Jennings.",
+      body: "",
+    });
+  });
+
+  it("is the first sentence, with the rest as the body", () => {
+    const text =
+      "Moved Rashee Rice into the FLEX over Jauan Jennings on a 78% snap-share read. Rice's preseason snap share was 78%; Jennings is a WR3 in a run-first offense.";
+    expect(splitHeadline(text)).toEqual({
+      headline: "Moved Rashee Rice into the FLEX over Jauan Jennings on a 78% snap-share read.",
+      body: "Rice's preseason snap share was 78%; Jennings is a WR3 in a run-first offense.",
+    });
+  });
+
+  it("skips a two-word opener for a sentence that says something", () => {
+    // "Respect." over the lead story tells a reader nothing; the next
+    // sentence is the one worth 54px.
+    const text =
+      "Respect. I took a tight end at 1.04 and I would do it again. Ask me in December, when the whole league has seen why it was right.";
+    expect(splitHeadline(text)).toEqual({
+      headline: "Respect. I took a tight end at 1.04 and I would do it again.",
+      body: "Ask me in December, when the whole league has seen why it was right.",
+    });
+  });
+
+  it("cuts a long first sentence at a word with an ellipsis and keeps the rest as the body", () => {
+    const words = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
+    const { headline, body } = splitHeadline(`${words}.`);
+    expect(headline.endsWith("…")).toBe(true);
+    expect(headline.length).toBeLessThanOrEqual(111);
+    // The cut lands between words, and nothing is said twice: the body
+    // picks up exactly where the headline stopped.
+    expect(`${headline.slice(0, -1)} ${body}`).toBe(`${words}.`);
+  });
+
+  it("does not take a decimal for a sentence end", () => {
+    const text =
+      "Took a tight end at 1.04 and would do it again, whatever the board says about it this week. Ask me in December, when it has paid off.";
+    expect(splitHeadline(text).headline).toBe(
+      "Took a tight end at 1.04 and would do it again, whatever the board says about it this week.",
+    );
+  });
+
+  it("keeps a closing quote with the sentence it closes", () => {
+    const text =
+      "Kimi to Gemini: “Your bench is thinner than my patience.” Thursday cannot come fast enough, and the two meet in week 1.";
+    expect(splitHeadline(text)).toEqual({
+      headline: "Kimi to Gemini: “Your bench is thinner than my patience.”",
+      body: "Thursday cannot come fast enough, and the two meet in week 1.",
+    });
+  });
+
+  it("does not break inside an inline token, same as the excerpts", () => {
+    const text = `${"a".repeat(30)} **Bold sentence. Still bold** and then ${"b".repeat(80)}.`;
+    const { headline } = splitHeadline(text);
+    expect(headline).not.toMatch(/^[^*]*\*\*[^*]*$/);
+  });
+
+  it("treats a line break as a sentence end, so a heading over bullets is not one run-on", () => {
+    // Models write summaries as a heading and a list as often as prose;
+    // flattening alone joined these with a space and the h1 was cut mid-list.
+    const text =
+      "## Week 1 plan\n- Start **Gibbs** at RB1 because the matchup is soft\n- Bench Wright until the bye is over\n- Claim Allgeier";
+    expect(splitHeadline(text)).toEqual({
+      headline: "Week 1 plan. Start **Gibbs** at RB1 because the matchup is soft.",
+      body: "Bench Wright until the bye is over. Claim Allgeier.",
+    });
+    expect(splitHeadline("## The plan\n- Start **Gibbs**.").headline).toBe("The plan. Start **Gibbs**.");
+  });
+
+  it("leaves a line that runs on by intent alone, and fenced code to the flattener", () => {
+    expect(splitHeadline("My plan:\n- Start Gibbs,\n- and bench Wright\n```\nnot prose\n```\nDone").headline).toBe(
+      "My plan: Start Gibbs, and bench Wright. Done.",
+    );
+    expect(splitHeadline("Above\n---\nBelow").headline).toBe("Above. Below.");
+  });
+
+  it("does not double a full stop that sits inside a closing token", () => {
+    // `**Start Gibbs.**` is already closed; a second stop after the `**`
+    // rendered as "Start Gibbs.. Bench Wright." on the lead.
+    expect(splitHeadline("**Start Gibbs.**\nBench Wright.").headline).toBe("**Start Gibbs.** Bench Wright.");
+    expect(splitHeadline("*Done.*\n`npm test.`\nNext").headline).toBe("*Done.* `npm test.` Next.");
+  });
+
+  it("does not let a one-line fence swallow every line after it", () => {
+    expect(splitHeadline("Start\n```quick``` aside\nLine one\nLine two").headline).toBe(
+      "Start. aside. Line one. Line two.",
+    );
+  });
+
+  it("leaves marker-only lines and table rows alone", () => {
+    expect(splitHeadline("- \n#\n-\n> \nReal line").headline).toBe("Real line.");
+    expect(splitHeadline("```only```\nAfter").headline).toBe("After.");
+    expect(splitHeadline("| a | b |\n| - | - |\nAfter").headline).toBe("| a | b | | - | - | After.");
+  });
+
+  it("ends a sentence on a bare no., and keeps No. 1 whole", () => {
+    const yes =
+      "Everything on that roster is a no. The rest of the league can stop asking me about it now, and the answer will not change before December.";
+    expect(splitHeadline(yes).headline).toBe("Everything on that roster is a no.");
+    const pick =
+      "Took the No. 1 pick and used it on a tight end, as everybody has now heard. Ask me in December about it, when the whole league has seen why.";
+    expect(splitHeadline(pick).headline).toBe(
+      "Took the No. 1 pick and used it on a tight end, as everybody has now heard.",
+    );
+  });
+
+  it("keeps St. Brown whole — St. holds ahead of a capital, which every next sentence starts with", () => {
+    const trade =
+      "Traded Jahmyr Gibbs for Amon-Ra St. Brown and a bench piece because the swing is worth it. The board can argue.";
+    expect(splitHeadline(trade).headline).toBe(
+      "Traded Jahmyr Gibbs for Amon-Ra St. Brown and a bench piece because the swing is worth it.",
+    );
+  });
+
+  it("does not turn a line that is only a number into a list marker that drops the line", () => {
+    expect(splitHeadline("Week 12\nSet the lineup\n12\nNext line here").headline).toBe(
+      "Week 12. Set the lineup. 12 Next line here.",
+    );
+  });
+
+  it("does not take an abbreviation for a sentence end", () => {
+    const text =
+      "Sat Rice over Jennings in the FLEX vs. the Chargers because the snap share favours him. Jennings stays on the bench.";
+    expect(splitHeadline(text).headline).toBe(
+      "Sat Rice over Jennings in the FLEX vs. the Chargers because the snap share favours him.",
+    );
+  });
+
+  it("returns an empty headline for text that is all fenced code, for the caller to fill", () => {
+    expect(splitHeadline("```\ncode\n```")).toEqual({ headline: "", body: "" });
+  });
+});
+
+describe("truncating text that is already one line", () => {
+  it("does not strip a marker-shaped opening the way a second flatten would", () => {
+    // The body under a headline is a slice of flattened text; the "2." that
+    // starts it is what is left of a numbered list, not a list marker.
+    expect(truncateFlat("2. Dropped Wright.", 100)).toBe("2. Dropped Wright.");
+    expect(truncateFlat("- item one", 100)).toBe("- item one");
+  });
+
+  it("cuts the same way the excerpts do", () => {
+    expect(truncateFlat("a".repeat(200), 50)).toHaveLength(51);
+  });
+});
+
+describe("the report's plain excerpt", () => {
+  it("reduces links and images to their text and strips inline marks", () => {
+    expect(plainExcerpt("See [the board](/board) and ![chart](x.png) — **bold** `code`.")).toBe(
+      "See the board and — bold code.",
+    );
+  });
+
+  it("keeps underscores, which are identifiers here, not marks", () => {
+    expect(plainExcerpt("Watch pts_allow_14_20 this week.")).toBe("Watch pts_allow_14_20 this week.");
+  });
+
+  it("caps at the word count with an ellipsis", () => {
+    expect(plainExcerpt("one two three four five", 3)).toBe("one two three…");
+    expect(plainExcerpt("one two three", 3)).toBe("one two three");
+  });
+});
+
+describe("what the wire says", () => {
+  const deal = { proposer: "Second Overall", counterparty: "Terra Nova", give: ["Alvin Kamara"], get: ["Garrett Wilson"] };
+
+  it("reads an offer from the proposer's side", () => {
+    expect(describeTradeWire({ ...deal, status: "proposed" })).toBe(
+      "Second Overall offers Terra Nova Alvin Kamara for Garrett Wilson",
+    );
+  });
+
+  it("says a trade is in review once it is accepted, and done once it executes", () => {
+    expect(describeTradeWire({ ...deal, status: "accepted" })).toBe(
+      "Second Overall and Terra Nova agree Alvin Kamara for Garrett Wilson — in review",
+    );
+    expect(describeTradeWire({ ...deal, status: "executed" })).toBe(
+      "Done: Second Overall sends Alvin Kamara to Terra Nova for Garrett Wilson",
+    );
+  });
+
+  it("lists several players with an and", () => {
+    expect(describeTradeWire({ ...deal, status: "proposed", give: ["A", "B", "C"] })).toBe(
+      "Second Overall offers Terra Nova A, B and C for Garrett Wilson",
+    );
+  });
+
+  it("never prints a raw id: an unnamed side reads as players", () => {
+    expect(describeTradeWire({ ...deal, status: "vetoed", give: [], get: [] })).toBe(
+      "The league vetoes Second Overall–Terra Nova: players for players",
+    );
+  });
+
+  it("has a line for every way an offer can end", () => {
+    const line = (status: string) => describeTradeWire({ ...deal, status });
+    expect(line("rejected")).toBe("Terra Nova turns down Second Overall: Alvin Kamara for Garrett Wilson");
+    expect(line("countered")).toBe("Terra Nova counters Second Overall's offer of Alvin Kamara for Garrett Wilson");
+    expect(line("cancelled")).toBe("Second Overall withdraws its offer to Terra Nova");
+    expect(line("expired")).toBe("Second Overall's offer to Terra Nova expires unanswered");
+    expect(line("failed")).toBe("Second Overall–Terra Nova falls through: Alvin Kamara for Garrett Wilson");
+    expect(line("new")).toBe("Second Overall and Terra Nova: Alvin Kamara for Garrett Wilson");
+  });
+
+  it("does not credit the proposer with an action when the engine supersedes its offer", () => {
+    // trades.ts marks an open offer superseded when a different trade in
+    // review takes one of its players; nobody replaced anything.
+    expect(describeTradeWire({ ...deal, status: "superseded" })).toBe(
+      "Second Overall's offer to Terra Nova lapses: a player in it is in a trade under review",
+    );
+  });
+
+  it("reads a processed claim either way it went", () => {
+    expect(describeClaimWire("The Gibbs Factor", "success", "Tyler Allgeier", "Jaylen Wright")).toBe(
+      "The Gibbs Factor claims Tyler Allgeier, drops Jaylen Wright",
+    );
+    expect(describeClaimWire("The Gibbs Factor", "success", "Tyler Allgeier", null)).toBe(
+      "The Gibbs Factor claims Tyler Allgeier",
+    );
+    expect(describeClaimWire("Moonshot Marauders", "failed", "Tyler Allgeier", null)).toBe(
+      "Moonshot Marauders loses its claim on Tyler Allgeier",
+    );
+    expect(describeClaimWire("Moonshot Marauders", "failed", null, null)).toBe(
+      "Moonshot Marauders loses a waiver claim",
+    );
+  });
+
+  it("counts a waiver run", () => {
+    expect(describeWaiverRunWire(9, 7)).toBe("Waivers ran: 9 claims, 7 landed");
+    expect(describeWaiverRunWire(1, 1)).toBe("Waivers ran: 1 claim, 1 landed");
+    expect(describeWaiverRunWire(0, 0)).toBe("Waivers ran: no claims");
   });
 });
