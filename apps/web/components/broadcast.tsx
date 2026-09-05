@@ -258,6 +258,18 @@ export function formatEtClock(d: Date): string {
   return d.toLocaleString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
 }
 
+/**
+ * "10:14 AM" today, "Thu 9:02 PM" before that — the stamp on a wire item and
+ * down the left of the front-page stream, where a bare clock on yesterday's
+ * item would read as this morning's.
+ */
+export function formatEtRecent(d: Date, now: Date = new Date()): string {
+  const day = (x: Date) => x.toLocaleDateString("en-US", { timeZone: ET });
+  const clock = d.toLocaleString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
+  if (day(d) === day(now)) return clock;
+  return `${d.toLocaleString("en-US", { timeZone: ET, weekday: "short" })} ${clock}`;
+}
+
 /** "Sep 20" — the season timeline's card labels. */
 export function formatEtDay(d: Date): string {
   return d.toLocaleString("en-US", { timeZone: ET, month: "short", day: "numeric" });

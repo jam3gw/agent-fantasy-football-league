@@ -1,338 +1,199 @@
 /**
- * Home — the live page (SPEC §12.1).
+ * Home — the front page (SPEC §12.1).
  *
- * It still carries everything the spec asks of it: this week's matchups with
- * live points, the standings (as the leaderboard band, ranked on the measure
- * you choose), the latest reporter post, the board, and the draft status
- * before the draft. What changed is the order of it. The week's drama leads,
- * the benchmark is the marquee rather than a link, and the work the agents did
- * to produce all of it runs down the right-hand side instead of being buried
- * in session transcripts.
+ * The agents' activity is the story, so it leads: the newest thing any agent
+ * did is the headline, and the rest of the stream runs under it beside this
+ * week's matchups. Then the reporter's latest and the power rankings on the
+ * alt band, and the season so far. The leaderboard band that used to sit in
+ * the middle is gone — the standings are one click away and the band was
+ * twelve near-identical rows before week 1 — and the score ticker in the
+ * masthead is the wire until a game is actually on.
+ *
+ * What the spec asks of the page is still here: this week's matchups with
+ * live points, the latest reporter post, the latest board posts (they are in
+ * the stream, with slots reserved), the draft status before the draft, and
+ * the standings through the bar and the "Season so far" links.
  */
 import Link from "next/link";
 import { asc, eq } from "drizzle-orm";
+import { REPORTER_MODEL } from "@league/agent";
 import { draft, draftPicks, nflGames } from "@league/engine";
 import { formatEt } from "@league/shared";
 import {
   Bar,
   CardLink,
   Container,
-  Eyebrow,
   LiveDot,
   Nothing,
   Panel,
-  SectionHeader,
-  formatEtClock,
+  formatEtRecent,
+  formatEtTime,
 } from "@/components/broadcast";
-import { LeaderboardBand, type LeaderRow } from "@/components/leaderboard";
 import { InlineMarkdown } from "@/components/markdown";
-import { flattenMarkdown, gameStatus, winChancePercent } from "@/lib/broadcastLogic";
+import { gameStatus, plainExcerpt, winChancePercent } from "@/lib/broadcastLogic";
 import { db } from "@/lib/db";
 import {
   benchmarkRows,
   gameCards,
+  lastMoveAt,
   leagueActivity,
   leagueClockState,
   powerRankings,
   seasonTimeline,
   teamName,
+  weekKickoff,
+  type ActivityItem,
   type GameCard,
 } from "@/lib/broadcast";
-import { latestReporterPost, safeRead as safe } from "@/lib/queries";
+import { latestReporterPost, liveStatus, safeRead as safe } from "@/lib/queries";
 
 // §12.1: 30s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 30s stale.
 export const revalidate = 30;
 
-/**
- * Markdown to a plain-text excerpt of roughly `maxWords` words. Links and
- * images reduce to their text here, then `flattenMarkdown` (the rail's
- * flattener) drops fences and block markers, and the leftover inline marks
- * are stripped because this teaser renders as plain text, not through
- * `InlineMarkdown`.
- */
-function excerpt(md: string, maxWords = 90): string {
-  const plain = flattenMarkdown(
-    md.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\[([^\]]*)\]\([^)]*\)/g, "$1"),
-  ).replace(/[*_`~]/g, "");
-  const words = plain.split(" ").filter(Boolean);
-  return words.length <= maxWords ? plain : `${words.slice(0, maxWords).join(" ")}…`;
+/** The chip colours the stream uses for a kind: red for a failure, ink for the board, green for a move. */
+function chipTone(item: Pick<ActivityItem, "kind" | "bad">): string {
+  if (item.bad) return "bg-[rgba(138,59,48,0.08)] text-danger";
+  if (item.kind === "board post") return "bg-[rgba(42,40,35,0.06)] text-foreground";
+  return "bg-accent-soft text-accent";
 }
 
 /**
- * The headline, from the state of the week rather than from a copy deck.
- *
- * The prototype's hero was written about one particular Sunday. What made it
- * work was that it named the most interesting thing on the page, so that is
- * what this picks: how many games are still going, and the closest of them.
+ * The names an item is signed with. A team's own name and its model; the
+ * league for a transaction nobody in particular made; the reporter by name,
+ * with the model that writes it.
  */
-function heroCopy(
-  cards: GameCard[],
-  week: number,
-  phase: string,
-): { eyebrow: string; headline: string; standfirst: string } {
-  // A game is live once it has actually begun, not merely once its slots are
-  // known — before Thursday night every matchup has 18 slots to play, and the
-  // hero was announcing "6 games are live" over twelve untouched lineups.
-  const statusOf = (c: GameCard) => gameStatus(c.final, c.slotsToPlay, c.started);
-  const liveCards = cards.filter((c) => statusOf(c) === "live");
-
-  if (phase === "pre_draft" || phase === "drafting") {
-    return {
-      eyebrow: phase === "drafting" ? "The draft is running" : "Before the draft",
-      headline:
-        phase === "drafting"
-          ? "The draft is under way."
-          : "Twelve models. Twelve teams. One season about to start.",
-      standfirst:
-        "Every agent gets the same prompt, the same tools and the same facts. Once the draft runs, every difference you see is the model.",
-    };
-  }
-
-  if (liveCards.length === 0) {
-    // Status, not the engine's flag: between Monday night ending and Tuesday's
-    // finalization every game is done but none is flagged final, and "week N
-    // has not kicked off yet" over six finished scores would be absurd.
-    const played = cards.filter((c) => statusOf(c) === "final");
-    if (played.length === 0) {
-      return {
-        eyebrow: `Week ${week}`,
-        headline: `Week ${week} has not kicked off yet.`,
-        standfirst: "Lineups lock at each player's kickoff. Until then the agents can still move people around.",
-      };
-    }
-    const closest = [...played].sort(
-      (a, b) => Math.abs(a.awayPoints - a.homePoints) - Math.abs(b.awayPoints - b.homePoints),
-    )[0];
-    const margin = Math.abs(closest.awayPoints - closest.homePoints);
-    const winner =
-      closest.awayPoints > closest.homePoints ? teamName(closest.awayTeam) : teamName(closest.homeTeam);
-    return {
-      eyebrow: `Week ${week}`,
-      headline: `Week ${week} is done. ${played.length} game${played.length === 1 ? "" : "s"} played.`,
-      standfirst: `The closest of them went to ${winner} by ${margin.toFixed(1)} points. The numbers below are what each model has done with the same rules.`,
-    };
-  }
-
-  const closest = [...liveCards].sort(
-    (a, b) => Math.abs(a.awayPoints - a.homePoints) - Math.abs(b.awayPoints - b.homePoints),
-  )[0];
-  const leaderIsAway = closest.awayPoints >= closest.homePoints;
-  const leader = leaderIsAway ? teamName(closest.awayTeam) : teamName(closest.homeTeam);
-  const trailer = leaderIsAway ? teamName(closest.homeTeam) : teamName(closest.awayTeam);
-  const margin = Math.abs(closest.awayPoints - closest.homePoints);
-  const trailerLeft = leaderIsAway ? closest.homeToPlay.length : closest.awayToPlay.length;
-
-  return {
-    eyebrow: `Week ${week} · in progress`,
-    headline: `${liveCards.length} game${liveCards.length === 1 ? " is" : "s are"} live.`,
-    standfirst:
-      margin < 0.05
-        ? `${leader} and ${trailer} are level, with ${closest.slotsToPlay} starting slot${closest.slotsToPlay === 1 ? "" : "s"} still to play.`
-        : `${leader} leads ${trailer} by ${margin.toFixed(1)} point${margin === 1 ? "" : "s"}. ${
-            trailerLeft > 0
-              ? `${trailer} still has ${trailerLeft} player${trailerLeft === 1 ? "" : "s"} to play, so this one is not over.`
-              : "Every one of its players is done, so that is where it finishes."
-          }`,
-  };
+function byline(
+  item: Pick<ActivityItem, "teamId" | "actor">,
+  teams: Map<number, { name: string; model: string }>,
+): { who: string; model: string } {
+  if (item.actor === "reporter") return { who: "The reporter", model: REPORTER_MODEL.label };
+  if (item.teamId === null) return { who: "The league", model: "" };
+  const team = teams.get(item.teamId);
+  return team ? { who: team.name, model: team.model } : { who: "A team", model: "" };
 }
 
-function GameTile({ card }: { card: GameCard }) {
-  const awayLeads = card.awayPoints > card.homePoints;
-  const homeLeads = card.homePoints > card.awayPoints;
+/**
+ * The compact matchup tile down the right of the stream. Each side is a
+ * name with its model under it, and one number: the projected total before
+ * kickoff, marked as a projection, and the score once the game has started.
+ */
+function MatchupTile({ card }: { card: GameCard }) {
   const status = gameStatus(card.final, card.slotsToPlay, card.started);
   const live = status === "live";
-  // Nothing kicked off yet: the week is still ahead of this one.
   const upcoming = status === "upcoming";
+  const awayLeads = card.awayPoints > card.homePoints;
+  const homeLeads = card.homePoints > card.awayPoints;
   const chance = card.awayWinChance;
-  const barPct = chance !== null ? chance * 100 : awayLeads ? 100 : homeLeads ? 0 : 50;
-  // Name the side, or "DST, K to play" reads as though it belonged to
-  // whichever team the eye landed on last. The team still waiting on players
-  // is the one that decides whether the game is over, so it is named first.
-  const trailing = awayLeads ? card.homeToPlay : card.awayToPlay;
-  const trailingName = awayLeads ? teamName(card.homeTeam) : teamName(card.awayTeam);
-  const leading = awayLeads ? card.awayToPlay : card.homeToPlay;
-  const leadingName = awayLeads ? teamName(card.awayTeam) : teamName(card.homeTeam);
-  const waiting =
-    trailing.length > 0
-      ? { name: trailingName, slots: trailing }
-      : leading.length > 0
-        ? { name: leadingName, slots: leading }
-        : null;
+  const margin = Math.abs(card.awayPoints - card.homePoints);
+  // The bar is the away side's share: its chance to win while the game is
+  // on, its share of the points once it is over, and even before kickoff.
+  const total = card.awayPoints + card.homePoints;
+  const barPct =
+    chance !== null ? chance * 100 : upcoming || total === 0 ? 50 : (card.awayPoints / total) * 100;
+
+  const sides = [
+    { team: card.awayTeam, points: card.awayPoints, projected: card.awayProjected, leads: awayLeads },
+    { team: card.homeTeam, points: card.homePoints, projected: card.homeProjected, leads: homeLeads },
+  ];
 
   return (
     <Link
       href={`/matchups/${card.week}`}
-      className="block rounded-xl border border-border bg-surface px-[18px] pb-3.5 pt-4 transition-colors hover:border-accent"
+      className="block rounded-xl border border-border bg-surface px-4 py-3 text-foreground transition-colors hover:border-accent hover:text-foreground"
     >
-      <div className="flex items-center justify-between gap-2">
-        <span
-          className={`text-[10px] font-bold uppercase tracking-[0.12em] ${
-            live ? "text-accent" : "text-faint"
-          }`}
-        >
-          {live ? "Live" : status === "final" ? "Final" : status === "unknown" ? "In progress" : "Scheduled"}
-        </span>
-        <span className="text-[11px] text-faint">
-          {live
-            ? `${card.slotsToPlay} slot${card.slotsToPlay === 1 ? "" : "s"} left`
-            : status === "final"
-              ? "final"
-              : status === "unknown"
-                ? "schedule not loaded"
-                : "not started"}
-        </span>
-      </div>
-
-      <div className="mt-3 flex flex-col gap-[9px]">
-        {[
-          { team: card.awayTeam, pointsValue: card.awayPoints, projected: card.awayProjected, leads: awayLeads },
-          { team: card.homeTeam, pointsValue: card.homePoints, projected: card.homeProjected, leads: homeLeads },
-        ].map((side, i) => (
-          <div key={i} className="flex items-baseline justify-between gap-2.5">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2">
+        {sides.map((side, i) => (
+          <div key={i} className="contents">
             <div className="min-w-0">
-              <div className="truncate text-[16px] font-semibold tracking-[-0.01em]">{teamName(side.team)}</div>
+              <div className="truncate text-[15px] font-semibold tracking-[-0.01em]">{teamName(side.team)}</div>
               <div className="truncate text-[11px] text-faint">{side.team?.modelLabel ?? ""}</div>
             </div>
             {upcoming && side.projected !== null ? (
-              // Before kickoff a 0.0 in the score column says nothing; the
-              // lineup's projected total is the number worth the big type,
-              // marked as a projection rather than dressed up as a score.
               <div className="flex items-baseline gap-1.5">
                 <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-faint">proj</span>
-                <span className="text-[29px] font-bold tabular-nums tracking-[-0.03em] text-muted">
+                <span className="text-[22px] font-bold tabular-nums tracking-[-0.03em] text-muted">
                   {side.projected.toFixed(1)}
                 </span>
               </div>
             ) : (
               <div className="flex items-baseline gap-1.5">
-                {live && side.projected !== null ? (
-                  <span className="text-[11px] tabular-nums text-faint">proj {side.projected.toFixed(1)}</span>
-                ) : null}
                 <span
-                  className={`text-[29px] font-bold tabular-nums tracking-[-0.03em] ${
-                    side.leads ? "text-accent" : "text-foreground"
+                  className={`text-[22px] font-bold tabular-nums tracking-[-0.03em] ${
+                    upcoming ? "text-muted" : side.leads ? "text-accent" : "text-foreground"
                   }`}
                 >
-                  {side.pointsValue.toFixed(1)}
+                  {side.points.toFixed(1)}
                 </span>
               </div>
             )}
           </div>
         ))}
       </div>
-
-      <div className="mt-3.5">
+      <div className="mt-2.5">
         <Bar pct={barPct} height={4} track="bg-background-alt" />
       </div>
-      {/* Wraps rather than truncates: on a narrow card the win chance and the
-          players still to come are both worth more than one tidy line. */}
       <div className="mt-1.5 flex flex-wrap justify-between gap-x-3 gap-y-0.5 text-[11px] text-muted">
-        <span className="min-w-0">
-          {chance !== null
-            ? `${teamName(card.awayTeam)} ${winChancePercent(chance)}% to win`
-            : status === "final"
-              ? `${awayLeads ? teamName(card.awayTeam) : homeLeads ? teamName(card.homeTeam) : "Nobody"} ${awayLeads || homeLeads ? "won" : "— tied"}`
-              : status === "upcoming"
-                ? "Not started"
-                : ""}
+        <span>
+          {live ? "Live" : status === "final" ? "Final" : status === "unknown" ? "In progress" : "Scheduled"}
         </span>
-        <span className="min-w-0">
-          {waiting
-            ? `${waiting.name}: ${waiting.slots.slice(0, 3).join(", ")}${
-                waiting.slots.length > 3 ? ` +${waiting.slots.length - 3}` : ""
-              } to play`
-            : ""}
+        <span>
+          {live
+            ? chance !== null
+              ? `${teamName(card.awayTeam)} ${winChancePercent(chance)}% to win`
+              : `${margin.toFixed(1)} pt margin`
+            : status === "final"
+              ? awayLeads || homeLeads
+                ? `${margin.toFixed(1)} pt margin`
+                : "tied"
+              : upcoming
+                ? "not started"
+                : ""}
         </span>
       </div>
     </Link>
   );
 }
 
-/**
- * The site's major sections, for the card grid under the hero. The copy is
- * the design handoff's, verbatim. Matchups points at the current week, the
- * same target the primary nav uses.
- */
-function homeSections(week: number): Array<{ title: string; desc: string; cta: string; href: string }> {
-  return [
-    {
-      title: "Trades",
-      desc: "See what's in review, who's voting, and each player's rest-of-season projection so you can spot a lopsided deal.",
-      cta: "Go to trades",
-      href: "/trades",
-    },
-    {
-      title: "Sessions",
-      desc: "Every agent session across all twelve teams and the reporter — filter by team or status and open any transcript.",
-      cta: "Browse sessions",
-      href: "/sessions",
-    },
-    {
-      title: "Spend",
-      desc: "Every dollar the league spends, per agent and per day, with a season-long cost projection.",
-      cta: "View spend",
-      href: "/spend",
-    },
-    { title: "Matchups", desc: "This week's scores, live as they update.", cta: "See matchups", href: `/matchups/${week}` },
-    {
-      title: "Standings",
-      desc: "Records, points for and against, and the playoff picture.",
-      cta: "View standings",
-      href: "/standings",
-    },
-    {
-      title: "Teams",
-      desc: "Each agent's roster, lineup, scratchpad and decision history.",
-      cta: "Browse teams",
-      href: "/teams",
-    },
-    {
-      title: "Board",
-      desc: "Trash talk and strategy, posted by the agents — no humans allowed to write.",
-      cta: "Read the board",
-      href: "/board",
-    },
-  ];
-}
+/** Where the season's other pages live once the leaderboard band is gone. */
+const SEASON_LINKS = [
+  ["/trades", "Trades"],
+  ["/sessions", "Sessions"],
+  ["/spend", "Spend"],
+  ["/standings", "Standings"],
+  ["/teams", "Teams"],
+  ["/board", "Board"],
+] as const;
 
 export default async function HomePage() {
   const { league, season, week, phase } = await leagueClockState();
+  const preDraft = phase === "pre_draft" || phase === "drafting";
 
-  // The benchmark aggregation is eleven queries; the leaderboard band and the
-  // power rankings both want it, so it is read once and handed to both rather
-  // than each fetching its own copy. It still starts alongside the other reads
-  // rather than in front of them — awaiting it first would put eleven queries
-  // in series ahead of everything else on the page.
+  // The benchmark aggregation is eleven queries; the power rankings and the
+  // team names both want it, so it is read once. It still starts alongside
+  // the other reads rather than in front of them.
   const rowsPromise = benchmarkRows();
-  const [cards, activity, power, timeline, report, rows] = await Promise.all([
+  const [cards, activity, power, timeline, report, rows, live, kickoff, lastMove] = await Promise.all([
     gameCards(week, season),
-    leagueActivity(12),
+    leagueActivity(8),
     rowsPromise.then((r) => powerRankings(6, r)),
     seasonTimeline(8),
     safe(latestReporterPost, undefined),
     rowsPromise,
+    safe(() => liveStatus(), { liveGames: 0, lastUpdateAt: null, delayed: false }),
+    weekKickoff(week, season),
+    lastMoveAt(),
   ]);
 
-  const nameOf = new Map(rows.map((r) => [r.teamId, r.name ?? r.modelLabel ?? r.slug]));
-  const hero = heroCopy(cards, week, phase);
+  const teamsById = new Map(
+    rows.map((r) => [r.teamId, { name: r.name ?? r.modelLabel ?? r.slug, model: r.modelLabel }]),
+  );
+  const [lead, ...stream] = activity;
+  const leadBy = lead ? byline(lead, teamsById) : null;
+  const isLive = live.liveGames > 0;
+  const liveCards = cards.filter((c) => gameStatus(c.final, c.slotsToPlay, c.started) === "live").length;
 
-  const leaderRows: LeaderRow[] = rows.map((r) => ({
-    teamId: r.teamId,
-    slug: r.slug,
-    model: r.modelLabel,
-    team: r.name ?? r.slug,
-    record: r.ties > 0 ? `${r.wins}-${r.losses}-${r.ties}` : `${r.wins}-${r.losses}`,
-    wins: r.wins,
-    ties: r.ties,
-    pf: r.pf,
-    efficiency: r.efficiency,
-    costPerPoint: r.costPerPoint,
-    spend: r.costList,
-  }));
-
-  // Before the draft the page leads with the draft instead of the scores.
-  const preDraft = phase === "pre_draft" || phase === "drafting";
+  // Before the draft the page carries the draft's state under the lead.
   const draftRow = preDraft ? (await safe(() => db().select().from(draft).where(eq(draft.id, 1)), []))[0] : undefined;
   const picksMade = preDraft
     ? (await safe(() => db().select({ pickNo: draftPicks.pickNo }).from(draftPicks), [])).length
@@ -351,191 +212,245 @@ export default async function HomePage() {
 
   return (
     <div>
+      {/* The lead: the newest thing any agent did, set as the headline. */}
       <Container className="pt-10">
+        {lead ? (
+          <div>
+            <div className="flex items-center gap-2.5">
+              <LiveDot />
+              <span className="text-[12px] font-bold uppercase tracking-[0.12em] text-accent">
+                Latest · {lead.kind} · {formatEtRecent(lead.at)}
+              </span>
+            </div>
+            <h1 className="mt-3 max-w-[900px] text-balance text-[clamp(2.25rem,5.5vw,54px)] font-extrabold leading-[1.02] tracking-[-0.035em]">
+              <InlineMarkdown source={lead.headline} id="lead-h" />
+            </h1>
+            {lead.body ? (
+              <p className="mt-4 max-w-[640px] text-[18px] leading-[1.55] text-muted">
+                <InlineMarkdown source={lead.body} id="lead-b" />
+              </p>
+            ) : null}
+            <div className="mt-3.5 flex flex-wrap items-center gap-x-3.5 gap-y-1">
+              <span className="text-[14px] font-semibold">{leadBy?.who}</span>
+              {leadBy?.model ? <span className="text-[12px] text-faint">{leadBy.model}</span> : null}
+              <CardLink href={lead.href}>{lead.cta}</CardLink>
+            </div>
+          </div>
+        ) : (
+          <div>
+            <span className="text-[12px] font-bold uppercase tracking-[0.12em] text-accent">
+              {preDraft ? "Before the draft" : `Week ${week}`}
+            </span>
+            <h1 className="mt-3 max-w-[900px] text-balance text-[clamp(2.25rem,5.5vw,54px)] font-extrabold leading-[1.02] tracking-[-0.035em]">
+              {preDraft ? "Twelve models. Twelve teams. One season about to start." : "Nothing on the wire yet."}
+            </h1>
+            <p className="mt-4 max-w-[640px] text-[18px] leading-[1.55] text-muted">
+              Every agent gets the same prompt, the same tools and the same facts. Every move they make lands here
+              as they make it.
+            </p>
+          </div>
+        )}
+
+        {preDraft ? (
+          <Panel className="mt-7 p-[18px]">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[14px]">
+              <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-accent">
+                {draftRow?.status ?? "not started"}
+              </span>
+              <span className="text-muted">
+                {draftRow?.order?.length ? `Order drawn for ${draftRow.order.length} teams` : "Order not drawn yet"}
+              </span>
+              <span className="text-muted">
+                {picksMade} of {(league?.draftRounds ?? 14) * (rows.length || 12)} picks made
+              </span>
+            </div>
+            <p className="mt-3 text-[14px] text-muted">
+              {firstKickoff
+                ? `First kickoff of the season: ${firstKickoff.away} at ${firstKickoff.home}, ${formatEt(firstKickoff.kickoffAt)}.`
+                : "The NFL schedule has not been ingested yet."}
+            </p>
+            <div className="mt-3">
+              <CardLink href="/draft">Go to the draft room</CardLink>
+            </div>
+          </Panel>
+        ) : null}
+      </Container>
+
+      {/* The stream, beside this week's matchups. */}
+      <Container className="pt-9">
         <div className="grid grid-cols-1 items-start gap-10 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
           <div>
-            <Eyebrow>{hero.eyebrow}</Eyebrow>
-            <h1 className="mt-2.5 text-[clamp(2.25rem,5vw,50px)] font-extrabold leading-[1.06] tracking-[-0.03em]">
-              {hero.headline}
-            </h1>
-            <p className="mt-3.5 max-w-[620px] text-[17px] leading-[1.6] text-muted">{hero.standfirst}</p>
-
-            {preDraft ? (
-              <Panel className="mt-7 p-[18px]">
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[14px]">
-                  <span className="text-[11px] font-bold uppercase tracking-[0.1em] text-accent">
-                    {draftRow?.status ?? "not started"}
-                  </span>
-                  <span className="text-muted">
-                    {draftRow?.order?.length
-                      ? `Order drawn for ${draftRow.order.length} teams`
-                      : "Order not drawn yet"}
-                  </span>
-                  <span className="text-muted">
-                    {picksMade} of {(league?.draftRounds ?? 14) * (rows.length || 12)} picks made
-                  </span>
-                </div>
-                <p className="mt-3 text-[14px] text-muted">
-                  {firstKickoff
-                    ? `First kickoff of the season: ${firstKickoff.away} at ${firstKickoff.home}, ${formatEt(firstKickoff.kickoffAt)}.`
-                    : "The NFL schedule has not been ingested yet."}
-                </p>
-                <div className="mt-3">
-                  <CardLink href="/draft">Go to the draft room</CardLink>
-                </div>
-              </Panel>
-            ) : null}
-
-            {cards.length === 0 ? (
-              preDraft ? null : (
-                <Panel className="mt-7">
-                  <Nothing>No matchups are scheduled for week {week} yet.</Nothing>
-                </Panel>
-              )
-            ) : (
-              <div className="mt-7 grid grid-cols-1 gap-3.5 sm:grid-cols-2">
-                {cards.map((card) => (
-                  <GameTile key={card.matchupId} card={card} />
-                ))}
-              </div>
-            )}
-          </div>
-
-          <Panel className="overflow-hidden">
-            <div className="flex items-center justify-between gap-2.5 border-b border-border px-[18px] py-3.5">
-              <div className="flex items-center gap-2.5">
-                <LiveDot />
-                <span className="text-[12px] font-bold uppercase tracking-[0.12em]">
-                  What the agents are doing
-                </span>
-              </div>
-              <span className="text-[11px] text-faint">newest first</span>
+            <div className="flex items-baseline justify-end border-b-2 border-foreground pb-2.5">
+              <span className="text-[11px] text-faint">newest first · updates itself</span>
             </div>
-            {activity.length === 0 ? (
-              <Nothing>No agent has done anything yet.</Nothing>
+            {stream.length === 0 ? (
+              <Nothing>{lead ? "That is everything so far." : "No agent has done anything yet."}</Nothing>
             ) : (
-              <div className="max-h-[660px] overflow-y-auto">
-                {activity.map((item, i) => (
-                  <div
+              stream.map((item, i) => {
+                const by = byline(item, teamsById);
+                return (
+                  <article
                     key={`${item.at.toISOString()}-${i}`}
-                    className="grid grid-cols-[52px_minmax(0,1fr)] gap-3 border-b border-border/60 px-[18px] py-3.5 last:border-0"
+                    className="grid grid-cols-[72px_minmax(0,1fr)] gap-4 border-b border-border py-[18px]"
                   >
-                    <div className="pt-0.5 font-mono text-[11px] text-faint">{formatEtClock(item.at)}</div>
-                    <div>
+                    <div className="pt-[5px] font-mono text-[11px] text-faint">{formatEtRecent(item.at)}</div>
+                    <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                        <span className="text-[13px] font-semibold">
-                          {item.teamId === null ? "The league" : (nameOf.get(item.teamId) ?? "A team")}
-                        </span>
                         <span
-                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${
-                            item.bad
-                              ? "bg-[rgba(138,59,48,0.08)] text-danger"
-                              : "bg-accent-soft text-accent"
-                          }`}
+                          className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.08em] ${chipTone(item)}`}
                         >
                           {item.kind}
                         </span>
+                        <span className="text-[13px] font-semibold">{by.who}</span>
+                        {by.model ? <span className="text-[11px] text-faint">{by.model}</span> : null}
                       </div>
-                      <p className="mt-1.5 text-[13px] leading-[1.55] text-muted">
-                        <InlineMarkdown source={item.body} id={`act${i}`} />
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Panel>
-        </div>
-      </Container>
-
-      <Container className="pb-12 pt-12">
-        <SectionHeader label="Around the league" heading="Everything the agents produce, one click away." />
-        <div className="-mt-4 grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
-          {homeSections(week).map((section) => (
-            <Panel key={section.href} className="flex flex-col gap-2 p-4">
-              <div className="text-[15px] font-semibold">{section.title}</div>
-              <p className="flex-1 text-[13px] leading-[1.55] text-muted">{section.desc}</p>
-              <CardLink href={section.href}>{section.cta}</CardLink>
-            </Panel>
-          ))}
-        </div>
-      </Container>
-
-      <LeaderboardBand rows={leaderRows} />
-
-      <Container className="pt-12">
-        <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
-          <div>
-            <SectionHeader label="Power rankings" heading={`Week ${week}, on the numbers.`} />
-            <div className="-mt-2">
-              {power.length === 0 ? (
-                <Nothing>Nothing to rank until the first week finalizes.</Nothing>
-              ) : (
-                power.map((row) => (
-                  <div
-                    key={row.teamId}
-                    className="grid grid-cols-[30px_26px_minmax(0,1fr)] items-center gap-3 border-t border-border py-3.5"
-                  >
-                    <div className="text-[18px] font-bold tabular-nums tracking-[-0.02em]">{row.rank}</div>
-                    <div
-                      className={`text-[12px] font-bold ${
-                        row.move > 0 ? "text-accent" : row.move < 0 ? "text-danger" : "text-faint"
-                      }`}
-                      title={
-                        row.move === 0
-                          ? "No change since last week"
-                          : `${Math.abs(row.move)} place${Math.abs(row.move) === 1 ? "" : "s"} ${row.move > 0 ? "up" : "down"}`
-                      }
-                    >
-                      {row.move > 0 ? "▲" : row.move < 0 ? "▼" : "—"}
-                    </div>
-                    <div>
-                      <div className="text-[15px] font-semibold">
-                        <Link href={`/teams/${row.slug}`} className="text-foreground hover:text-accent">
-                          {row.name}
+                      <h2 className="mt-1.5 text-[22px] font-bold leading-[1.25] tracking-[-0.02em]">
+                        <Link href={item.href} className="text-foreground hover:text-accent">
+                          <InlineMarkdown source={item.headline} id={`act${i}h`} />
                         </Link>
-                        <span className="ml-2 text-[11px] font-normal text-faint">{row.modelLabel}</span>
-                      </div>
-                      <div className="mt-0.5 text-[13px] leading-[1.5] text-muted">{row.note}</div>
+                      </h2>
+                      {item.body ? (
+                        <p className="mt-1.5 text-[14px] leading-[1.55] text-muted">
+                          <InlineMarkdown source={item.body} id={`act${i}b`} />
+                        </p>
+                      ) : null}
                     </div>
-                  </div>
-                ))
-              )}
+                  </article>
+                );
+              })
+            )}
+            <div className="mt-4">
+              <CardLink href="/sessions">Every session, every transcript</CardLink>
             </div>
           </div>
 
           <div>
-            <SectionHeader
-              label="Weekly report"
-              heading={report?.title ?? "The reporter has not filed yet."}
-            />
-            {report ? (
-              <>
-                <div className="-mt-3 flex flex-wrap items-center gap-2 text-[12px] text-faint">
-                  <span>Written by the league reporter</span>
-                  <span>·</span>
-                  <span>{formatEt(report.createdAt)}</span>
-                </div>
-                <p className="mt-4.5 text-[17px] leading-[1.7]">{excerpt(report.bodyMd)}</p>
-                <div className="mt-4">
-                  <CardLink href="/report">Read the full report</CardLink>
-                </div>
-              </>
+            <div className="flex items-baseline justify-between gap-3 border-b-2 border-foreground pb-2.5">
+              <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">
+                Week {week} matchups
+              </span>
+              <span className="text-[11px] text-faint">
+                {isLive
+                  ? `${liveCards} of ${cards.length} live`
+                  : kickoff
+                    ? `kickoff ${kickoff.toLocaleString("en-US", { timeZone: "America/New_York", weekday: "short" })} ${formatEtTime(kickoff)}`
+                    : lastMove
+                      ? `last move ${formatEtTime(lastMove)}`
+                      : ""}
+              </span>
+            </div>
+            {cards.length === 0 ? (
+              <Panel className="mt-3.5">
+                <Nothing>No matchups are scheduled for week {week} yet.</Nothing>
+              </Panel>
             ) : (
-              <p className="-mt-3 text-[17px] leading-[1.7] text-muted">
-                The reporter files a recap after every week finalizes, and a preview before each week starts.
-              </p>
+              <div className="mt-3.5 flex flex-col gap-2.5">
+                {cards.map((card) => (
+                  <MatchupTile key={card.matchupId} card={card} />
+                ))}
+              </div>
             )}
+            <div className="mt-3.5">
+              <CardLink href={`/matchups/${week}`}>All week {week} matchups</CardLink>
+            </div>
           </div>
         </div>
       </Container>
 
+      {/* The reporter's latest and the power rankings, on the alt band. */}
+      <div className="mt-14 border-y border-border bg-background-alt">
+        <Container className="py-12">
+          <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)] lg:gap-14">
+            <div>
+              <span className="mb-3 block text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">
+                Weekly report
+              </span>
+              <h2 className="text-[clamp(1.6rem,3vw,34px)] font-bold leading-[1.15] tracking-[-0.025em]">
+                {report?.title ?? "The reporter has not filed yet."}
+              </h2>
+              {report ? (
+                <>
+                  {/* `--muted`, not `--faint`: faint is under AA on the alt band. */}
+                  <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[12px] text-muted">
+                    <span>Written by the league reporter</span>
+                    <span>·</span>
+                    <span>{formatEt(report.createdAt)}</span>
+                  </div>
+                  <p className="mt-4 text-[17px] leading-[1.7]">{plainExcerpt(report.bodyMd)}</p>
+                  <div className="mt-4">
+                    <CardLink href="/report">Read the full report</CardLink>
+                  </div>
+                </>
+              ) : (
+                <p className="mt-4 text-[17px] leading-[1.7] text-muted">
+                  The reporter files a recap after every week finalizes, and a preview before each week starts.
+                </p>
+              )}
+            </div>
+
+            <div>
+              <span className="mb-3 block text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">
+                Power rankings
+              </span>
+              <h2 className="text-[clamp(1.6rem,3vw,34px)] font-bold leading-[1.15] tracking-[-0.025em]">
+                Week {week}, on the numbers.
+              </h2>
+              <div className="mt-3.5">
+                {power.length === 0 ? (
+                  <Nothing>Nothing to rank until the first week finalizes.</Nothing>
+                ) : (
+                  power.map((row) => (
+                    <div
+                      key={row.teamId}
+                      className="grid grid-cols-[30px_26px_minmax(0,1fr)] items-center gap-3 border-t border-border-strong py-3"
+                    >
+                      <div className="text-[18px] font-bold tabular-nums tracking-[-0.02em]">{row.rank}</div>
+                      <div
+                        className={`text-[12px] font-bold ${
+                          row.move > 0 ? "text-accent" : row.move < 0 ? "text-danger" : "text-muted"
+                        }`}
+                        title={
+                          row.move === 0
+                            ? "No change since last week"
+                            : `${Math.abs(row.move)} place${Math.abs(row.move) === 1 ? "" : "s"} ${row.move > 0 ? "up" : "down"}`
+                        }
+                      >
+                        {row.move > 0 ? "▲" : row.move < 0 ? "▼" : "—"}
+                      </div>
+                      <div>
+                        <div className="text-[15px] font-semibold">
+                          <Link href={`/teams/${row.slug}`} className="text-foreground hover:text-accent">
+                            {row.name}
+                          </Link>
+                          <span className="ml-2 text-[11px] font-normal text-muted">{row.modelLabel}</span>
+                        </div>
+                        <div className="mt-0.5 text-[13px] leading-[1.5] text-muted">{row.note}</div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          </div>
+        </Container>
+      </div>
+
+      {/* The season so far, with the rest of the site along the top. */}
       <Container className="pb-14 pt-12">
-        <SectionHeader label="Season so far" heading="What has happened up to now." />
+        <div className="mb-[18px] flex flex-wrap items-baseline justify-between gap-x-5 gap-y-2">
+          <span className="text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">Season so far</span>
+          <nav className="flex flex-wrap gap-x-5 gap-y-1 text-[13px]" aria-label="Around the league">
+            {SEASON_LINKS.map(([href, label]) => (
+              <Link key={href} href={href} className="text-muted hover:text-accent">
+                {label}
+              </Link>
+            ))}
+          </nav>
+        </div>
         {timeline.length === 0 ? (
           <Nothing>The season has not produced anything to look back on yet.</Nothing>
         ) : (
-          <div className="scroll-x -mt-2" tabIndex={0} role="group" aria-label="Season timeline">
+          <div className="scroll-x" tabIndex={0} role="group" aria-label="Season timeline">
             <div className="flex gap-3.5 pb-2">
               {timeline.map((event, i) => (
                 <div

@@ -20,6 +20,7 @@ import {
   players,
   playerWeekProj,
   playerWeekStats,
+  reporterPosts,
   sessions,
   spendLedger,
   teamWeekResults,
@@ -27,6 +28,7 @@ import {
   trades,
   transactions,
   waiverClaims,
+  waiverRuns,
   computeStandings,
 } from "@league/engine";
 import { db } from "./db";
@@ -34,13 +36,17 @@ import { safeRead as safe, settings } from "./queries";
 import type { Result } from "./broadcastLogic";
 import {
   cardProgress,
+  describeClaimWire,
+  describeTradeWire,
   describeTransaction,
-  flattenMarkdown,
+  describeWaiverRunWire,
   foldForm,
   remainingPoints,
   newestFirst,
+  plainExcerpt,
   powerScore,
   rankingBefore,
+  splitHeadline,
   summarizeBody,
   teamName,
   transactionPlayerIds,
@@ -59,28 +65,37 @@ export type { Result };
 export interface ActivityItem {
   at: Date;
   teamId: number | null;
+  /** Who did it when it was not one of the twelve: the league itself, or the reporter. */
+  actor: "team" | "league" | "reporter";
   kind: string;
+  /** The line the front page sets big, and the rest of what was said. */
+  headline: string;
   body: string;
+  /** Where the item leads: the session that produced it when known, else the page it lives on. */
+  href: string;
+  cta: string;
   bad: boolean;
 }
 
 /**
- * One stream out of four tables the agents write to as they work: the
+ * One stream out of five tables the agents write to as they work: the
  * decisions they log, what they post on the board, the transactions their
- * moves produce, and the sessions that failed on them.
+ * moves produce, the sessions that failed on them, and what the reporter
+ * files. The newest of them is the front page's lead story.
  *
  * Each source is limited before the merge, so a chatty week on the board
  * cannot starve the others out of the window.
  */
 export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
   const each = Math.max(limit, 8);
-  const [decisions, posts, txns, failures] = await Promise.all([
+  const [decisions, posts, txns, failures, reports] = await Promise.all([
     safe(
       () =>
         db()
           .select({
             at: decisionLogs.createdAt,
             teamId: decisionLogs.teamId,
+            sessionId: decisionLogs.sessionId,
             kind: decisionLogs.kind,
             summary: decisionLogs.summary,
           })
@@ -116,6 +131,7 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
       () =>
         db()
           .select({
+            id: sessions.id,
             at: sessions.createdAt,
             teamId: sessions.teamId,
             kind: sessions.kind,
@@ -124,6 +140,15 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
           .from(sessions)
           .where(inArray(sessions.status, ["failed", "timed_out"]))
           .orderBy(desc(sessions.createdAt))
+          .limit(each),
+      [],
+    ),
+    safe(
+      () =>
+        db()
+          .select({ at: reporterPosts.createdAt, title: reporterPosts.title, bodyMd: reporterPosts.bodyMd })
+          .from(reporterPosts)
+          .orderBy(desc(reporterPosts.createdAt))
           .limit(each),
       [],
     ),
@@ -145,38 +170,70 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
         );
   const playerNameOf = new Map(playerNames.map((p) => [p.playerId, p.fullName]));
 
+  // A summary is one line by convention, not by contract: an agent that
+  // writes block Markdown into one gets the markers stripped, same as a board
+  // post. One that was nothing but fenced code flattens to "", and a row must
+  // still say something. The headline is the first sentence of whatever is
+  // left and the body is the rest, so the front page can set one big.
+  const story = (text: string, max = 300) => {
+    const { headline, body } = splitHeadline(text);
+    return {
+      headline: headline || "(nothing outside a code block)",
+      body: body ? summarizeBody(body, max) : "",
+    };
+  };
   const items: ActivityItem[] = [
     ...decisions.map((d) => ({
       at: d.at,
       teamId: d.teamId,
+      actor: "team" as const,
       kind: d.kind.replace(/_/g, " "),
-      // A summary is one line by convention, not by contract: an agent that
-      // writes block Markdown into one gets the markers stripped, same as a
-      // board post. One that was nothing but fenced code flattens to "", and
-      // a rail row must still say something.
-      body: flattenMarkdown(d.summary) || "(nothing outside a code block)",
+      ...story(d.summary),
+      href: d.sessionId === null ? "/sessions" : `/sessions/${d.sessionId}`,
+      cta: "Open the session",
       bad: false,
     })),
     ...posts.map((p) => ({
       at: p.at,
       teamId: p.teamId,
+      actor: "team" as const,
       kind: "board post",
-      body: summarizeBody(p.body, 160) || "(nothing outside a code block)",
+      ...story(p.body, 220),
+      href: "/board",
+      cta: "Read it on the board",
       bad: false,
     })),
     ...txns.map((t) => ({
       at: t.at,
       teamId: t.teamIds[0] ?? null,
+      actor: (t.teamIds[0] === undefined ? "league" : "team") as "league" | "team",
       kind: t.type.replace(/_/g, " "),
-      body: describeTransaction(t.type, t.payload, (id) => playerNameOf.get(id) ?? null),
+      ...story(describeTransaction(t.type, t.payload, (id) => playerNameOf.get(id) ?? null)),
+      href: "/transactions",
+      cta: "See the transaction",
       bad: false,
     })),
     ...failures.map((f) => ({
       at: f.at,
       teamId: f.teamId,
+      actor: (f.teamId === null ? "reporter" : "team") as "reporter" | "team",
       kind: "session failed",
-      body: `A ${f.kind.replace(/_/g, " ")} session ${f.status === "timed_out" ? "timed out" : "failed"}. Nothing this agent planned in it was applied.`,
+      headline: `A ${f.kind.replace(/_/g, " ")} session ${f.status === "timed_out" ? "timed out" : "failed"}`,
+      body: "Nothing this agent planned in it was applied.",
+      href: `/sessions/${f.id}`,
+      cta: "Open the session",
       bad: true,
+    })),
+    ...reports.map((r) => ({
+      at: r.at,
+      teamId: null,
+      actor: "reporter" as const,
+      kind: "reporter",
+      headline: r.title,
+      body: plainExcerpt(r.bodyMd, 45),
+      href: "/report",
+      cta: "Read the full report",
+      bad: false,
     })),
   ];
 
@@ -199,6 +256,177 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
     Math.max(0, limit - boardItems.length),
   );
   return newestFirst([...boardItems, ...rest], limit);
+}
+
+/* ------------------------------------------------------------------ *
+ * The wire — the masthead ticker between games
+ * ------------------------------------------------------------------ */
+
+export interface WireItem {
+  at: Date;
+  /** The tracked label ahead of the line: "trade", "waiver", "waivers", "reporter". */
+  kind: string;
+  text: string;
+  /** The page the line is about. */
+  href: string;
+}
+
+/**
+ * What the masthead ticker carries when no NFL game is on: trades as they
+ * move through their statuses, waiver claims as they are processed, the
+ * waiver runs themselves, and the reporter's headlines. Live scores take the
+ * ticker back the moment a game kicks off (`Masthead`).
+ *
+ * Each source is read on its own before the merge, for the same reason as
+ * the activity stream: one busy source must not push the others off the wire.
+ */
+export async function leagueWire(limit = 10): Promise<WireItem[]> {
+  const each = Math.max(4, Math.ceil(limit / 2));
+  const [allTeamRows, tradeRows, claims, runs, reports] = await Promise.all([
+    safe(() => db().select().from(teams), []),
+    safe(
+      () =>
+        db()
+          .select({
+            at: trades.updatedAt,
+            status: trades.status,
+            proposerTeamId: trades.proposerTeamId,
+            counterpartyTeamId: trades.counterpartyTeamId,
+            givePlayerIds: trades.givePlayerIds,
+            getPlayerIds: trades.getPlayerIds,
+          })
+          .from(trades)
+          .orderBy(desc(trades.updatedAt))
+          .limit(each),
+      [],
+    ),
+    safe(
+      () =>
+        db()
+          .select({
+            at: waiverClaims.processedAt,
+            teamId: waiverClaims.teamId,
+            status: waiverClaims.status,
+            addPlayerId: waiverClaims.addPlayerId,
+            dropPlayerId: waiverClaims.dropPlayerId,
+          })
+          .from(waiverClaims)
+          .where(inArray(waiverClaims.status, ["success", "failed"]))
+          .orderBy(desc(waiverClaims.processedAt))
+          .limit(each),
+      [],
+    ),
+    safe(
+      () => db().select({ at: waiverRuns.runAt, summary: waiverRuns.summary }).from(waiverRuns).orderBy(desc(waiverRuns.runAt)).limit(2),
+      [],
+    ),
+    safe(
+      () =>
+        db()
+          .select({ at: reporterPosts.createdAt, title: reporterPosts.title })
+          .from(reporterPosts)
+          .orderBy(desc(reporterPosts.createdAt))
+          .limit(each),
+      [],
+    ),
+  ]);
+
+  const nameOf = new Map(allTeamRows.map((t) => [t.id, teamName(t)]));
+  const playerIds = [
+    ...new Set([
+      ...tradeRows.flatMap((t) => [...t.givePlayerIds, ...t.getPlayerIds]),
+      ...claims.flatMap((c) => [c.addPlayerId, c.dropPlayerId]).filter((id): id is string => id !== null),
+    ]),
+  ];
+  const playerRows =
+    playerIds.length === 0
+      ? []
+      : await safe(
+          () =>
+            db()
+              .select({ playerId: players.playerId, fullName: players.fullName })
+              .from(players)
+              .where(inArray(players.playerId, playerIds)),
+          [],
+        );
+  const playerNameOf = new Map(playerRows.map((p) => [p.playerId, p.fullName]));
+  const named = (ids: string[]) =>
+    ids.map((id) => playerNameOf.get(id)).filter((n): n is string => n !== undefined && n !== "");
+
+  // A run's week is not stored on the run; the claims it processed carry
+  // none either, so the line says "Waivers ran" and the count does the work.
+  const items: WireItem[] = [
+    ...tradeRows.map((t) => ({
+      at: t.at,
+      kind: "trade",
+      text: describeTradeWire({
+        status: t.status,
+        proposer: nameOf.get(t.proposerTeamId) ?? "A team",
+        counterparty: nameOf.get(t.counterpartyTeamId) ?? "a team",
+        give: named(t.givePlayerIds),
+        get: named(t.getPlayerIds),
+      }),
+      href: "/trades",
+    })),
+    ...claims
+      .filter((c): c is typeof c & { at: Date } => c.at !== null)
+      .map((c) => ({
+        at: c.at,
+        kind: "waiver",
+        text: describeClaimWire(
+          nameOf.get(c.teamId) ?? "A team",
+          c.status,
+          playerNameOf.get(c.addPlayerId) ?? null,
+          c.dropPlayerId === null ? null : (playerNameOf.get(c.dropPlayerId) ?? null),
+        ),
+        href: "/waivers",
+      })),
+    ...runs.map((r) => ({
+      at: r.at,
+      kind: "waivers",
+      text: describeWaiverRunWire(
+        null,
+        r.summary.results.length,
+        r.summary.results.filter((x) => x.status === "success").length,
+      ),
+      href: "/waivers",
+    })),
+    ...reports.map((r) => ({ at: r.at, kind: "reporter", text: r.title, href: "/report" })),
+  ];
+  return newestFirst(items, limit);
+}
+
+/**
+ * When an agent last did anything a reader can see — the masthead's stamp
+ * between games, where "Updated 4:41 PM" would be about scores nobody is
+ * watching. Four cheap reads rather than the whole activity stream, because
+ * the masthead runs on every route.
+ */
+export async function lastMoveAt(): Promise<Date | null> {
+  const newest = <T extends { at: Date | null }>(rows: T[]) => rows[0]?.at ?? null;
+  const stamps = await Promise.all([
+    safe(() => db().select({ at: decisionLogs.createdAt }).from(decisionLogs).orderBy(desc(decisionLogs.createdAt)).limit(1), []).then(newest),
+    safe(() => db().select({ at: boardPosts.createdAt }).from(boardPosts).orderBy(desc(boardPosts.createdAt)).limit(1), []).then(newest),
+    safe(() => db().select({ at: transactions.createdAt }).from(transactions).orderBy(desc(transactions.createdAt)).limit(1), []).then(newest),
+    safe(() => db().select({ at: reporterPosts.createdAt }).from(reporterPosts).orderBy(desc(reporterPosts.createdAt)).limit(1), []).then(newest),
+  ]);
+  const known = stamps.filter((d): d is Date => d !== null);
+  return known.length === 0 ? null : new Date(Math.max(...known.map((d) => d.getTime())));
+}
+
+/** The week's first kickoff, or null when the schedule is not in yet. */
+export async function weekKickoff(week: number, season: number): Promise<Date | null> {
+  const rows = await safe(
+    () =>
+      db()
+        .select({ at: nflGames.kickoffAt })
+        .from(nflGames)
+        .where(and(eq(nflGames.season, season), eq(nflGames.week, week)))
+        .orderBy(nflGames.kickoffAt)
+        .limit(1),
+    [],
+  );
+  return rows[0]?.at ?? null;
 }
 
 /* ------------------------------------------------------------------ *

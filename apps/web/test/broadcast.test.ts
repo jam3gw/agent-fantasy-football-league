@@ -8,12 +8,17 @@ import { describe, expect, it } from "vitest";
 import {
   MARGIN_SCALE,
   cardProgress,
+  describeClaimWire,
+  describeTradeWire,
   describeTransaction,
+  describeWaiverRunWire,
   gameStatus,
   foldForm,
   newestFirst,
+  plainExcerpt,
   powerScore,
   rankingBefore,
+  splitHeadline,
   summarizeBody,
   teamName,
   transactionPlayerIds,
@@ -580,5 +585,148 @@ describe("team names", () => {
 
   it("never renders undefined for a team that is not there", () => {
     expect(teamName(undefined)).toBe("unknown");
+  });
+});
+
+describe("a headline out of an agent's paragraph", () => {
+  it("is the whole thing when it is short enough to set big", () => {
+    expect(splitHeadline("Moved Rice into the FLEX over Jennings.")).toEqual({
+      headline: "Moved Rice into the FLEX over Jennings.",
+      body: "",
+    });
+  });
+
+  it("is the first sentence, with the rest as the body", () => {
+    const text =
+      "Moved Rashee Rice into the FLEX over Jauan Jennings on a 78% snap-share read. Rice's preseason snap share was 78%; Jennings is a WR3 in a run-first offense.";
+    expect(splitHeadline(text)).toEqual({
+      headline: "Moved Rashee Rice into the FLEX over Jauan Jennings on a 78% snap-share read.",
+      body: "Rice's preseason snap share was 78%; Jennings is a WR3 in a run-first offense.",
+    });
+  });
+
+  it("skips a two-word opener for a sentence that says something", () => {
+    // "Respect." over the lead story tells a reader nothing; the next
+    // sentence is the one worth 54px.
+    const text =
+      "Respect. I took a tight end at 1.04 and I would do it again. Ask me in December, when the whole league has seen why it was right.";
+    expect(splitHeadline(text)).toEqual({
+      headline: "Respect. I took a tight end at 1.04 and I would do it again.",
+      body: "Ask me in December, when the whole league has seen why it was right.",
+    });
+  });
+
+  it("cuts a long first sentence at a word with an ellipsis and keeps the rest as the body", () => {
+    const words = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
+    const { headline, body } = splitHeadline(`${words}.`);
+    expect(headline.endsWith("…")).toBe(true);
+    expect(headline.length).toBeLessThanOrEqual(111);
+    // The cut lands between words, and nothing is said twice: the body
+    // picks up exactly where the headline stopped.
+    expect(`${headline.slice(0, -1)} ${body}`).toBe(`${words}.`);
+  });
+
+  it("does not take a decimal for a sentence end", () => {
+    const text =
+      "Took a tight end at 1.04 and would do it again, whatever the board says about it this week. Ask me in December, when it has paid off.";
+    expect(splitHeadline(text).headline).toBe(
+      "Took a tight end at 1.04 and would do it again, whatever the board says about it this week.",
+    );
+  });
+
+  it("keeps a closing quote with the sentence it closes", () => {
+    const text =
+      "Kimi to Gemini: “Your bench is thinner than my patience.” Thursday cannot come fast enough, and the two meet in week 1.";
+    expect(splitHeadline(text)).toEqual({
+      headline: "Kimi to Gemini: “Your bench is thinner than my patience.”",
+      body: "Thursday cannot come fast enough, and the two meet in week 1.",
+    });
+  });
+
+  it("does not break inside an inline token, same as the excerpts", () => {
+    const text = `${"a".repeat(30)} **Bold sentence. Still bold** and then ${"b".repeat(80)}.`;
+    const { headline } = splitHeadline(text);
+    expect(headline).not.toMatch(/^[^*]*\*\*[^*]*$/);
+  });
+
+  it("flattens block markdown first, so a heading is not a headline with hashes", () => {
+    expect(splitHeadline("## The plan\n- Start **Gibbs**.").headline).toBe("The plan Start **Gibbs**.");
+  });
+
+  it("returns an empty headline for text that is all fenced code, for the caller to fill", () => {
+    expect(splitHeadline("```\ncode\n```")).toEqual({ headline: "", body: "" });
+  });
+});
+
+describe("the report's plain excerpt", () => {
+  it("reduces links and images to their text and strips inline marks", () => {
+    expect(plainExcerpt("See [the board](/board) and ![chart](x.png) — **bold** `code`.")).toBe(
+      "See the board and — bold code.",
+    );
+  });
+
+  it("caps at the word count with an ellipsis", () => {
+    expect(plainExcerpt("one two three four five", 3)).toBe("one two three…");
+    expect(plainExcerpt("one two three", 3)).toBe("one two three");
+  });
+});
+
+describe("what the wire says", () => {
+  const deal = { proposer: "Second Overall", counterparty: "Terra Nova", give: ["Alvin Kamara"], get: ["Garrett Wilson"] };
+
+  it("reads an offer from the proposer's side", () => {
+    expect(describeTradeWire({ ...deal, status: "proposed" })).toBe(
+      "Second Overall offers Terra Nova Alvin Kamara for Garrett Wilson",
+    );
+  });
+
+  it("says a trade is in review once it is accepted, and done once it executes", () => {
+    expect(describeTradeWire({ ...deal, status: "accepted" })).toBe(
+      "Second Overall and Terra Nova agree Alvin Kamara for Garrett Wilson — in review",
+    );
+    expect(describeTradeWire({ ...deal, status: "executed" })).toBe(
+      "Done: Second Overall sends Alvin Kamara to Terra Nova for Garrett Wilson",
+    );
+  });
+
+  it("lists several players with an and", () => {
+    expect(describeTradeWire({ ...deal, status: "proposed", give: ["A", "B", "C"] })).toBe(
+      "Second Overall offers Terra Nova A, B and C for Garrett Wilson",
+    );
+  });
+
+  it("never prints a raw id: an unnamed side reads as players", () => {
+    expect(describeTradeWire({ ...deal, status: "vetoed", give: [], get: [] })).toBe(
+      "The league vetoes Second Overall–Terra Nova: players for players",
+    );
+  });
+
+  it("has a line for every way an offer can end, and none of them carries the message", () => {
+    for (const status of ["rejected", "countered", "cancelled", "expired", "failed", "superseded", "new"]) {
+      const line = describeTradeWire({ ...deal, status });
+      expect(line).toContain("Second Overall");
+      expect(line).not.toMatch(/undefined|null/);
+    }
+  });
+
+  it("reads a processed claim either way it went", () => {
+    expect(describeClaimWire("The Gibbs Factor", "success", "Tyler Allgeier", "Jaylen Wright")).toBe(
+      "The Gibbs Factor claims Tyler Allgeier, drops Jaylen Wright",
+    );
+    expect(describeClaimWire("The Gibbs Factor", "success", "Tyler Allgeier", null)).toBe(
+      "The Gibbs Factor claims Tyler Allgeier",
+    );
+    expect(describeClaimWire("Moonshot Marauders", "failed", "Tyler Allgeier", null)).toBe(
+      "Moonshot Marauders loses its claim on Tyler Allgeier",
+    );
+    expect(describeClaimWire("Moonshot Marauders", "failed", null, null)).toBe(
+      "Moonshot Marauders loses a waiver claim",
+    );
+  });
+
+  it("counts a waiver run", () => {
+    expect(describeWaiverRunWire(1, 9, 7)).toBe("Week 1 waivers ran: 9 claims, 7 landed");
+    expect(describeWaiverRunWire(null, 1, 1)).toBe("Waivers ran: 1 claim, 1 landed");
+    expect(describeWaiverRunWire(null, 0, 0)).toBe("Waivers ran: no claims");
   });
 });
