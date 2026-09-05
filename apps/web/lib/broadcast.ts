@@ -8,12 +8,14 @@ import "server-only";
  * of truth — each is derived here from tables the engine already writes, and
  * every derivation that involves a judgement call says what it assumes.
  */
+import { cache } from "react";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import {
   STARTING_SLOTS,
   boardPosts,
   decisionLogs,
   draftPicks,
+  leagueSettings,
   lineupEntries,
   matchups,
   nflGames,
@@ -32,7 +34,7 @@ import {
   computeStandings,
 } from "@league/engine";
 import { db } from "./db";
-import { safeRead as safe, settings } from "./queries";
+import { allTeams, safeRead as safe, settings } from "./queries";
 import type { Result } from "./broadcastLogic";
 import {
   cardProgress,
@@ -47,9 +49,9 @@ import {
   powerScore,
   rankingBefore,
   splitHeadline,
-  summarizeBody,
   teamName,
   transactionPlayerIds,
+  truncateFlat,
   winChanceFromMargin,
 } from "./broadcastLogic";
 
@@ -82,6 +84,11 @@ export interface ActivityItem {
  * decisions they log, what they post on the board, the transactions their
  * moves produce, the sessions that failed on them, and what the reporter
  * files. The newest of them is the front page's lead story.
+ *
+ * The reporter's newest post is left out: the front page gives it its own
+ * section, and the masthead wire carries its title, so leading with it as
+ * well would print the same headline three times every Tuesday and
+ * Thursday morning. Its older posts stay in the stream.
  *
  * Each source is limited before the merge, so a chatty week on the board
  * cannot starve the others out of the window.
@@ -149,6 +156,7 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
           .select({ at: reporterPosts.createdAt, title: reporterPosts.title, bodyMd: reporterPosts.bodyMd })
           .from(reporterPosts)
           .orderBy(desc(reporterPosts.createdAt))
+          .offset(1)
           .limit(each),
       [],
     ),
@@ -179,7 +187,7 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
     const { headline, body } = splitHeadline(text);
     return {
       headline: headline || "(nothing outside a code block)",
-      body: body ? summarizeBody(body, max) : "",
+      body: truncateFlat(body, max),
     };
   };
   const items: ActivityItem[] = [
@@ -279,11 +287,14 @@ export interface WireItem {
  *
  * Each source is read on its own before the merge, for the same reason as
  * the activity stream: one busy source must not push the others off the wire.
+ *
+ * `cache`d per request: the masthead reads it on every route, and a page
+ * that also wants it must not run the same six queries twice.
  */
-export async function leagueWire(limit = 10): Promise<WireItem[]> {
+export const leagueWire = cache(async (limit = 10): Promise<WireItem[]> => {
   const each = Math.max(4, Math.ceil(limit / 2));
   const [allTeamRows, tradeRows, claims, runs, reports] = await Promise.all([
-    safe(() => db().select().from(teams), []),
+    safe(allTeams, []),
     safe(
       () =>
         db()
@@ -353,8 +364,6 @@ export async function leagueWire(limit = 10): Promise<WireItem[]> {
   const named = (ids: string[]) =>
     ids.map((id) => playerNameOf.get(id)).filter((n): n is string => n !== undefined && n !== "");
 
-  // A run's week is not stored on the run; the claims it processed carry
-  // none either, so the line says "Waivers ran" and the count does the work.
   const items: WireItem[] = [
     ...tradeRows.map((t) => ({
       at: t.at,
@@ -385,7 +394,6 @@ export async function leagueWire(limit = 10): Promise<WireItem[]> {
       at: r.at,
       kind: "waivers",
       text: describeWaiverRunWire(
-        null,
         r.summary.results.length,
         r.summary.results.filter((x) => x.status === "success").length,
       ),
@@ -394,28 +402,52 @@ export async function leagueWire(limit = 10): Promise<WireItem[]> {
     ...reports.map((r) => ({ at: r.at, kind: "reporter", text: r.title, href: "/report" })),
   ];
   return newestFirst(items, limit);
-}
+});
 
 /**
- * When an agent last did anything a reader can see — the masthead's stamp
+ * When the league last did anything a reader can see — the masthead's stamp
  * between games, where "Updated 4:41 PM" would be about scores nobody is
- * watching. Four cheap reads rather than the whole activity stream, because
- * the masthead runs on every route.
+ * watching. Everything the stream and the wire draw on: decisions, board
+ * posts, transactions, reporter posts, and the trades and waiver claims that
+ * move without writing a transaction. One statement of scalar subqueries,
+ * like the pulse stamp, because the masthead runs on every route; `cache`d
+ * per request so the home page's own read of it is free.
  */
-export async function lastMoveAt(): Promise<Date | null> {
-  const newest = <T extends { at: Date | null }>(rows: T[]) => rows[0]?.at ?? null;
-  const stamps = await Promise.all([
-    safe(() => db().select({ at: decisionLogs.createdAt }).from(decisionLogs).orderBy(desc(decisionLogs.createdAt)).limit(1), []).then(newest),
-    safe(() => db().select({ at: boardPosts.createdAt }).from(boardPosts).orderBy(desc(boardPosts.createdAt)).limit(1), []).then(newest),
-    safe(() => db().select({ at: transactions.createdAt }).from(transactions).orderBy(desc(transactions.createdAt)).limit(1), []).then(newest),
-    safe(() => db().select({ at: reporterPosts.createdAt }).from(reporterPosts).orderBy(desc(reporterPosts.createdAt)).limit(1), []).then(newest),
-  ]);
-  const known = stamps.filter((d): d is Date => d !== null);
-  return known.length === 0 ? null : new Date(Math.max(...known.map((d) => d.getTime())));
-}
+export const lastMoveAt = cache(async (): Promise<Date | null> => {
+  // Anchored on the settings singleton so the read is one statement, the
+  // same way the pulse stamp is; every inner column is verified to exist on
+  // its inner table (the correlated-subquery trap noted in pulse.ts). The
+  // epoch keeps the driver out of it: a number comes back as a number or a
+  // numeric string, never as a Date it may or may not have mapped.
+  const rows = await safe(
+    () =>
+      db()
+        .select({
+          at: sql<unknown>`extract(epoch from greatest(
+            (select max(created_at) from decision_logs),
+            (select max(created_at) from board_posts),
+            (select max(created_at) from transactions),
+            (select max(created_at) from reporter_posts),
+            (select max(updated_at) from trades),
+            (select max(processed_at) from waiver_claims)
+          ))`,
+        })
+        .from(leagueSettings)
+        .where(eq(leagueSettings.id, 1)),
+    [],
+  );
+  const epoch = Number(rows[0]?.at ?? Number.NaN);
+  return Number.isFinite(epoch) ? new Date(epoch * 1000) : null;
+});
 
-/** The week's first kickoff, or null when the schedule is not in yet. */
-export async function weekKickoff(week: number, season: number): Promise<Date | null> {
+/**
+ * The week's first kickoff while it is still ahead, or null once it has
+ * passed or when the schedule is not in yet. The judgement is made here
+ * rather than in the page, which must stay pure: a page that compared the
+ * kickoff against the clock itself would present a played week's kickoff
+ * as upcoming until the week advanced.
+ */
+export async function nextKickoff(week: number, season: number, now: Date = new Date()): Promise<Date | null> {
   const rows = await safe(
     () =>
       db()
@@ -426,7 +458,8 @@ export async function weekKickoff(week: number, season: number): Promise<Date | 
         .limit(1),
     [],
   );
-  return rows[0]?.at ?? null;
+  const at = rows[0]?.at ?? null;
+  return at !== null && at.getTime() > now.getTime() ? at : null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -703,7 +736,7 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
 }
 
 /* ------------------------------------------------------------------ *
- * Benchmark aggregates — shared by /benchmark and the home leaderboard
+ * Benchmark aggregates — shared by /benchmark and the power rankings
  * ------------------------------------------------------------------ */
 
 export interface BenchRow {
@@ -744,9 +777,9 @@ export interface BenchRow {
 /**
  * Every per-team number the benchmark shows, in one pass.
  *
- * This was inline in `/benchmark`. The redesign puts the same figures on the
- * home page's leaderboard band and in the power rankings, so it lives here and
- * both read it rather than two aggregations drifting apart.
+ * This was inline in `/benchmark`. The home page's power rankings read the
+ * same figures, so it lives here and both read it rather than two
+ * aggregations drifting apart.
  */
 export async function benchmarkRows(): Promise<BenchRow[]> {
   // `db()` reads DATABASE_URL and throws when it is missing, so it is called

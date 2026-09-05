@@ -48,6 +48,67 @@ off the page". Implemented as designed; the pieces:
 
 Checks: lint, typecheck, 859 tests, and `next build` against an unreachable
 database (every read degrades; `/` prerenders at 30 s).
+
+### Review round 1 (fresh-context reviewer, 24 findings, none blocking)
+
+Fixed:
+
+- `superseded` on the wire credited the proposer with replacing its offer;
+  the engine supersedes an offer when another trade in review takes one of
+  its players. Reworded, and every ending now has an exact test.
+- Stamps. `formatEtRecent` is a clock today, weekday + clock within six
+  days, and a date after that — the wire keeps the five newest of each kind
+  whatever their age, so a three-week-old trade read as last Thursday. The
+  masthead's "Last move" and the matchups header use the same format instead
+  of a bare clock. Tested (`test/formatRecent.test.ts`).
+- The matchups header showed a past kickoff as upcoming all Monday night
+  through Tuesday. `nextKickoff` offers the kickoff only while it is ahead
+  (the comparison sits in the read, not the page — `react-hooks/purity`
+  rejects `Date.now()` in a component), and a fully played week says "all
+  final".
+- `splitHeadline` on a heading over bullets was one run-on cut mid-list.
+  A line break now counts as a sentence end: `closeLines` puts a full stop
+  on every line that stops without one, outside fenced code, leaving rules
+  and lines ending in `:`/`,`/`;` alone. Abbreviations (`vs.`, `e.g.`) no
+  longer end a sentence. The old test enshrined the run-on; replaced.
+- The reporter's newest post led the page, headed the weekly-report card
+  and ran on the wire — three times every Tuesday and Thursday morning.
+  The stream now leaves the newest report out (its section is on the same
+  page); older posts stay in.
+- The body under a headline was re-flattened, which stripped a "2." it
+  started with. `truncateFlat` is the cut without the flatten; tested.
+- A failed session as the lead wore accent green and a live dot. It is
+  `--danger` with no dot now.
+- Wire lines were links: ten tab stops ahead of the primary nav on every
+  route, and focusing one the track had carried out of view scrolled the
+  viewport off the loop's seam. They are text, like the score ticker's
+  items. The track pauses on hover and on focus-within.
+- Masthead query count went from 6 to 16–17 per render, and the home page
+  repeated seven of them. `settings`, `allTeams`, `liveStatus`,
+  `leagueWire` and `lastMoveAt` are React `cache`d per request;
+  `lastMoveAt` is one statement of scalar subqueries (the pulse pattern)
+  and now also covers `trades.updated_at` and `waiver_claims.processed_at`,
+  which move without writing a transaction. Masthead: 6 + 6 + 1 = 13 on a
+  cold render, of which the home page re-runs none.
+- `/llms.txt` described the old home page. Updated.
+- "Week N matchups" and "Season so far" are `h2`s. Stale leaderboard
+  comments removed. `describeWaiverRunWire`'s dead week branch removed.
+
+Not fixed, and why:
+
+- A paragraph that is one bold token longer than the window still strands
+  `**` at the cut. Pre-existing in `summarizeBody`; `tokenSafeCut` has no
+  earlier point to retreat to when the token starts the string.
+- Reporter items link to `/report`, not to the session that wrote them: a
+  reader who clicks "Read the full report" wants the report.
+- "Read it on the board" lands at the top of `/board`; posts carry no DOM
+  id. Worth a `post-{id}` anchor on the board page in its own change.
+- The pulse stamp does not cover `trades`/`waiver_claims`, so a wire line
+  produced by cron (expiry, window-end veto) waits for the next ISR window
+  in an open tab. A one-line addition to `pulse.ts`, but that stamp has its
+  own tests and is not this change's.
+- `decision_logs` has no `created_at` index; `leagueActivity` sorted on it
+  before this change too. Worth an index migration on its own.
 ## 2026-09-05 — `/llms.txt` for outside agents
 
 Jake asked whether an `llm.txt` would help agents (ChatGPT, Claude Code)
