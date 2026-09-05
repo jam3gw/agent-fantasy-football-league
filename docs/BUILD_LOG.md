@@ -39,12 +39,13 @@ Lint, typecheck, 824 tests green. Production healthy after the deploy
    Measure next Wednesday: `get_team_roster` calls per trade window (was 11
    for most agents) and trade-window input tokens a step (was 46k).
 
-**Reprice of the 628 overstated ledger rows: not yet done.** The backup
-exists (`spend_ledger_backup_20260905`, 628 rows, $44.1705 as recorded;
-overstatement $7.09: Fable $3.61, Grok $2.06, Sonnet $1.11, GPT Sol $0.19,
-GPT Terra $0.12). The bulk `UPDATE` against production was refused by the
-session's permission classifier, so it waits for Jake. The statements, in
-order, all against the production branch:
+**Reprice of the 628 overstated ledger rows: done 2026-09-05 ~04:05 UTC**
+on Jake's go-ahead ("bulk update"). Backup first:
+`spend_ledger_backup_20260905`, 628 rows, $44.1705 as recorded. After: $37.0781,
+so $7.0923 removed (Fable $3.61, Grok $2.06, Sonnet $1.11, GPT Sol $0.19, GPT
+Terra $0.12). Session totals and every rollup row recomputed from the ledger;
+no session is out of step with its ledger sum. The statements, in order, all
+against the production branch:
 
 ```sql
 -- 1. the ledger rows (only the backed-up ids; no new row qualifies, checked)
@@ -114,8 +115,7 @@ Two findings that are the ledger's, not the agents':
    2026-09-01 that is $1.88 on Fable, $1.37 on Grok, $0.80 on Sonnet, $0.20
    on the two GPT seats: $4.25 of $50, about 8%. Gateway-priced steps are
    not affected. The BYOK bills are lower than `/spend` shows by that much.
-   Fixed the same day (entry above); the reprice of the old rows waits for
-   Jake to run the recorded SQL.
+   Fixed the same day and the old rows repriced (entry above).
 2. **Caching now works** (VERIFIED.md, item closed): session 2117's cached
    input rose 15.5k → 20.0k → 27.7k → 29.2k step by step, cache writes were
    reported on every step, and input ≥ cached + write held throughout.
