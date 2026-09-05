@@ -2,30 +2,32 @@
 /**
  * Reports one "Step opened" event each time a reader opens a step card by
  * hand. The cards are server-rendered `<details>` elements that React never
- * owns (see `SessionRail`), so this listens to `toggle` on the document in the
- * capture phase — the event does not bubble — instead of adding a handler per
- * card. "Expand all" sets `open` from script, which also fires `toggle`; the
- * rail marks those so they are not counted as reading.
+ * owns (see `SessionRail`), so this is one delegated listener on the document
+ * rather than a handler per card.
+ *
+ * It listens for `click`, not `toggle`: `toggle` also fires when script or a
+ * React re-render sets `open` — the rail's "Expand all", and the live view
+ * moving the anchored decision card as steps arrive every poll — none of which
+ * is a reader reading. A click on the summary of a card that is closed at
+ * click time is. Keyboard activation of a `<summary>` dispatches a synthetic
+ * click, so Enter and Space are covered.
  */
 import { useEffect } from "react";
-import { EVENTS } from "@/lib/analytics";
+import { EVENTS, countsAsStepOpen } from "@/lib/analytics";
 import { currentPage, trackEvent } from "@/lib/track";
-
-/** Set on a card by `SessionRail` just before it flips `open` from script. */
-export const BULK_TOGGLE_FLAG = "data-bulk-toggle";
 
 export function StepOpenTracker() {
   useEffect(() => {
-    const onToggle = (e: Event) => {
-      const card = e.target;
-      if (!(card instanceof HTMLDetailsElement) || !card.hasAttribute("data-step-card")) return;
-      const bulk = card.hasAttribute(BULK_TOGGLE_FLAG);
-      if (bulk) card.removeAttribute(BULK_TOGGLE_FLAG);
-      if (!card.open || bulk) return;
+    const onClick = (e: Event) => {
+      if (!(e.target instanceof Element)) return;
+      const summary = e.target.closest("summary");
+      const card = summary?.parentElement;
+      if (!(card instanceof HTMLDetailsElement)) return;
+      if (!countsAsStepOpen({ stepCard: card.hasAttribute("data-step-card"), open: card.open })) return;
       trackEvent(EVENTS.stepOpened, { page: currentPage(), kind: card.dataset.stepKind ?? "turn" });
     };
-    document.addEventListener("toggle", onToggle, true);
-    return () => document.removeEventListener("toggle", onToggle, true);
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
   }, []);
   return null;
 }

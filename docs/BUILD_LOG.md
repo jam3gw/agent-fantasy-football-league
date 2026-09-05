@@ -4124,15 +4124,25 @@ Three events added to the vocabulary, all on deliberate reader actions:
 
 - `Step opened` — a transcript step card opened by hand. Properties: `page`,
   `kind` (decision, write, brief, turn). The cards are server-rendered
-  `<details>` that React never owns, so `StepOpenTracker` listens for `toggle`
-  on the document in the capture phase. "Expand all" from the rail marks each
-  card it flips (`data-bulk-toggle`) and the tracker skips and clears the mark,
-  so a bulk open is not counted as reading.
-- `Live watched` — a reader stayed 30 s on a running session or the running
-  draft (`useLiveWatched`). One `setTimeout` per visit, cancelled if they leave
-  or the session ends first; never per poll.
+  `<details>` that React never owns, so `StepOpenTracker` is one delegated
+  `click` listener on the document: a click on the summary of a card that is
+  closed at click time. Not `toggle` — the reviewer caught that `toggle` also
+  fires when the rail's "Expand all" sets `open`, and when the live view moves
+  the anchored decision card as steps arrive on every poll, which would have
+  billed a "reader opened a step" per poll per open tab.
+- `Live watched` — a reader kept a running session or the running draft
+  visible for 30 s (`useLiveWatched`). The timer runs only while the tab is
+  visible (a background tab is not watching), fires at most once per mount (a
+  draft pausing and resuming under a reader does not count twice), and is
+  cancelled if they leave or the session ends; never per poll.
 - `Notes expanded` — "Read the full notes" on a team's scratchpad card.
   Properties: `page`, `model`.
+
+`Filter` now fires only when the URL state actually changed: a sessions chip
+that is already lit can be clicked again, a select cannot re-fire its value.
+
+Review round 1 found the three behaviour bugs above plus an untested
+`beforeSend`; all fixed, `beforeSend` exported and tested directly.
 
 Not added, on purpose: nav/footer clicks (page views already count them), poll
 ticks and scroll (no reader action, pure cost), anything under `/admin`,

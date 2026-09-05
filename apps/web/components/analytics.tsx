@@ -12,7 +12,7 @@ export function SiteAnalytics() {
   return <Analytics beforeSend={beforeSend} />;
 }
 
-function beforeSend(event: BeforeSendEvent): BeforeSendEvent | null {
+export function beforeSend(event: BeforeSendEvent): BeforeSendEvent | null {
   const url = filterUrl(event.url);
   return url === null ? null : { ...event, url };
 }

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { patchQuery } from "@/lib/listControls";
-import { EVENTS } from "@/lib/analytics";
+import { EVENTS, queryChanged } from "@/lib/analytics";
 import { currentPage, trackEvent } from "@/lib/track";
 
 /**
@@ -36,11 +36,12 @@ export function useUrlState(): {
   const get = useCallback((key: string) => params.get(key) ?? "", [params]);
   const set = useCallback(
     (patch: Record<string, string | undefined>) => {
-      const query = patchQuery(window.location.search, patch);
+      const before = window.location.search;
+      const query = patchQuery(before, patch);
       window.history.replaceState(null, "", query ? `${window.location.pathname}?${query}` : window.location.pathname);
       setParams(new URLSearchParams(query));
       const key = Object.keys(patch)[0];
-      if (key) trackEvent(EVENTS.filter, { page: currentPage(), key });
+      if (key && queryChanged(before, query)) trackEvent(EVENTS.filter, { page: currentPage(), key });
     },
     [],
   );
