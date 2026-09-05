@@ -42,6 +42,21 @@ tool showed the freeze, so an agent still had to search.
 Tests: engine messages, the three roster tools and the visibility rule, the
 snapshot and `get_league_state` note, and the prompt bullet per kind.
 
+Reviewer findings, fixed: Appendix C and §8.5 now carry the new bullet and
+field; the bullet no longer says "ten" teams or promises a session that may
+not come (paused and eliminated teams get none, and the session runs at
+accept time, not "before the review ends"); `submitWaiverClaims` names the
+trade too; a player in two open offers is named by the oldest one, stable
+across calls; the dead `frozenPlayerIdsExcluding` wrapper is gone; tests
+added for the reporter view, a `team_ids` subset, `addFreeAgent` and the
+claim path, precedence and determinism.
+
+Left alone: `runWaivers` keeps the `invalid_drop` reason for a claim that
+fails at run time because its drop is frozen — the reason is an enum shown
+on the public transactions page, and the claim's own player row shows
+`frozen_in_trade` by then. `get_matchup` and `get_trade` roster views carry
+`locked` but not `frozen_in_trade`; neither is a place to decide a drop.
+
 ## 2026-09-05 — Jake: the same player may be offered to several teams; the first accept wins
 
 Jake's decision, replacing the §3.5 freeze rule for open offers. Before, a

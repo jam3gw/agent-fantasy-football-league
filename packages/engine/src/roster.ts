@@ -153,7 +153,8 @@ export interface FrozenBy {
  * offers (the same player may be shopped to several teams; the first accept
  * supersedes the rest), but a player is never dropped out from under the
  * offers he is in. A trade in review wins over an open offer for the same
- * player, so the reason shown is the one that also blocks offers.
+ * player, so the reason shown is the one that also blocks offers; among
+ * open offers the oldest (lowest id) is named, so the reason is stable.
  */
 export async function frozenPlayerTradesForTeams(
   db: EngineDb,
@@ -170,12 +171,13 @@ export async function frozenPlayerTradesForTeams(
         inArray(trades.status, ["proposed", "accepted"]),
         or(inArray(trades.proposerTeamId, teamIds), inArray(trades.counterpartyTeamId, teamIds)),
       ),
-    );
+    )
+    .orderBy(trades.id);
   const hold = (teamId: number, playerId: string, by: FrozenBy): void => {
     const m = out.get(teamId);
     if (!m) return;
     const cur = m.get(playerId);
-    if (cur && cur.status === "accepted") return;
+    if (cur && (cur.status === "accepted" || by.status === "proposed")) return;
     m.set(playerId, by);
   };
   for (const t of open) {

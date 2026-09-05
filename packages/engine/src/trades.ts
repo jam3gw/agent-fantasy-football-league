@@ -89,15 +89,6 @@ export async function frozenPlayerTradesExcluding(
   return frozen;
 }
 
-/** The player ids of `frozenPlayerTradesExcluding`. */
-export async function frozenPlayerIdsExcluding(
-  db: EngineDb,
-  teamId: number,
-  excludeTradeId?: number,
-): Promise<Set<string>> {
-  return new Set((await frozenPlayerTradesExcluding(db, teamId, excludeTradeId)).keys());
-}
-
 /**
  * Transaction-scoped advisory lock serialising every propose and accept.
  * An accept locks its own row and then every other open offer (to supersede

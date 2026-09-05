@@ -210,7 +210,7 @@ describe("votes owed outside a trade_vote session (§8.6)", () => {
     const window = await buildContextSnapshot(ctxFor({ teamId: a, kind: "trade_window" as SessionKind }));
     expect(window.pending!.votes_owed).toHaveLength(1);
     expect(window.pending!.votes_note).toContain("separate trade_vote session");
-    expect(window.pending!.votes_note).toContain("no vote tool");
+    expect(window.pending!.votes_note).toContain("This session has no vote tool");
 
     const vote = await buildContextSnapshot(ctxFor({ teamId: a, kind: "trade_vote" as SessionKind }));
     expect(vote.pending!.votes_owed).toHaveLength(1);

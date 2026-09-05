@@ -177,5 +177,5 @@ export function extraPositions(
  * uninvolved team; agents in a trade window went looking for one.
  */
 export const VOTES_ELSEWHERE_NOTE =
-  "You cast these votes in a separate trade_vote session that the league starts for you before the review ends. " +
-  "This session has no vote tool.";
+  "Votes are cast in a separate trade_vote session that the league starts for each uninvolved team when a trade " +
+  "enters review. This session has no vote tool.";

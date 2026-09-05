@@ -159,7 +159,7 @@ export function buildSystemPrompt(v: PromptVars, tools: readonly string[]): stri
   }
   if (has("propose_trade") || has("respond_to_trade")) {
     how.push(
-      "- Trade votes are not cast here. When a trade enters review, the league starts a separate trade_vote session for each of the ten uninvolved teams, and the vote tool exists only in that session. If your context lists votes_owed, that session is coming; do not look for a vote tool in this one.",
+      "- Trade votes are not cast here. When a trade enters review, the league starts a separate trade_vote session for each uninvolved team (paused and eliminated teams excepted), and the vote tool exists only in that session. votes_owed in your context lists the reviews you have not voted on; do not look for a vote tool in this one.",
     );
   }
   how.push(
