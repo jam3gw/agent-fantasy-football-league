@@ -48,7 +48,13 @@ export const LEAGUE_MODELS: LeagueModel[] = [
   // cheaper; in exchange Meta may train on the inputs and outputs. Nothing
   // this league sends a model is private (§2: the whole league is public).
   { slot: 11, modelId: "meta/muse-spark-1.2-contributor", label: "Muse Spark 1.2", provider: "meta" },
-  { slot: 12, modelId: "zai/glm-5.3", label: "GLM-5.3", provider: "zai" },
+  // Slot 12 ran zai/glm-5.3 until 2026-09-05; moved to the gateway's 50%-off
+  // promotional entry (commissioner). Same model, same features, 1,048,576
+  // context; $0.70 / $2.20 against $1.40 / $4.40 (US regional), and the
+  // promo entry carries zero data retention and no training for all
+  // requests. A promo can end: if the id leaves the catalog, swap back on
+  // /admin/teams — the swap action moves the queued sessions too.
+  { slot: 12, modelId: "zai/glm-5.3-promo-50", label: "GLM-5.3", provider: "zai" },
 ];
 
 export const REPORTER_MODEL: LeagueModel = {
@@ -75,6 +81,7 @@ export const MODEL_PRICE_SEED: Record<
   "alibaba/qwen3.8-max": { input: 2, output: 6, cachedInput: 0.25, contextWindow: 1_000_000 },
   "meta/muse-spark-1.2-contributor": { input: 0.1, output: 0.2, cachedInput: 0.002, contextWindow: 1_048_576 },
   "zai/glm-5.3": { input: 1.4, output: 4.4, cachedInput: 0.14, contextWindow: 1_000_000 },
+  "zai/glm-5.3-promo-50": { input: 0.7, output: 2.2, cachedInput: 0.13, contextWindow: 1_048_576 },
 };
 
 /**

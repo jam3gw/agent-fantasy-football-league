@@ -2,6 +2,24 @@
 
 Each entry: date, the request made, what came back. Items marked **verify** in SPEC.md land here.
 
+## 2026-09-05 — AI Gateway catalog check for the GLM-5.3 promo entry (§8.1)
+
+Request: `GET https://ai-gateway.vercel.sh/v1/models` (no auth). Slot 12 moves
+to the 50%-off entry; the id is live:
+
+| Gateway ID | Ctx | $/1M in | $/1M out | Cache read $/1M | ZDR | No training |
+|---|---|---|---|---|---|---|
+| `zai/glm-5.3` (old; US regional price, which the ledger matched) | 1,000,000 | 1.40 | 4.40 | 0.14 | some | some |
+| `zai/glm-5.3-promo-50` (new) | 1,048,576 | 0.70 | 2.20 | 0.13 | all | all |
+
+Same description ("uses the same base model as GLM-5.2"), same tags
+(`reasoning`, `tool-use`, `implicit-caching`), same `supported_parameters`
+and specifications. The promo entry lists no `regions` and no
+`reasoning_options` block (the league sets none, §8.1). Checked against the
+ledger first: GLM's 2026-09-01→04 tokens at 1.40/4.40/0.14 come to $2.76
+against $2.88 recorded, so the current seat pays the regional rate and the
+promo is a real halving.
+
 ## 2026-09-03 — AI Gateway catalog re-check for the Contributor tier (§8.1)
 
 Request: `GET https://ai-gateway.vercel.sh/v1/models` (no auth). 369 models
