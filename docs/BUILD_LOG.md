@@ -2,6 +2,32 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Team 12: GLM-5.3 moves to the gateway's 50%-off entry
+
+Slot 12 now runs `zai/glm-5.3-promo-50` (was `zai/glm-5.3`). **Reason:
+price.** Jake's call ("might as well"). Same model, same features, 1,048,576
+context; $0.70 / $2.20 per M (cache read $0.13) against the $1.40 / $4.40
+US-regional rate the ledger had been paying, and the promo entry carries zero
+data retention and no training for all requests where the standard entry
+says "some". Catalog check in `docs/VERIFIED.md`. The seat had cost $3.57 for
+the season, about $1 a day, so this is worth about $0.50 a day.
+
+Done on production first (Jake's go-ahead), one transaction: the
+`model_prices` row, the `teams` row, the twelve queued sessions for team 12
+moved to the new id, the commissioner-action audit row and the public
+`model_swapped` transaction — the same five writes `swapModelAction` makes.
+Verified after commit: team 12 reads the promo id, no queued session carries
+the old one. Then `LEAGUE_MODELS` slot 12 and `MODEL_PRICE_SEED` in
+`packages/agent/src/models.ts` (the old id's seed stays for history), and a
+`smoke` session queued for team 12 as §8.1 asks after a model change.
+
+Label stays "GLM-5.3": same weights. No tier note on the site, unlike Muse
+Spark's Contributor tier — the promo carries no training term. **A promo can
+end.** If the id leaves the catalog, `checkGatewayModelId` in the outage
+detector will not see it, but the sessions will fail; the fix is the swap
+action on `/admin/teams` back to `zai/glm-5.3`, which moves the queued
+sessions too.
+
 ## 2026-09-05 — Two trade windows, reasoning billed once, get_league_rosters (deployed)
 
 Jake's three asks from the cost analysis below. Merged to `main` as `31e00f4`
