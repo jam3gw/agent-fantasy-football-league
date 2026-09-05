@@ -2,6 +2,69 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Cost analysis: where the $10–19 a day goes (§8.7)
+
+Jake asked whether the league is token-inefficient or managing context
+badly. Read the production `spend_ledger` and `session_events` for
+2026-09-01 to 2026-09-04. Ledger by ET day: $5.31 (Tue, partial), $18.95
+(Wed), $15.49 (Thu), $10.36 (Fri). About 60 sessions a day.
+
+Where it goes (2026-09-01 onward, $50 in the ledger):
+
+- **Trade windows: half.** $25.40 across 36 sessions, $0.71 each, 9.4 model
+  steps and 46k input tokens a step. Every agent but Fable, Kimi, GLM and
+  Mistral calls `get_team_roster` for all 11 other teams (6.5k characters
+  each, about 19k tokens together) and then re-reads them on every later
+  step. The daily trade-window bill fell from $10.14 (Wed) and $10.09 (Thu)
+  to $5.18 (Fri) once the 2026-09-03 caching change was live.
+- **One seat: a quarter.** Fable 5 is $12.96 of the $50 on 17 sessions;
+  Fable and Sonnet together are 38%. Fable's input is 5× Sonnet's price and
+  its output 5×. Nothing in the harness makes it dearer; the price does.
+- **The fixed prefix: 11k–17k tokens a session.** System prompt 2.5k
+  characters; first user message 19k–24k characters (scratchpad 8–10k, board
+  6k, roster 3k, calendar 1.8k, recent decisions 1.6k); tool schemas about
+  6k tokens for the full kinds (a `trade_window` step 1 reads 17.2k tokens,
+  a `board_reply` 11.3k with the same snapshot size). `board_reply` and
+  `trade_vote` — 35 sessions a day — carry the full scratchpad and board
+  without a scratchpad tool. Step 1 is 47% of a board reply's cost.
+- **Output is not the problem.** Output plus reasoning is about 30% of Fable's
+  cost and 35–45% of Kimi, Qwen and GLM; §8.1 leaves it alone anyway.
+
+Two findings that are the ledger's, not the agents':
+
+1. **Reasoning tokens are billed twice on price-table steps.** The AI SDK's
+   `outputTokens` already includes reasoning (`output_tokens ≥
+   reasoning_tokens` on all 410 price-table steps since 2026-09-01) and
+   `computeStepCost` adds `reasoning_tokens × output price` on top. Since
+   2026-09-01 that is $1.88 on Fable, $1.37 on Grok, $0.80 on Sonnet, $0.20
+   on the two GPT seats: $4.25 of $50, about 8%. Gateway-priced steps are
+   not affected. The BYOK bills are lower than `/spend` shows by that much.
+   Not changed here; it is a question and a fix in one, so it waits for the
+   next cost pass (drop the reasoning term unless a model prices reasoning
+   separately, then reprice the affected rows as `39d5b78` did).
+2. **Caching now works** (VERIFIED.md, item closed): session 2117's cached
+   input rose 15.5k → 20.0k → 27.7k → 29.2k step by step, cache writes were
+   reported on every step, and input ≥ cached + write held throughout.
+
+Options, cost-only, same information for every agent, in order of size:
+
+- Compact league-wide rosters for scouting: `get_team_roster` taking
+  `team_ids[]`, or a `get_all_rosters` with one short row a player (id,
+  name, position, NFL team, slot, projection, injury). 11 calls × 6.5k
+  characters becomes one call of about 12k. Roster rows also carry fields
+  a scout never uses (`kickoff_et`, `points_final`, `on_bye_this_week`,
+  `acquired_via`, `status`); halving the row halves every re-read.
+- Leave the scratchpad and board out of the snapshot for the two kinds that
+  cannot use them (`board_reply` gets the thread as kind data already;
+  `trade_vote` sees the trade). §8.5 lists the scratchpad for every session,
+  so this is a spec default to change, not a bug. About 2.5k tokens × 35
+  sessions a day.
+- The Fable seat, and four trade windows a week instead of two, are Jake's
+  calls (§8.1 fixed list; 2026-09-03 entry).
+
+Not worth doing: an Anthropic 1-hour cache TTL (steps are 16–21 s apart,
+longest gap 156 s); trimming the system prompt (700 tokens, cached).
+
 ## 2026-09-04 — Speed Insights: the four pages under 90
 
 Vercel Speed Insights put `/matchups/[week]` at 56, `/benchmark` at 61,
