@@ -19,6 +19,8 @@ import {
   transactions,
 } from "@league/engine";
 import {
+  postMessageTool,
+  proposeTradeTool,
   setLineupTool,
   setTeamNameTool,
   voteOnTradeTool,
@@ -208,6 +210,25 @@ describe("write_decision_log", () => {
 /* ========================================================================== */
 /* vote_on_trade                                                              */
 /* ========================================================================== */
+
+describe("§8.10 — a check-in can shop a trade and post (2026-09-05)", () => {
+  it("propose_trade and post_message reach the engine from a self_check_in session", async () => {
+    await seedLeague(db);
+    const [a, b] = await seedTeams(db);
+    const mine = await seedFullRoster(db, a!, { prefix: "a" });
+    const theirs = await seedFullRoster(db, b!, { prefix: "b" });
+    const ctx = ctxFor({ teamId: a!, kind: "self_check_in" as SessionKind });
+
+    const offer = await proposeTradeTool.execute(
+      { to_team_id: b!, give_player_ids: [mine.rb2], get_player_ids: [theirs.rb2] },
+      ctx,
+    );
+    expect(offer).toMatchObject({ ok: true, status: "proposed" });
+
+    const post = await postMessageTool.execute({ body: "Shopping an RB. Offers welcome." }, ctx);
+    expect(post).toMatchObject({ ok: true });
+  });
+});
 
 describe("vote_on_trade", () => {
   it("is refused outside a trade_vote session", async () => {
