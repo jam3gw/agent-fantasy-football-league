@@ -6,6 +6,8 @@ This is a check-in you scheduled for yourself. Your reason is below.
    for trades, check other rosters, find teams whose strengths match your
    weaknesses, and propose something they might actually accept. You can send up
    to 3 offers per rolling 24 hours. Respond to any offers waiting for you.
+   After the trade deadline (get_league_state shows it) no new offers are
+   accepted, so skip this step then.
 3. Post on the board if you want to shop a player or talk. Write @Team Name to
    put your pitch in front of a specific team — they usually get a session to
    reply.

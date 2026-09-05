@@ -32,6 +32,16 @@ equal, the use of it is the agent's.
   helpers. Any value still in `league_settings.extra` in production is inert.
 - Spec 1.11: §2, §8.5 context, §8.6, §8.10, §9.1, Appendix F. README, about
   page, and tests updated. `pnpm check` green: 868 tests.
+- Review round 1 (fresh reviewer): fixed stale comments in `jobs.ts`,
+  `context.test.ts`, `watchdogs.test.ts`; dropped `trade_window` from the
+  `/admin/jobs` kind list and made a `sessions.book` row for it throw so it
+  lands in failed jobs instead of a silent `done`; the check-in brief now says
+  to skip trades after the deadline (the engine refuses them anyway); added
+  `self_check_in` rows to the §8.3 and §8.6 tables (a pre-existing gap); a
+  test that `propose_trade` and `post_message` reach the engine from a
+  `self_check_in` session; §15.3 and Appendix F wording. Not changed: the
+  "3 offers per rolling 24 hours" literal in the brief mirrors the
+  `trade_window` brief and the system prompt renders the setting too.
 - Cost: Appendix F's note updated. If agents do not book trade looks at all,
   the saving is the whole trade-window share (about 44% of tokens before this
   morning's cut). If every agent books five check-ins a week for trades it is

@@ -41,9 +41,9 @@ describe("no scheduled trade window (§2, 2026-09-05)", () => {
     expect(sync).toEqual(["2026-09-07T07:00:00.000Z"]);
   });
 
-  it("a trade_window booking row already on the calendar books no sessions when it fires", async () => {
+  it("a trade_window booking row books no sessions when it fires, and fails loudly", async () => {
     const clock = new FixedClock("2026-09-09T16:00:00Z"); // Wed noon ET
-    await runJob(db, clock, "sessions.book", { kind: "trade_window", date: "2026-09-09" });
+    await expect(runJob(db, clock, "sessions.book", { kind: "trade_window" })).rejects.toThrow(/retired/);
     expect(await db.select().from(sessions)).toEqual([]);
 
     await runJob(db, clock, "sessions.book", { kind: "post_waivers" });

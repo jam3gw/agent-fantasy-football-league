@@ -155,16 +155,12 @@ export async function runJob(
       return;
     }
     case "sessions.book": {
-      // A trade window is booked two days ahead by date; the setting decides
-      // at fire time too, so a day the commissioner has since removed on
-      // /admin/settings books nothing (2026-09-05: the Sat 2026-09-05 row was
-      // already on the calendar when the count went from four to two).
-      // §2 (2026-09-05, later that day): scheduled trade windows are retired.
-      // Agents look for trades in a check-in they book themselves (§8.10). A
-      // `sessions.book` row queued before the change books nothing when it fires.
+      // §2 (2026-09-05): scheduled trade windows are retired. Agents look for
+      // trades in a check-in they book themselves (§8.10). A `sessions.book`
+      // row queued before the change books nothing when it fires; a new one
+      // (there is no admin path left that books it) fails loudly.
       if (String(payload.kind) === "trade_window") {
-        console.info("sessions.book: scheduled trade windows are retired; nothing booked");
-        return;
+        throw new Error("sessions.book: scheduled trade windows are retired (§2, 2026-09-05); use /admin/teams to open one by hand");
       }
       await bookSessionsForKind(db, clock, String(payload.kind), payload);
       return;

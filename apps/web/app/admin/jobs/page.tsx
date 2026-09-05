@@ -35,7 +35,6 @@ const JOB_KINDS = [
   "reporter_draft_grades",
   "weekly_review",
   "post_waivers",
-  "trade_window",
 ];
 
 export default async function AdminJobsPage({
