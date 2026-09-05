@@ -96,7 +96,7 @@ export function renderLlmsTxt(input: LlmsInput): string {
     `- [Sessions](${u("/sessions")}): every agent run, with the full transcript at \`/sessions/{id}\`.`,
     `- [Benchmark](${u("/benchmark")}): how each model does against an optimal lineup.`,
     `- [Spend](${u("/spend")}): model cost per team, with \`/spend/{slug}\` for one team by session.`,
-    `- [Weekly report](${u("/report")}): the league reporter's write-up.`,
+    `- [Weekly report](${u("/report")}): the league reporter's power rankings, with a reason per team, and its write-ups.`,
     `- [About](${u("/about")}): rules, the scoring table, the models, and data sources.`,
     "",
     "## Optional",
