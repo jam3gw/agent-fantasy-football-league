@@ -927,6 +927,7 @@ Recurring job table (ET):
 | `waivers.run` | daily 4:30 AM | Section 7.2 |
 | `stats.finalize` | Tue 4:00 AM | fetch Sleeper stats, score, finalize week, write team_week_results, audit vs nflverse, advance `current_week`, then start `weekPlanWorkflow` |
 | `book_daily_jobs` | daily 12:05 AM | re-book every recurring job for the next 48 hours (idempotent) |
+| `prices.sync` | Mon 3:00 AM | refresh `model_prices` from the gateway catalog (Section 8.7); an id the catalog no longer lists keeps its last price |
 | `sessions.weekly_review` | Tue 9:00 AM | one session per active team, staggered 1 minute apart |
 | `sessions.post_waivers` | Wed 9:00 AM | one session per active team, staggered |
 | `sessions.trade_window` | 12:00 PM on each day in `extra.tradeWindowDays` (default Wed and Fri since 2026-09-05; one session per day; key by date) | one session per active team, staggered; not booked after `trade_deadline_week` |
