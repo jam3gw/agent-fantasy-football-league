@@ -739,7 +739,7 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
 }
 
 /* ------------------------------------------------------------------ *
- * Benchmark aggregates — /benchmark
+ * Benchmark aggregates — /benchmark and /teams
  * ------------------------------------------------------------------ */
 
 export interface BenchRow {
@@ -781,8 +781,8 @@ export interface BenchRow {
  * Every per-team number the benchmark shows, in one pass.
  *
  * This was inline in `/benchmark` and moved here when the home page's power
- * rankings were computed from it. The rankings are the reporter's now; this
- * stays as `/benchmark`'s read.
+ * rankings were computed from it. The rankings are the reporter's now;
+ * `/benchmark` and `/teams` read this.
  */
 export async function benchmarkRows(): Promise<BenchRow[]> {
   // `db()` reads DATABASE_URL and throws when it is missing, so it is called

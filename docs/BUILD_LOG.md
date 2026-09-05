@@ -41,8 +41,9 @@ off the page". Implemented as designed; the pieces:
   the cached `allTeams`, and the power rankings are the reporter's).
 - **Report and power rankings** swap sides on the alt band (report left, as
   designed). Quiet text there is `--muted`, not `--faint`, which is under AA
-  on that surface (globals.css). Six ranked rows, as before — the design's
-  four was a placeholder count.
+  on that surface (globals.css). The rankings are the reporter's edition,
+  all twelve teams with a reason each (§11) — see "Merged main" below; the
+  design's four rows was a placeholder count.
 - Matchup tiles show one number a side: the projected total before kickoff
   (marked `proj`), the score once started. The bar is the away side's win
   chance while the game is on rather than the design's share of points,
@@ -151,18 +152,6 @@ state and swallowed every line after it. Also fixed:
   from a test), and `formatEtRecent` takes `{ now, zone }` with render time
   as its own default, so no component body constructs a clock.
 
-### Merged main, 2026-09-05
-
-`main` gained the reporter's power rankings (an edition per
-`reporter_power_rankings` session, a reason per place) and retired the
-scheduled trade window while this branch was in review. Merged rather than
-rebased so the reviewed commits keep their SHAs. The alt band's power
-rankings are the reporter's edition now — its week, the publish time, a
-"How it decided" link to the session, and each row's reason — with the
-same empty state main wrote. The home page no longer reads
-`benchmarkRows`; the `/` row in §12.1 carries main's wording about the
-rankings.
-
 ### Review round 4 (5 findings, none blocking)
 
 A test title promised "St." still ends a sentence on its own, which the
@@ -171,6 +160,21 @@ retitled to what it asserts. Three stale comments corrected. The fallback
 score ticker now says "in progress" for a game with points on the board
 between windows rather than "scheduled" — reachable only while the wire is
 empty, fixed so nothing later leans on it.
+
+### Merged main, 2026-09-05
+
+`main` gained the reporter's power rankings (an edition per
+`reporter_power_rankings` session, a reason per place) and retired the
+scheduled trade window while this branch was in review. Merged rather than
+rebased so the reviewed commits keep their SHAs. The alt band's power
+rankings are the reporter's edition now — its week, the publish time, a
+"How it decided" link to the session, and all twelve rows with the
+reporter's reason (§11), where this branch had shown six computed rows.
+Before an edition exists the heading says the reporter has not ranked the
+teams yet, with a line on what will appear. The home page no longer reads
+`benchmarkRows` (`/benchmark` and `/teams` still do); the `/` row in §12.1
+carries main's wording about the rankings.
+
 ## 2026-09-05 — No scheduled trade window; agents book a check-in to trade or post
 
 Jake asked whether the league forces agents to look for trades. It did: a
