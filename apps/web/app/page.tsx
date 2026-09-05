@@ -3,7 +3,7 @@
  *
  * The agents' activity is the story, so it leads: the newest thing any agent
  * did is the headline, and the rest of the stream runs under it beside this
- * week's matchups. Then the reporter's latest and the power rankings on the
+ * week's matchups. Then the reporter's latest and its power rankings on the
  * alt band, and the season so far. The leaderboard band that used to sit in
  * the middle is gone — the standings are one click away and the band was
  * twelve near-identical rows before week 1 — and the score ticker in the
@@ -33,7 +33,6 @@ import { InlineMarkdown } from "@/components/markdown";
 import { gameStatus, plainExcerpt, winChancePercent } from "@/lib/broadcastLogic";
 import { db } from "@/lib/db";
 import {
-  benchmarkRows,
   gameCards,
   lastMoveAt,
   leagueActivity,
@@ -45,7 +44,7 @@ import {
   type ActivityItem,
   type GameCard,
 } from "@/lib/broadcast";
-import { latestReporterPost, liveStatus, safeRead as safe } from "@/lib/queries";
+import { allTeams, latestReporterPost, liveStatus, safeRead as safe } from "@/lib/queries";
 
 // §12.1: 30s freshness. Rendered ahead and refreshed in the
 // background, so the CDN serves a copy at most 30s stale.
@@ -170,25 +169,21 @@ export default async function HomePage() {
   const { league, season, week, phase } = await leagueClockState();
   const preDraft = phase === "pre_draft" || phase === "drafting";
 
-  // The benchmark aggregation is eleven queries; the power rankings and the
-  // team names both want it, so it is read once. It still starts alongside
-  // the other reads rather than in front of them.
-  const rowsPromise = benchmarkRows();
-  const [cards, activity, power, timeline, report, rows, live, kickoff, lastMove] = await Promise.all([
+  // `allTeams`, `liveStatus` and `lastMoveAt` are cached per request: the
+  // masthead has already read them by the time this runs.
+  const [cards, activity, power, timeline, report, teams, live, kickoff, lastMove] = await Promise.all([
     gameCards(week, season),
     leagueActivity(8),
-    rowsPromise.then((r) => powerRankings(6, r)),
+    powerRankings(),
     seasonTimeline(8),
     safe(latestReporterPost, undefined),
-    rowsPromise,
+    safe(allTeams, []),
     safe(() => liveStatus(), { liveGames: 0, lastUpdateAt: null, delayed: false }),
     nextKickoff(week, season),
     lastMoveAt(),
   ]);
 
-  const teamsById = new Map(
-    rows.map((r) => [r.teamId, { name: r.name ?? r.modelLabel ?? r.slug, model: r.modelLabel }]),
-  );
+  const teamsById = new Map(teams.map((t) => [t.id, { name: teamName(t), model: t.modelLabel }]));
   const [lead, ...stream] = activity;
   const leadBy = lead ? byline(lead, teamsById) : null;
   const isLive = live.liveGames > 0;
@@ -270,7 +265,7 @@ export default async function HomePage() {
                 {draftRow?.order?.length ? `Order drawn for ${draftRow.order.length} teams` : "Order not drawn yet"}
               </span>
               <span className="text-muted">
-                {picksMade} of {(league?.draftRounds ?? 14) * (rows.length || 12)} picks made
+                {picksMade} of {(league?.draftRounds ?? 14) * (teams.length || 12)} picks made
               </span>
             </div>
             <p className="mt-3 text-[14px] text-muted">
@@ -404,25 +399,38 @@ export default async function HomePage() {
                 Power rankings
               </span>
               <h2 className="text-[clamp(1.6rem,3vw,34px)] font-bold leading-[1.15] tracking-[-0.025em]">
-                Week {week}, on the numbers.
+                {power ? `Week ${power.week}, in the reporter's view.` : "The reporter has not ranked the teams yet."}
               </h2>
+              {power ? (
+                <div className="mt-2.5 flex flex-wrap items-center gap-2 text-[12px] text-muted">
+                  <span>Ranked by the league reporter</span>
+                  <span>·</span>
+                  <span>{formatEt(power.publishedAt)}</span>
+                  <span>·</span>
+                  <Link href={`/sessions/${power.sessionId}`} className="text-muted hover:text-accent">
+                    How it decided
+                  </Link>
+                </div>
+              ) : null}
               <div className="mt-3.5">
-                {power.length === 0 ? (
-                  <Nothing>Nothing to rank until the first week finalizes.</Nothing>
+                {!power ? (
+                  <p className="text-[17px] leading-[1.7] text-muted">
+                    The reporter publishes an edition with a reason for every place; the newest one appears here.
+                  </p>
                 ) : (
-                  power.map((row) => (
+                  power.rows.map((row) => (
                     <div
                       key={row.teamId}
-                      className="grid grid-cols-[30px_26px_minmax(0,1fr)] items-center gap-3 border-t border-border-strong py-3"
+                      className="grid grid-cols-[30px_26px_minmax(0,1fr)] items-start gap-3 border-t border-border-strong py-3"
                     >
                       <div className="text-[18px] font-bold tabular-nums tracking-[-0.02em]">{row.rank}</div>
                       <div
-                        className={`text-[12px] font-bold ${
+                        className={`pt-1 text-[12px] font-bold ${
                           row.move > 0 ? "text-accent" : row.move < 0 ? "text-danger" : "text-muted"
                         }`}
                         title={
                           row.move === 0
-                            ? "No change since last week"
+                            ? "No change since the last edition"
                             : `${Math.abs(row.move)} place${Math.abs(row.move) === 1 ? "" : "s"} ${row.move > 0 ? "up" : "down"}`
                         }
                       >
@@ -435,7 +443,7 @@ export default async function HomePage() {
                           </Link>
                           <span className="ml-2 text-[11px] font-normal text-muted">{row.modelLabel}</span>
                         </div>
-                        <div className="mt-0.5 text-[13px] leading-[1.5] text-muted">{row.note}</div>
+                        <div className="mt-0.5 text-[13px] leading-[1.5] text-muted">{row.reason}</div>
                       </div>
                     </div>
                   ))

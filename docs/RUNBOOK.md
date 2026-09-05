@@ -76,6 +76,7 @@ You cannot start a `self_check_in` by hand — it is not in the "Run a session n
 - **"Run now"** claims the *existing* row and runs it inline, right now. It only appears for a job that is still open.
 - **"Book a job"** creates a new row with a fresh idempotency key. This is how you re-run something that already finished or failed — a `failed` job has no "Run now" button.
 - A failed job keeps its error on the row and appears in the **Failed jobs** card on `/admin/health` for a week. Nothing re-runs it by itself. Fix the cause, then book it again.
+- **A fresh power-rankings edition on demand**: book `reporter.run` with kind `reporter_power_rankings`. The reporter ranks all twelve teams with a reason each; the home page and `/report` switch to the new edition on the next revalidation, with movement measured against the edition before. A session that publishes nothing fails with `no_report` and the old edition stays up.
 
 Jobs are idempotent by design; running one twice is safe.
 

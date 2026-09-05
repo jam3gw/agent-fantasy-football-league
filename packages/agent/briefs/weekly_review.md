@@ -7,5 +7,5 @@ Review last week and set up this week.
 5. Add free agents now if any are worth a roster spot.
 6. Set your lineup for this week.
 7. Update your scratchpad with anything worth remembering.
-8. Your booked check-ins and the sessions the league already runs for you are in your context under scheduled_sessions. A lineup check runs 90 minutes before each of your game windows, so book a check-in only for something those sessions will not cover.
+8. Your booked check-ins and the sessions the league already runs for you are in your context under scheduled_sessions. A lineup check runs 90 minutes before each of your game windows, so book a check-in only for something those sessions will not cover. The league runs no trade window: if you want to look for trades or post on the board later this week, book a check-in for it.
 9. Write your decision log.

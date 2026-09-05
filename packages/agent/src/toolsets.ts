@@ -57,6 +57,13 @@ const LOG = ["write_decision_log"];
  */
 const CHECK_IN = ["schedule_check_in", "cancel_check_in", "list_check_ins"];
 
+/**
+ * The reporter's read tools (§8.4 table 3). Each reporter kind adds exactly
+ * one ending tool: a post kind gets `publish_report`, the rankings kind gets
+ * `publish_power_rankings`, so a session can never end on the wrong one.
+ */
+const REPORTER_READ = REPORTER_TOOLS.map((t) => t.name).filter((n) => !n.startsWith("publish_"));
+
 /** Read tools minus the scratchpad reader, which the scratchpad group re-adds. */
 const READ_ONLY_NO_PAD = READ.filter((n) => n !== "read_scratchpad");
 
@@ -153,8 +160,9 @@ export const SETS: Record<SessionKind, string[]> = {
   /**
    * §8.10. A check-in exists to answer the question the agent left itself and
    * act on the answer, so it can do anything time-sensitive: the lineup, the
-   * wire, a trade waiting on a reply. It cannot *propose* a trade or post to
-   * the board — those have their own windows and their own limits — and it
+   * wire, a trade. Since 2026-09-05 there is no scheduled trade window, so a
+   * check-in is also where an agent shops a trade or posts to the board — the
+   * per-day offer limit (§3.5) and the check-in limits (§8.10) bound both. It
    * cannot book another check-in, so it can never become a way to run a
    * second weekly review or to keep going past the ceiling.
    */
@@ -167,7 +175,10 @@ export const SETS: Record<SessionKind, string[]> = {
     "drop_player",
     "submit_waiver_claims",
     "cancel_waiver_claims",
+    "propose_trade",
     "respond_to_trade",
+    "cancel_trade",
+    "post_message",
     ...SCRATCHPAD,
     ...LOG,
   ],
@@ -179,10 +190,12 @@ export const SETS: Record<SessionKind, string[]> = {
     "read_scratchpad",
   ],
   smoke: ["get_league_state", ...LOG],
-  reporter_draft_grades: [...READ_ONLY_NO_PAD, ...REPORTER_TOOLS.map((t) => t.name)],
-  reporter_recap: [...READ_ONLY_NO_PAD, ...REPORTER_TOOLS.map((t) => t.name)],
-  reporter_preview: [...READ_ONLY_NO_PAD, ...REPORTER_TOOLS.map((t) => t.name)],
-  reporter_trade_note: [...READ_ONLY_NO_PAD, ...REPORTER_TOOLS.map((t) => t.name)],
+  reporter_draft_grades: [...READ_ONLY_NO_PAD, ...REPORTER_READ, "publish_report"],
+  reporter_recap: [...READ_ONLY_NO_PAD, ...REPORTER_READ, "publish_report"],
+  reporter_preview: [...READ_ONLY_NO_PAD, ...REPORTER_READ, "publish_report"],
+  reporter_trade_note: [...READ_ONLY_NO_PAD, ...REPORTER_READ, "publish_report"],
+  // The rankings session ends with publish_power_rankings, not a post (§11).
+  reporter_power_rankings: [...READ_ONLY_NO_PAD, ...REPORTER_READ, "publish_power_rankings"],
 };
 
 /** The tools a session of this kind may call. */

@@ -205,7 +205,7 @@ export async function runTick(): Promise<TickSummary> {
     }
 
     try {
-      await runJob(database, clock, type, payload);
+      await runJob(database, clock, type, payload, { id });
       await database
         .update(scheduledJobs)
         .set({ status: "done", doneAt: clock.now() })
