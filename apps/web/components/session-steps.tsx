@@ -540,6 +540,7 @@ export function StepCard({
     <details
       id={stepAnchor(step)}
       data-step-card
+      data-step-kind={decision ? "decision" : write ? "write" : step.kind}
       open={defaultOpen}
       className={`group/step min-w-0 scroll-mt-24 overflow-hidden rounded-xl border bg-surface ${
         decision ? "border-accent" : "border-border"

@@ -1,8 +1,8 @@
-import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import type { Metadata } from "next";
 import { Geist_Mono, Inter_Tight } from "next/font/google";
 import Link from "next/link";
+import { SiteAnalytics } from "@/components/analytics";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { Container } from "@/components/broadcast";
 import { Masthead } from "@/components/masthead";
@@ -70,7 +70,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             </nav>
           </Container>
         </footer>
-        <Analytics />
+        <SiteAnalytics />
         <SpeedInsights />
       </body>
     </html>
