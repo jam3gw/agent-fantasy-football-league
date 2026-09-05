@@ -13,6 +13,7 @@ import {
   carryOverLineups,
   createSession,
   getSettings,
+  health,
   runWaivers,
   scheduledJobs,
   teams,
@@ -102,6 +103,25 @@ export async function runJob(
         from: Number(payload.week ?? settings.currentWeek),
         fetchWeek: (s, w) => fetchWeekProjections(s, w, { db }),
       });
+      return;
+    }
+    case "prices.sync": {
+      // §8.7: model_prices refreshed weekly from the gateway catalog. A seat
+      // whose id has left the catalog (a promo that ended, a retired model)
+      // is a `prices.sync` error row on /admin/health, not a log line: the
+      // swap on /admin/teams is the fix and someone has to see the need.
+      const { syncModelPrices } = await import("@league/agent");
+      const result = await syncModelPrices(db, clock);
+      if (!result.ok) throw new Error(`prices.sync: ${result.error}`);
+      const now = clock.now();
+      const set =
+        result.missingInUse.length > 0
+          ? {
+              lastError: `not in the gateway catalog any more: ${result.missingInUse.join(", ")} — swap the seat on /admin/teams`,
+              lastErrorAt: now,
+            }
+          : { lastSuccessAt: now, lastError: null, lastErrorAt: null };
+      await db.insert(health).values({ key: "prices.sync", ...set }).onConflictDoUpdate({ target: health.key, set });
       return;
     }
     case "ingest.season_stats": {
@@ -272,6 +292,8 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
   }
 
   // Weekly fixtures relative to now.
+  // §8.7: the price table follows the gateway catalog, Monday 3:00 AM ET.
+  await book("prices.sync", nextEtWeekdayTime(now, 1, 3, 0));
   const nextTue4 = nextEtWeekdayTime(now, 2, 4, 0);
   await book("stats.finalize", nextTue4, { week: settings.currentWeek });
   await book("sessions.book", nextEtWeekdayTime(now, 2, 9, 0), { kind: "weekly_review" });

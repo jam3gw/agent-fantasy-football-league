@@ -70,7 +70,11 @@ export const MODEL_PRICE_SEED: Record<
   { input: number; output: number; cachedInput?: number; contextWindow: number }
 > = {
   "anthropic/claude-fable-5": { input: 10, output: 50, cachedInput: 1, contextWindow: 1_000_000 },
-  "mistral/mistral-large-3": { input: 2, output: 6, cachedInput: 0.5, contextWindow: 128_000 },
+  // Catalog 2026-09-05: $0.50 / $1.50, no cache-read price listed, 256k
+  // context (the 2026-08-28 capture had 2 / 6 / 0.5 / 128k). The weekly
+  // `prices.sync` job keeps the table itself current; this seed only fills a
+  // fresh database.
+  "mistral/mistral-large-3": { input: 0.5, output: 1.5, contextWindow: 256_000 },
   "anthropic/claude-sonnet-5": { input: 2, output: 10, cachedInput: 0.2, contextWindow: 1_000_000 },
   "openai/gpt-5.6-sol": { input: 2, output: 10, cachedInput: 0.2, contextWindow: 1_050_000 },
   "openai/gpt-5.6-terra": { input: 2, output: 12, cachedInput: 0.2, contextWindow: 1_050_000 },

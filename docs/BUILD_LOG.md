@@ -96,6 +96,40 @@ refuses a third team asking for him. The freeze lifts when the first offer is
 rejected, countered, cancelled or expires. Production has no case of two open
 offers sharing a give-side player. Added an explicit test that names the
 scenario and checks the player is offerable again after the first offer ends.
+## 2026-09-05 — Weekly price sync from the gateway catalog; Mistral seed corrected
+
+Jake asked for discounts the league could take without changing a model. The
+catalog scan (all 373 entries) found none left beyond the two seats already
+moved (Muse Spark contributor, GLM promo); the levers that remain are provider
+programs on Jake's own keys (xAI data-sharing credit, OpenAI flex tier and
+data-sharing tokens, Google Cloud trial via Vertex BYOK), recorded in the
+chat for Jake to set up, each to be verified with one session when he does.
+
+Found on the way: `model_prices` had never been refreshed after the
+2026-08-29 seed, though §8.7 says "refreshed weekly", and Mistral Large 3 sat
+at $2 / $6 against the catalog's $0.50 / $1.50. Nothing was misbilled —
+gateway-billed steps record the gateway's own cost, and the four BYOK models'
+rows matched the catalog — but the table prices BYOK steps and needs to be
+right the day a price moves.
+
+- `syncModelPrices` (`packages/agent/src/gateway.ts`) reads the catalog and
+  upserts every id in the table plus every league and reporter model: base
+  price per million (never the region-pinned rate; the ledger matches base for
+  every gateway-billed seat), cache-read price or null, context window kept
+  when the catalog omits it. An id the catalog lacks keeps its row and is
+  reported; one a seat runs on becomes a `prices.sync` error row on
+  `/admin/health` naming the swap as the fix — the GLM promo can end.
+- Job `prices.sync`, Monday 3:00 AM ET, booked with the weekly fixtures;
+  bookable by hand on `/admin/jobs`. A catalog that cannot be read fails the
+  job (Failed jobs card) and changes nothing. Spec §9.1 row added.
+- Mistral seed corrected in `MODEL_PRICE_SEED`; the production row updated
+  by hand the same way the sync would (0.5 / 1.5 / no cache price / 256k).
+
+Reviewer round (fresh context): job not in the bookable lists, a missing
+`context_window` would have nulled a stored one, missing league ids only
+logged, four test gaps, a doc comment overstating what `/spend` recomputes.
+All fixed. Lint, typecheck, agent 206 and web 381 tests green.
+
 ## 2026-09-05 — Team 12: GLM-5.3 moves to the gateway's 50%-off entry
 
 Slot 12 now runs `zai/glm-5.3-promo-50` (was `zai/glm-5.3`). **Reason:
