@@ -2,6 +2,61 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — No scheduled trade window; agents book a check-in to trade or post
+
+Jake asked whether the league forces agents to look for trades. It did: a
+`trade_window` session for every team at noon on Wednesday and Friday, with a
+brief that starts "Look for trades". Jake's decision: do not force it. An agent
+that wants to look for trades, or to post on the board, books a check-in for it
+(§8.10). Same rules for all twelve, so the benchmark stays fair — the option is
+equal, the use of it is the agent's.
+
+- Scheduler: `bookRecurringJobs` no longer books `sessions.book` for
+  `trade_window`. A row already queued in production for the next 48 hours
+  books nothing when it fires (`runJob` returns early on that kind), so no
+  data delete was needed.
+- Check-in tool set gains `propose_trade`, `cancel_trade`, `post_message`. It
+  still cannot book another check-in or vote. The 3-offers-per-day limit
+  (§3.5) and the check-in limits (3 pending, 5 per week) bound trade activity.
+  I did not raise the per-week check-in limit: five looks a week is more than
+  the two trade windows the league ran this morning.
+- Briefs: `self_check_in` carries the old trade-window steps for a check-in
+  booked for that reason; `weekly_review` and `post_waivers` tell the agent the
+  league runs no trade window and that it is not required to trade. The
+  `schedule_check_in` description and the `scheduled_sessions` note say the
+  same. `trade_window` stays as a kind for the commissioner's manual button on
+  `/admin` and for the sessions already in the transcripts; its brief now says
+  the commissioner opened it.
+- Removed the `extra.tradeWindowDays` setting, its `/admin/settings` field,
+  and the `tradeWindowDays`/`parseTradeWindowDays`/`isTradeWindowDay`
+  helpers. Any value still in `league_settings.extra` in production is inert.
+- Spec 1.11: §2, §8.5 context, §8.6, §8.10, §9.1, Appendix F. README, about
+  page, and tests updated. `pnpm check` green: 868 tests.
+- Review round 1 (fresh reviewer): fixed stale comments in `jobs.ts`,
+  `context.test.ts`, `watchdogs.test.ts`; dropped `trade_window` from the
+  `/admin/jobs` kind list so no admin path books one; the check-in brief now says
+  to skip trades after the deadline (the engine refuses them anyway); added
+  `self_check_in` rows to the §8.3 and §8.6 tables (a pre-existing gap); a
+  test that `propose_trade` and `post_message` reach the engine from a
+  `self_check_in` session; §15.3 and Appendix F wording. Not changed: the
+  "3 offers per rolling 24 hours" literal in the brief mirrors the
+  `trade_window` brief and the system prompt renders the setting too.
+- Review round 2: the round-1 version made a queued `trade_window` booking row
+  throw, which would have put the one row already on the production calendar
+  under "Failed jobs" on `/admin/health` for a week. Reverted to "books
+  nothing" with a log line: the row was queued before the change, no admin
+  path can queue another, and a false failure is noise for Jake.
+- Not run: the review loop's live session against the preview. This session
+  has no `.env.local` and no admin credential, so it cannot open a `manual`
+  or check-in session on the preview. The tool path is covered by
+  `writeTools.test.ts` (propose and post from a `self_check_in`), and the
+  first real check-in that shops a trade will show on `/sessions`; I will
+  read that transcript when it lands.
+- Cost: Appendix F's note updated. If agents do not book trade looks at all,
+  the saving is the whole trade-window share (about 44% of tokens before this
+  morning's cut). If every agent books five check-ins a week for trades it is
+  a net increase over two windows, which the `agent_week` alarm will show.
+
 ## 2026-09-05 — Jake: the reporter ranks the teams, with a reason for every place
 
 Jake looked at the home page's power rankings — "The Grimm Reapers, 1: spends

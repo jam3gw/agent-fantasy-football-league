@@ -4,7 +4,7 @@
  */
 import { and, desc, eq, inArray } from "drizzle-orm";
 import { formatEt, nextEtTime } from "@league/shared";
-import type { LeagueSettings, SessionKind } from "@league/engine";
+import type { SessionKind } from "@league/engine";
 import {
   boardPosts,
   computeStandings,
@@ -29,7 +29,6 @@ import {
   teamWeekResults,
   trades,
   tradeVotes,
-  tradeWindowDays,
   waiverClaims,
 } from "@league/engine";
 import type { ToolContext } from "./tools/types.ts";
@@ -416,7 +415,7 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
     snapshot.pending.votes_note = VOTES_ELSEWHERE_NOTE;
   }
 
-  snapshot.scheduled_sessions = await scheduledSessions(ctx, team, roster, upcoming, settings);
+  snapshot.scheduled_sessions = await scheduledSessions(ctx, team, roster, upcoming);
 
   snapshot.scratchpad = await readScratchpad(db, teamId);
 
@@ -432,15 +431,13 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
   return snapshot;
 }
 
-const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-
-/** The calendar note, with the trade-window days read off the setting (§2, 2026-09-05). */
-export function scheduledNote(settings: Pick<LeagueSettings, "extra">): string {
-  const days = tradeWindowDays(settings).map((d) => WEEKDAY[d]).join(", ");
+/** The calendar note (§8.5, §8.10). No scheduled trade window since 2026-09-05 (§2). */
+export function scheduledNote(): string {
   return (
     "The league runs a lineup_check for you about 90 minutes before every game window you have a player in; " +
-    "you do not need to book a check-in for that moment. weekly_review (Tue), post_waivers (Wed) and the " +
-    `trade windows (${days}) run on their days without a booking.`
+    "you do not need to book a check-in for that moment. weekly_review (Tue) and post_waivers (Wed) run on " +
+    "their days without a booking. The league runs no trade window: if you want to look for trades or post " +
+    "on the board, book a check-in for it."
   );
 }
 
@@ -450,7 +447,6 @@ async function scheduledSessions(
   team: { id: number; paused: boolean; eliminated: boolean },
   roster: Array<{ nflTeam: string | null }>,
   weekGames: Array<{ kickoffAt: Date; home: string; away: string }>,
-  settings: Pick<LeagueSettings, "extra">,
 ): Promise<ScheduledSessions> {
   const { db, clock } = ctx;
   const now = clock.now();
@@ -497,7 +493,7 @@ async function scheduledSessions(
       at_et: formatEt(l.at),
       ...(l.window ? { window_kickoff_et: formatEt(l.window) } : {}),
     })),
-    note: scheduledNote(settings),
+    note: scheduledNote(),
   };
 }
 
