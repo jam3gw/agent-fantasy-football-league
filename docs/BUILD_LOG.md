@@ -2,6 +2,13 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Sitemap: dropped the `/players` index URL
+
+The sitemap listed `/players`, but no players index page exists. Only
+`/players/[id]` does, and SPEC §12.1 specifies only the player card. The
+URL returned a 404 to crawlers. Removed `/players` from the sitemap's page
+list. No index page was built: the spec does not ask for one.
+
 ## 2026-09-05 — Two transcript findings: no vote tool in a trade window, and why a player is frozen
 
 Jake asked whether two findings from the trade-window transcripts were fixed.
