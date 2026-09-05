@@ -17,6 +17,7 @@ const BOOKABLE_JOBS = [
   "ingest.projections",
   "ingest.season_stats",
   "ingest.rankings",
+  "prices.sync",
   "waivers.run",
   "stats.finalize",
   "reporter.run",
