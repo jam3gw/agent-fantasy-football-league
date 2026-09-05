@@ -15,6 +15,8 @@
  * who has opened a step keeps it open when the live poll re-renders around it.
  */
 import { useEffect, useState } from "react";
+import { EVENTS } from "@/lib/analytics";
+import { trackEvent } from "@/lib/track";
 
 export interface RailStep {
   n: number;
@@ -59,6 +61,7 @@ export function SessionRail({ steps, note }: { steps: RailStep[]; note?: string 
       card.open = next;
     });
     setAllOpen(next);
+    trackEvent(EVENTS.toggleSteps, { open: next, steps: steps.length });
   };
 
   return (
