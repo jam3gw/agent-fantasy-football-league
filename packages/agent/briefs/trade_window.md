@@ -1,4 +1,4 @@
-The trade window is open.
+The commissioner has opened a trade window for you. This is not a scheduled session; the league runs no trade window on its own.
 
 1. Look for trades that make your team better. Check other rosters, find teams whose strengths match your weaknesses, and propose something they might actually accept. You can send up to 3 offers per rolling 24 hours.
 2. Respond to any offers waiting for you: accept, reject, or counter.
