@@ -2,6 +2,56 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Jake: the reporter ranks the teams, with a reason for every place
+
+Jake looked at the home page's power rankings — "The Grimm Reapers, 1: spends
+the most in the league at $20.25, for 0.0 points" — and asked whether the
+reporter should be ranking the teams instead, with reasoning. It should; §11
+had said so since v1 and the page had quietly grown its own formula on
+2026-08-29 (win rate 0.5, points 0.35, lineup efficiency 0.15) because the
+redesign wanted a rankings block before the first recap existed. Before a game
+is played every input is zero, so the order was team-id order, and the "note"
+under each team was a fact chosen from a fixed list (spend, bad tool calls,
+bench points) that has nothing to do with why a team is ranked where it is.
+
+**What changed.**
+
+- A new reporter session kind, `reporter_power_rankings`, whose only ending
+  tool is `publish_power_rankings`: every team once, ranks 1–12 with no
+  repeats, one or two sentences of reasoning each (≤ 400 chars). The engine
+  validates the whole set and writes it as one edition in one transaction;
+  a session publishes once. `publish_report` is not in this kind's set, and
+  `publish_power_rankings` is not in the post kinds' sets, so no session can
+  end on the wrong tool (`toolsets.test.ts` walks every reporter kind).
+- `get_power_rankings` (all reporter kinds): the newest edition with each
+  team's reason and its movement, so the reporter can explain what changed
+  and the recap can point at the list instead of repeating it. The recap brief
+  loses its "rankings 1–12" item.
+- Booked Tuesday 10:30 AM ET, ahead of the 11:00 recap and the 11:30 digest,
+  and once after `draft.completed` (20 minutes after the grades) for a
+  preseason edition. The site shows the newest edition; movement is against
+  the one before, so an arrow means the reporter changed its mind.
+- The home page reads the edition (all twelve, with the reason as the line
+  under each team and a link to the session that decided it); `/report`
+  carries the same list above the posts. `powerScore` and `rankingBefore`
+  and their tests are gone. `benchmarkRows()` is still read once for the
+  leaderboard band.
+- Table `power_rankings` (migration 0007): unique on `(session_id, team_id)`
+  and `(session_id, rank)`. `pulse` includes its max id so the pages refresh
+  when an edition lands.
+
+**Choices.** An edition is keyed by session, not by week, so a re-run never
+overwrites and a preseason edition and a Tuesday edition in the same fantasy
+week both survive. `week` on the row is the week in play when it was
+published, for the heading. The reporter is told to rank on results, roster,
+moves, and lineup management — and, before the first game, on the draft and
+the trades — and to read its previous edition first. It is not shown the
+retired formula.
+
+**Today's edition.** Jake asked for a ranking now, since the draft and six
+trades are in. Booked `reporter.run` with kind `reporter_power_rankings` on
+production after the deploy; the result is on `/` and `/report`.
+
 ## 2026-09-05 — Two transcript findings: no vote tool in a trade window, and why a player is frozen
 
 Jake asked whether two findings from the trade-window transcripts were fixed.

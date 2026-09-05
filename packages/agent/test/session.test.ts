@@ -343,6 +343,7 @@ describe("endingToolFor (§8.2)", () => {
   it("maps each kind to its ending tool", () => {
     expect(endingToolFor("draft_pick")).toBe("make_pick");
     expect(endingToolFor("reporter_recap")).toBe("publish_report");
+    expect(endingToolFor("reporter_power_rankings")).toBe("publish_power_rankings");
     expect(endingToolFor("weekly_review")).toBe("write_decision_log");
     expect(endingToolFor("smoke")).toBe("write_decision_log");
   });

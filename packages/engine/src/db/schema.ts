@@ -40,7 +40,8 @@ export type SessionKind =
   | "reporter_draft_grades"
   | "reporter_recap"
   | "reporter_preview"
-  | "reporter_trade_note";
+  | "reporter_trade_note"
+  | "reporter_power_rankings";
 export type SessionStatus =
   | "queued"
   | "running"
@@ -717,6 +718,31 @@ export const reporterPosts = pgTable("reporter_posts", {
   sessionId: integer("session_id"),
   createdAt: createdAt(),
 });
+
+/**
+ * Power rankings (§11). One edition per `reporter_power_rankings` session:
+ * twelve rows, ranks 1–12, each with the reporter's one- or two-sentence
+ * reason. Editions are never edited; a later session writes a new one, and the
+ * site shows the newest with movement against the one before it.
+ */
+export const powerRankings = pgTable(
+  "power_rankings",
+  {
+    id: serial("id").primaryKey(),
+    /** The fantasy week in play when the edition was published. */
+    week: integer("week").notNull(),
+    teamId: integer("team_id").notNull(),
+    rank: integer("rank").notNull(),
+    reason: text("reason").notNull(),
+    sessionId: integer("session_id").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("power_rankings_session_team_uq").on(t.sessionId, t.teamId),
+    uniqueIndex("power_rankings_session_rank_uq").on(t.sessionId, t.rank),
+    index("power_rankings_session_idx").on(t.sessionId),
+  ],
+);
 
 export const commissionerActions = pgTable("commissioner_actions", {
   id: serial("id").primaryKey(),

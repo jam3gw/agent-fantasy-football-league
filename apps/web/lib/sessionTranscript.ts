@@ -313,7 +313,9 @@ const TOOL_VERB: Record<string, string> = {
   get_team_scratchpad: "Read a team's notes",
   list_sessions: "Listed sessions",
   get_session_transcript: "Read a transcript",
+  get_power_rankings: "Read the power rankings",
   publish_report: "Published the report",
+  publish_power_rankings: "Published the power rankings",
 };
 
 /** The write tools: the ones that change the league, marked as such (§8.4). */
@@ -331,6 +333,7 @@ const WRITE_TOOLS = new Set([
   "post_message",
   "make_pick",
   "publish_report",
+  "publish_power_rankings",
 ]);
 
 export function isWriteStep(step: Step): boolean {

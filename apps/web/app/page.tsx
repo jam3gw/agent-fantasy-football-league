@@ -299,19 +299,13 @@ function homeSections(week: number): Array<{ title: string; desc: string; cta: s
 export default async function HomePage() {
   const { league, season, week, phase } = await leagueClockState();
 
-  // The benchmark aggregation is eleven queries; the leaderboard band and the
-  // power rankings both want it, so it is read once and handed to both rather
-  // than each fetching its own copy. It still starts alongside the other reads
-  // rather than in front of them — awaiting it first would put eleven queries
-  // in series ahead of everything else on the page.
-  const rowsPromise = benchmarkRows();
   const [cards, activity, power, timeline, report, rows] = await Promise.all([
     gameCards(week, season),
     leagueActivity(12),
-    rowsPromise.then((r) => powerRankings(6, r)),
+    powerRankings(),
     seasonTimeline(8),
     safe(latestReporterPost, undefined),
-    rowsPromise,
+    benchmarkRows(),
   ]);
 
   const nameOf = new Map(rows.map((r) => [r.teamId, r.name ?? r.modelLabel ?? r.slug]));
@@ -466,24 +460,38 @@ export default async function HomePage() {
       <Container className="pt-12">
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)]">
           <div>
-            <SectionHeader label="Power rankings" heading={`Week ${week}, on the numbers.`} />
-            <div className="-mt-2">
-              {power.length === 0 ? (
-                <Nothing>Nothing to rank until the first week finalizes.</Nothing>
+            <SectionHeader
+              label="Power rankings"
+              heading={power ? `Week ${power.week}, in the reporter's view.` : "Power rankings"}
+            />
+            {power ? (
+              <div className="-mt-3 flex flex-wrap items-center gap-2 text-[12px] text-faint">
+                <span>Ranked by the league reporter</span>
+                <span>·</span>
+                <span>{formatEt(power.publishedAt)}</span>
+                <span>·</span>
+                <Link href={`/sessions/${power.sessionId}`} className="hover:text-accent">
+                  How it decided
+                </Link>
+              </div>
+            ) : null}
+            <div className={power ? "mt-4" : "-mt-2"}>
+              {!power ? (
+                <Nothing>The reporter has not ranked the teams yet.</Nothing>
               ) : (
-                power.map((row) => (
+                power.rows.map((row) => (
                   <div
                     key={row.teamId}
-                    className="grid grid-cols-[30px_26px_minmax(0,1fr)] items-center gap-3 border-t border-border py-3.5"
+                    className="grid grid-cols-[30px_26px_minmax(0,1fr)] items-start gap-3 border-t border-border py-3.5"
                   >
                     <div className="text-[18px] font-bold tabular-nums tracking-[-0.02em]">{row.rank}</div>
                     <div
-                      className={`text-[12px] font-bold ${
+                      className={`pt-1 text-[12px] font-bold ${
                         row.move > 0 ? "text-accent" : row.move < 0 ? "text-danger" : "text-faint"
                       }`}
                       title={
                         row.move === 0
-                          ? "No change since last week"
+                          ? "No change since the last edition"
                           : `${Math.abs(row.move)} place${Math.abs(row.move) === 1 ? "" : "s"} ${row.move > 0 ? "up" : "down"}`
                       }
                     >
@@ -496,7 +504,7 @@ export default async function HomePage() {
                         </Link>
                         <span className="ml-2 text-[11px] font-normal text-faint">{row.modelLabel}</span>
                       </div>
-                      <div className="mt-0.5 text-[13px] leading-[1.5] text-muted">{row.note}</div>
+                      <div className="mt-0.5 text-[13px] leading-[1.5] text-muted">{row.reason}</div>
                     </div>
                   </div>
                 ))
