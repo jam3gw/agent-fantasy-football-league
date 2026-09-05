@@ -138,9 +138,13 @@ export async function isIrIllegal(
 }
 
 /**
- * Players of `teamId` frozen by trades (§3.5): give-side of its own `proposed`
- * offers; both sides of `accepted` trades it is a party to. A frozen player
- * cannot be dropped, traded elsewhere, or put in another offer.
+ * Players of `teamId` that cannot be **dropped** because of trades (§3.5):
+ * give-side of its own `proposed` offers; both sides of `accepted` trades it
+ * is a party to. This is the drop freeze only. Offers use the narrower
+ * trades.ts `frozenPlayerIdsExcluding` — an open offer binds nobody for other
+ * offers (the same player may be shopped to several teams; the first accept
+ * supersedes the rest), but a player is never dropped out from under the
+ * offers he is in.
  */
 export async function frozenPlayerIds(db: EngineDb, teamId: number): Promise<Set<string>> {
   const frozen = new Set<string>();
@@ -155,7 +159,7 @@ export async function frozenPlayerIds(db: EngineDb, teamId: number): Promise<Set
     );
   for (const t of open) {
     if (t.status === "proposed") {
-      // only the proposer's give-side is frozen while proposed
+      // only the proposer's give-side is held (against drops) while proposed
       if (t.proposerTeamId === teamId) for (const p of t.givePlayerIds) frozen.add(p);
     } else {
       // accepted (in review): both sides

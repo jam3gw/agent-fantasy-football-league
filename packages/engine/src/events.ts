@@ -22,6 +22,7 @@ export type EngineEvent =
   | { type: "trade.executed"; tradeId: number }
   | { type: "trade.vetoed"; tradeId: number }
   | { type: "trade.failed"; tradeId: number; reason: string }
+  | { type: "trade.superseded"; tradeId: number; byTradeId: number }
   | { type: "injury.changed"; teamId: number; playerId: string; status: string; week: number }
   | { type: "board.posted"; postId: number; authorTeamId: number; mentionTeamIds: number[]; depth: number }
   | { type: "draft.completed" }
@@ -261,6 +262,7 @@ export async function handleEvent(db: EngineDb, clock: Clock, event: EngineEvent
     // clears every waiver window).
     case "trade.vote_cast":
     case "trade.failed":
+    case "trade.superseded":
       return;
 
     case "draft.completed": {

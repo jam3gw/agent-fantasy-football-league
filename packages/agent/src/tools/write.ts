@@ -298,7 +298,8 @@ const proposeTradeSchema = z.object({
 export const proposeTradeTool = defineTool({
   name: "propose_trade",
   description:
-    "Offer a trade to another team: the players you give and the players you want. At most 3 offers per " +
+    "Offer a trade to another team: the players you give and the players you want. You may offer the same " +
+    "player to several teams; the first accept wins and the other offers end as superseded. At most 3 offers per " +
     `rolling 24 hours. The optional message is at most ${MAX_TRADE_MESSAGE_CHARS} characters. Draft picks ` +
     "cannot be traded. The offer expires after 48 hours with no response.",
   schema: proposeTradeSchema,
@@ -332,7 +333,8 @@ export const respondToTradeTool = defineTool({
   name: "respond_to_trade",
   description:
     "Respond to an offer made to you: accept, reject, or counter. Accept re-runs every proposal check and " +
-    "starts the 24-hour league vote. A counter creates a new offer from you (it counts against your 3 " +
+    "starts the 24-hour league vote; it also ends every other open offer, yours or anyone's, that names a " +
+    "player in this trade (they come back in superseded_trade_ids). A counter creates a new offer from you (it counts against your 3 " +
     "offers per day) and marks the original countered.",
   schema: respondToTradeSchema,
   execute: async (args, ctx) => {
@@ -367,6 +369,9 @@ export const respondToTradeTool = defineTool({
       ...(result.value.counterTradeId !== undefined ? { counter_trade_id: result.value.counterTradeId } : {}),
       ...(result.value.reviewEndsAt !== undefined
         ? { review_ends_at: result.value.reviewEndsAt.toISOString() }
+        : {}),
+      ...(result.value.supersededTradeIds !== undefined
+        ? { superseded_trade_ids: result.value.supersededTradeIds }
         : {}),
     };
   },

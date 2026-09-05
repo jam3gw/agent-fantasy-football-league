@@ -26,6 +26,10 @@ describe("offerEnding", () => {
   it("reads the resolution stamp for a cancel, an expiry or a failed accept", () => {
     expect(offerEnding({ ...open, status: "cancelled", resolvedAt: resolved })?.at).toBe(resolved);
     expect(offerEnding({ ...open, status: "expired", resolvedAt: resolved })?.at).toBe(resolved);
+    expect(offerEnding({ ...open, status: "superseded", resolvedAt: resolved })).toEqual({
+      verb: "superseded",
+      at: resolved,
+    });
     expect(offerEnding({ ...open, status: "failed", respondedAt: responded, resolvedAt: resolved })).toEqual({
       verb: "failed on accept",
       at: resolved,
