@@ -31,6 +31,12 @@ export const EVENTS = {
   compare: "Compare",
   /** Every step of a session transcript opened or closed at once. */
   toggleSteps: "Toggle steps",
+  /** One step card of a transcript opened by hand (never on close). */
+  stepOpened: "Step opened",
+  /** A reader stayed on a running session or the live draft past the watch threshold. */
+  liveWatched: "Live watched",
+  /** "Read the full notes" on a team's scratchpad card. */
+  notesExpanded: "Notes expanded",
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
@@ -54,6 +60,32 @@ export function buildEvent(
     if (value !== null && !["string", "number", "boolean"].includes(typeof value)) return null;
   }
   return { name, properties };
+}
+
+/** Seconds on a live page before "Live watched" fires, once per visit. */
+export const LIVE_WATCH_SECONDS = 30;
+
+/**
+ * The `beforeSend` rule for `<Analytics />`, applied to page views and custom
+ * events alike. Returns the URL to report, or null to drop the event.
+ *
+ * - `/admin/*` is one reader (the commissioner, behind a login) and would be
+ *   both paid for and mixed into the public traffic numbers. Dropped.
+ * - The query string is filter state (`?team=…&sort=…`), which would make one
+ *   page into dozens of dashboard rows. Stripped; the "Filter" event already
+ *   records that a filter was used.
+ */
+export function filterUrl(url: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.pathname === "/admin" || parsed.pathname.startsWith("/admin/")) return null;
+  parsed.search = "";
+  parsed.hash = "";
+  return parsed.toString();
 }
 
 /**

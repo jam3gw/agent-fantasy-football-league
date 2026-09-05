@@ -4106,3 +4106,39 @@ call site sends at most two properties.
   enforced in `buildEvent` where a test can see it.
 - Development mode logs each event to the console via the debug script and
   records nothing, same as page views.
+
+## 2026-09-05 — beforeSend filter and three more custom events
+
+`<Analytics />` moved into `apps/web/components/analytics.tsx` (`SiteAnalytics`)
+so it can carry a `beforeSend` rule; the root layout is a server component and
+cannot pass a function. The rule, `filterUrl` in `lib/analytics.ts`, is pure and
+tested:
+
+- **`/admin/*` page views are dropped.** One reader behind a login, paid for
+  and mixed into the public numbers otherwise.
+- **Query strings and anchors are stripped.** Filter state lives in the URL, so
+  `/trades?team=…` would be a row per combination. The `Filter` event already
+  records that a filter was used.
+
+Three events added to the vocabulary, all on deliberate reader actions:
+
+- `Step opened` — a transcript step card opened by hand. Properties: `page`,
+  `kind` (decision, write, brief, turn). The cards are server-rendered
+  `<details>` that React never owns, so `StepOpenTracker` listens for `toggle`
+  on the document in the capture phase. "Expand all" from the rail marks each
+  card it flips (`data-bulk-toggle`) and the tracker skips and clears the mark,
+  so a bulk open is not counted as reading.
+- `Live watched` — a reader stayed 30 s on a running session or the running
+  draft (`useLiveWatched`). One `setTimeout` per visit, cancelled if they leave
+  or the session ends first; never per poll.
+- `Notes expanded` — "Read the full notes" on a team's scratchpad card.
+  Properties: `page`, `model`.
+
+Not added, on purpose: nav/footer clicks (page views already count them), poll
+ticks and scroll (no reader action, pure cost), anything under `/admin`,
+per-row table clicks (each row is a link), server-side events for league
+actions (the database already has them in full), and the Web Analytics API on
+`/about` (a vanity number for another token).
+
+Still for Jake, a dashboard setting not code: a Spend Management alert on the
+Vercel team, since Pro meters events with no cap.
