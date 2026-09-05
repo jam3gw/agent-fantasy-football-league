@@ -8,6 +8,8 @@
  * the session rows stay server-rendered.
  */
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { EVENTS } from "@/lib/analytics";
+import { currentPage, trackEvent } from "@/lib/track";
 
 /**
  * The scratchpad card. Collapsed to a few hundred pixels with a fade, because
@@ -20,11 +22,14 @@ export function NotesCard({
   versions,
   versionCount,
   collapsible,
+  model,
 }: {
   children: ReactNode;
   versions: ReactNode;
   versionCount: number;
   collapsible: boolean;
+  /** The team's model label, for the analytics event. */
+  model: string;
 }) {
   const [open, setOpen] = useState(false);
   const [showVersions, setShowVersions] = useState(false);
@@ -36,6 +41,7 @@ export function NotesCard({
   // scrolled into it; bring the card's top back into view so the button they
   // pressed is where they left it.
   const toggle = () => {
+    if (!open) trackEvent(EVENTS.notesExpanded, { page: currentPage(), model });
     setOpen((o) => !o);
     if (open) {
       requestAnimationFrame(() => {

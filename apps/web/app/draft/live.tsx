@@ -7,6 +7,7 @@
  * focus, which the old hand-rolled interval never did.
  */
 import { useEffect, useRef, useState } from "react";
+import { useLiveWatched } from "@/lib/useLiveWatched";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { Badge, Card, Empty } from "../../components/ui";
@@ -72,6 +73,7 @@ export default function DraftLive() {
     },
   });
   const offline = Boolean(error);
+  useLiveWatched("draft", state?.status === "running");
 
   useEffect(() => {
     const ticker = setInterval(() => setLeft(secondsLeft(deadline.current)), 1_000);
