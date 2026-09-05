@@ -602,6 +602,71 @@ describe("billing: the gateway pays unless the provider is BYOK (2026-08-29)", (
     expect(billed.costUsd).toBe(0.123456);
   });
 
+  it("bills reasoning tokens once: they are part of output, not on top of it (2026-09-05)", async () => {
+    // The SDK's outputTokens is the provider's whole output; reasoningTokens
+    // is the share of it that was thinking. On production every price-table
+    // step had output >= reasoning, and the old formula charged the reasoning
+    // share twice — $7.09 over 628 rows, 15% of Fable's bill.
+    await db.insert(modelPrices).values({
+      modelId: "test/thinker",
+      inputUsdPerM: 1,
+      outputUsdPerM: 10,
+      cachedInputUsdPerM: 0.1,
+      source: "test",
+    });
+    const step = await computeStepCost(
+      db,
+      "test/thinker",
+      { inputTokens: 0, outputTokens: 1000, reasoningTokens: 800, cachedInputTokens: 0 },
+      null,
+    );
+    expect(step.costUsd).toBeCloseTo(0.01, 9); // 1000 output tokens at $10/M, nothing more
+
+    // A model that prices reasoning differently pays only the difference on
+    // the reasoning share.
+    await db.insert(modelPrices).values({
+      modelId: "test/priced-reasoning",
+      inputUsdPerM: 1,
+      outputUsdPerM: 10,
+      reasoningUsdPerM: 20,
+      cachedInputUsdPerM: 0.1,
+      source: "test",
+    });
+    const priced = await computeStepCost(
+      db,
+      "test/priced-reasoning",
+      { inputTokens: 0, outputTokens: 1000, reasoningTokens: 800, cachedInputTokens: 0 },
+      null,
+    );
+    expect(priced.costUsd).toBeCloseTo(0.01 + 0.008, 9); // 200 at $10/M + 800 at $20/M
+
+    // Reasoning cheaper than output: the share is repriced down, never below zero.
+    await db.insert(modelPrices).values({
+      modelId: "test/cheap-reasoning",
+      inputUsdPerM: 1,
+      outputUsdPerM: 10,
+      reasoningUsdPerM: 2,
+      cachedInputUsdPerM: 0.1,
+      source: "test",
+    });
+    const cheap = await computeStepCost(
+      db,
+      "test/cheap-reasoning",
+      { inputTokens: 0, outputTokens: 1000, reasoningTokens: 800, cachedInputTokens: 0 },
+      null,
+    );
+    expect(cheap.costUsd).toBeCloseTo(0.002 + 0.0016, 9); // 200 at $10/M + 800 at $2/M
+
+    // Reasoning reported beyond the output count is still billed, not dropped.
+    const excess = await computeStepCost(
+      db,
+      "test/thinker",
+      { inputTokens: 0, outputTokens: 100, reasoningTokens: 300, cachedInputTokens: 0 },
+      null,
+    );
+    expect(excess.costUsd).toBeCloseTo(0.001 + 0.003, 9); // 100 output + all 300 reasoning at $10/M
+  });
+
   it("and the ledger row actually persists it", async () => {
     // The step reporting `gateway` is only half of it: `recordSpend` is what
     // writes `billed_to`, and /spend, /spend/[slug] and /benchmark all filter

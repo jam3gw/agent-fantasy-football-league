@@ -52,9 +52,13 @@ input, and step 2 read 14,457 from the cache, so the write must have been in
 step 1's count). The ledger never recorded writes, so it had priced them at the
 plain input rate; `cache_write_tokens` is now recorded and priced at 1.25×.
 
-**Still to verify on production after the deploy**, on the first Anthropic
-`trade_window` or `board_reply` that runs; record the session id and the
-per-step numbers here:
+**Verified on production 2026-09-05** (session 2117, Sonnet, trade_response,
+2026-09-04): input 15,558 / 19,998 / 27,742 / 29,235 / 30,533; cached 0 /
+15,556 / 19,996 / 27,740 / 29,233; cache writes 15,556 / 4,440 / 7,744 /
+1,493 / 1,298. All three conditions below hold on every step, and the same
+pattern shows on every Anthropic session since the deploy (2099–2150). The
+daily trade-window bill went from $10.09 to $5.18 the next day. The
+conditions, as they were written before the check:
 
 - `cached_input_tokens` rises step by step (step N ≈ step N−1's input);
 - `cache_write_tokens` is above 0 on step 1 and on later steps, which
