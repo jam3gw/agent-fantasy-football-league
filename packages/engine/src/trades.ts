@@ -15,7 +15,7 @@ import type { EngineErrorCode, EngineFailure, EngineResult } from "./errors.ts";
 import { fail, ok } from "./errors.ts";
 import { handleEvent } from "./events.ts";
 import { lockedPlayerIds } from "./locks.ts";
-import { irOccupant, maxActiveRoster } from "./roster.ts";
+import { incomingReservedCount, irOccupant, maxActiveRoster } from "./roster.ts";
 import type { LeagueSettings } from "./settings.ts";
 import { getSettings } from "./settings.ts";
 import { recordTransaction } from "./transactions.ts";
@@ -46,6 +46,8 @@ export interface RespondToTradeResult {
   counterTradeId?: number;
   /** Set when action = 'accept'. */
   reviewEndsAt?: Date;
+  /** Set when action = 'accept': open offers ended because they shared a player with this one (§3.5). */
+  supersededTradeIds?: number[];
 }
 
 const MAX_MESSAGE_CHARS = 500;
@@ -56,8 +58,17 @@ const OFFER_WINDOW_MS = 24 * 3600_000;
 const maxActive = maxActiveRoster;
 
 /**
- * roster.ts `frozenPlayerIds` with one trade excluded — used when a trade
- * re-validates itself on accept/execute ("nothing frozen *elsewhere*", §3.5).
+ * Players `teamId` cannot put in an offer, with one trade excluded — used
+ * when a trade re-validates itself on accept/execute ("nothing frozen
+ * *elsewhere*", §3.5).
+ *
+ * Only a trade in review (`accepted`) freezes players for offers. An open
+ * (`proposed`) offer binds nobody: a team may shop the same player to several
+ * teams at once, and another team may ask for a player who is already in an
+ * outgoing offer. The first accept wins — `supersedeOverlappingOffers` ends
+ * every other open offer that shares a player. (Drops are stricter: roster.ts
+ * `frozenPlayerIds` still holds a proposer's give-side while an offer is open,
+ * so a player is never dropped out from under the offers he is in.)
  */
 export async function frozenPlayerIdsExcluding(
   db: EngineDb,
@@ -65,40 +76,87 @@ export async function frozenPlayerIdsExcluding(
   excludeTradeId?: number,
 ): Promise<Set<string>> {
   const conditions: Array<SQL<unknown> | undefined> = [
-    inArray(trades.status, ["proposed", "accepted"]),
-    or(eq(trades.proposerTeamId, teamId), eq(trades.counterpartyTeamId, teamId)),
-  ];
-  if (excludeTradeId !== undefined) conditions.push(ne(trades.id, excludeTradeId));
-  const open = await db.select().from(trades).where(and(...conditions));
-  const frozen = new Set<string>();
-  for (const t of open) {
-    if (t.status === "proposed") {
-      if (t.proposerTeamId === teamId) for (const p of t.givePlayerIds) frozen.add(p);
-    } else {
-      if (t.proposerTeamId === teamId) for (const p of t.givePlayerIds) frozen.add(p);
-      if (t.counterpartyTeamId === teamId) for (const p of t.getPlayerIds) frozen.add(p);
-    }
-  }
-  return frozen;
-}
-
-/** roster.ts `incomingReservedCount` with one trade excluded. */
-async function incomingReservedExcluding(
-  tx: EngineDb,
-  teamId: number,
-  excludeTradeId?: number,
-): Promise<number> {
-  const conditions: Array<SQL<unknown> | undefined> = [
     eq(trades.status, "accepted"),
     or(eq(trades.proposerTeamId, teamId), eq(trades.counterpartyTeamId, teamId)),
   ];
   if (excludeTradeId !== undefined) conditions.push(ne(trades.id, excludeTradeId));
-  const inReview = await tx.select().from(trades).where(and(...conditions));
-  let count = 0;
+  const inReview = await db.select().from(trades).where(and(...conditions));
+  const frozen = new Set<string>();
   for (const t of inReview) {
-    count += t.proposerTeamId === teamId ? t.getPlayerIds.length : t.givePlayerIds.length;
+    if (t.proposerTeamId === teamId) for (const p of t.givePlayerIds) frozen.add(p);
+    if (t.counterpartyTeamId === teamId) for (const p of t.getPlayerIds) frozen.add(p);
   }
-  return count;
+  return frozen;
+}
+
+/**
+ * Transaction-scoped advisory lock serialising every propose and accept.
+ * An accept locks its own row and then every other open offer (to supersede
+ * the overlapping ones); two accepts at once would take those locks in
+ * opposite orders and deadlock. Taking this lock first, before any row lock,
+ * makes them queue instead. Propose takes it too, so an offer cannot slip in
+ * between an accept's supersede pass and its commit and escape it. Released
+ * with the transaction. Key: arbitrary constant, unique to this use.
+ */
+const TRADE_OFFER_LOCK_KEY = 0x7472_6164; // "trad"
+
+async function lockTradeOffers(tx: EngineDb): Promise<void> {
+  await tx.execute(sql`select pg_advisory_xact_lock(${TRADE_OFFER_LOCK_KEY})`);
+}
+
+/**
+ * Why an open offer was retired because another offer sharing one of its
+ * players was accepted first (§3.5). Stored in `resolution_reason` as
+ * `superseded by trade <id>`; the constant is the prefix.
+ */
+export const SUPERSEDED_REASON_PREFIX = "superseded by trade ";
+
+/**
+ * A `trade_response` session retired because its offer was superseded before
+ * the counterparty answered. Like `MOOT_VOTE_REASON`, a healthy no-op.
+ */
+export const MOOT_OFFER_REASON = "offer superseded before this response was needed";
+/** The same, for an offer that expired with its response session still queued. */
+export const MOOT_OFFER_REASON_EXPIRED = "offer expired before this response was needed";
+
+/**
+ * The accept of `accepted` binds its players (§3.5). Every other open offer
+ * that names any of those players — on either side, from any team — can no
+ * longer be honoured, so it ends now as `superseded` rather than sitting open
+ * until it fails at its own accept. The counterparty's queued response
+ * session is retired with it. Emits `trade.superseded` per offer.
+ */
+async function supersedeOverlappingOffers(
+  tx: EngineDb,
+  clock: Clock,
+  accepted: { id: number; givePlayerIds: string[]; getPlayerIds: string[] },
+): Promise<number[]> {
+  const now = clock.now();
+  const bound = new Set([...accepted.givePlayerIds, ...accepted.getPlayerIds]);
+  const open = await tx
+    .select()
+    .from(trades)
+    .where(and(eq(trades.status, "proposed"), ne(trades.id, accepted.id)))
+    .for("update");
+  const hit = open.filter((t) => [...t.givePlayerIds, ...t.getPlayerIds].some((p) => bound.has(p)));
+  const ids: number[] = [];
+  for (const t of hit) {
+    const done = await tx
+      .update(trades)
+      .set({
+        status: "superseded",
+        resolutionReason: `${SUPERSEDED_REASON_PREFIX}${accepted.id}`,
+        resolvedAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(trades.id, t.id), eq(trades.status, "proposed")))
+      .returning({ id: trades.id });
+    if (done.length === 0) continue;
+    await retireQueuedSessions(tx, clock, "trade_response", t.id, MOOT_OFFER_REASON);
+    await handleEvent(tx, clock, { type: "trade.superseded", tradeId: t.id, byTradeId: accepted.id });
+    ids.push(t.id);
+  }
+  return ids.sort((x, y) => x - y);
 }
 
 /** Subset of `playerIds` NOT on `teamId`'s roster. */
@@ -134,7 +192,7 @@ async function activeAfterTrade(
   const size = roster.filter((r) => !out.has(r.playerId)).length + incoming.length;
   const ir = await irOccupant(tx, teamId, week);
   const irFilled = ir !== null && !out.has(ir) && roster.some((r) => r.playerId === ir);
-  const reserved = await incomingReservedExcluding(tx, teamId, excludeTradeId);
+  const reserved = await incomingReservedCount(tx, teamId, week, excludeTradeId);
   return size - (irFilled ? 1 : 0) + reserved;
 }
 
@@ -309,6 +367,7 @@ export async function proposeTrade(
   input: TradeProposalInput,
 ): Promise<EngineResult<{ tradeId: number }>> {
   return db.transaction(async (tx) => {
+    await lockTradeOffers(tx);
     const settings = await getSettings(tx);
     return createOffer(
       tx,
@@ -338,9 +397,12 @@ export async function respondToTrade(
   counter?: TradeCounterInput,
 ): Promise<EngineResult<RespondToTradeResult>> {
   return db.transaction(async (tx) => {
+    // Serialise with every other propose/accept first (see lockTradeOffers),
+    // then lock the row so the status we read is the status we update.
+    await lockTradeOffers(tx);
     const settings = await getSettings(tx);
     const now = clock.now();
-    const tradeRows = await tx.select().from(trades).where(eq(trades.id, tradeId));
+    const tradeRows = await tx.select().from(trades).where(eq(trades.id, tradeId)).for("update");
     const trade = tradeRows[0];
     if (!trade) return fail("not_found", `trade ${tradeId} not found`);
     if (trade.counterpartyTeamId !== teamId) {
@@ -410,17 +472,29 @@ export async function respondToTrade(
       return fail(reason, failure.message, failure.hint ? { hint: failure.hint } : {});
     }
     const reviewEndsAt = new Date(now.getTime() + settings.tradeReviewHours * 3600_000);
-    await tx
+    const accepted = await tx
       .update(trades)
       .set({ status: "accepted", respondedAt: now, reviewEndsAt, updatedAt: now })
-      .where(eq(trades.id, tradeId));
+      .where(and(eq(trades.id, tradeId), eq(trades.status, "proposed")))
+      .returning({ id: trades.id });
+    if (accepted.length === 0) {
+      // Superseded between our read and our write (the row lock makes this a
+      // belt-and-braces check, never the normal path).
+      const fresh = (await tx.select().from(trades).where(eq(trades.id, tradeId)))[0];
+      return fail("bad_status", `trade ${tradeId} is '${fresh?.status ?? "gone"}', not 'proposed'`);
+    }
+    const supersededTradeIds = await supersedeOverlappingOffers(tx, clock, {
+      id: tradeId,
+      givePlayerIds: trade.givePlayerIds,
+      getPlayerIds: trade.getPlayerIds,
+    });
     await handleEvent(tx, clock, {
       type: "trade.accepted",
       tradeId,
       partyTeamIds: [trade.proposerTeamId, trade.counterpartyTeamId],
       reviewEndsAt,
     });
-    return ok({ tradeId, status: "accepted" as TradeStatus, reviewEndsAt });
+    return ok({ tradeId, status: "accepted" as TradeStatus, reviewEndsAt, supersededTradeIds });
   });
 }
 
@@ -568,6 +642,7 @@ export async function expireOffers(db: EngineDb, clock: Clock): Promise<EngineRe
       .set({ status: "expired", resolvedAt: now, updatedAt: now })
       .where(and(eq(trades.status, "proposed"), lt(trades.proposedAt, cutoff)))
       .returning({ id: trades.id });
+    for (const r of rows) await retireQueuedSessions(tx, clock, "trade_response", r.id, MOOT_OFFER_REASON_EXPIRED);
     return ok(rows.map((r) => r.id).sort((a, b) => a - b));
   });
 }
@@ -584,6 +659,7 @@ export async function expireAllProposedAtDeadline(db: EngineDb, clock: Clock): P
       .set({ status: "expired", resolvedAt: now, updatedAt: now })
       .where(eq(trades.status, "proposed"))
       .returning({ id: trades.id });
+    for (const r of rows) await retireQueuedSessions(tx, clock, "trade_response", r.id, MOOT_OFFER_REASON_EXPIRED);
     return ok(rows.map((r) => r.id).sort((a, b) => a - b));
   });
 }
@@ -632,13 +708,24 @@ async function vetoTrade(tx: EngineDb, clock: Clock, tradeId: number): Promise<v
 export const MOOT_VOTE_REASON = "trade resolved before this vote was needed";
 
 async function retireQueuedVoteSessions(tx: EngineDb, clock: Clock, tradeId: number): Promise<void> {
+  await retireQueuedSessions(tx, clock, "trade_vote", tradeId, MOOT_VOTE_REASON);
+}
+
+/** Skip every still-queued session of `kind` booked for `tradeId`, with `reason` as its error text. */
+async function retireQueuedSessions(
+  tx: EngineDb,
+  clock: Clock,
+  kind: "trade_vote" | "trade_response",
+  tradeId: number,
+  reason: string,
+): Promise<void> {
   const now = clock.now();
   await tx
     .update(sessions)
-    .set({ status: "skipped", endedBy: null, error: MOOT_VOTE_REASON, endedAt: now, updatedAt: now })
+    .set({ status: "skipped", endedBy: null, error: reason, endedAt: now, updatedAt: now })
     .where(
       and(
-        eq(sessions.kind, "trade_vote"),
+        eq(sessions.kind, kind),
         eq(sessions.status, "queued"),
         sql`${sessions.context} ->> 'trade_id' = ${String(tradeId)}`,
       ),

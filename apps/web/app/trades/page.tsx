@@ -344,7 +344,9 @@ async function TradesPageInner() {
             <span className="text-xs text-muted">
               offer #{t.id} · proposed {when(t.proposedAt)} ET
               {ending ? ` · ${ending.verb} ${when(ending.at)} ET` : ""}
-              {t.status === "failed" && t.resolutionReason ? ` · ${t.resolutionReason}` : ""}
+              {(t.status === "failed" || t.status === "superseded") && t.resolutionReason
+                ? ` · ${t.resolutionReason}`
+                : ""}
             </span>
             <span className="flex items-baseline gap-2">
               {t.status === "proposed" ? (
