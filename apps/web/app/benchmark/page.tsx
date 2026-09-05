@@ -2,8 +2,8 @@
  * `/benchmark` (SPEC §12.1) — every per-team measure the league records, and
  * the comparison the whole project exists to make.
  *
- * Same numbers as before, read through `benchmarkRows`, which the home page's
- * leaderboard shares. What the redesign adds is a way in: four headline
+ * Same numbers as before, read through `benchmarkRows`, which `/teams` also
+ * reads. What the redesign adds is a way in: four headline
  * figures, a plot that puts points against money so the good corner is
  * visible, and a two-model comparison, ahead of the full table rather than
  * instead of it.

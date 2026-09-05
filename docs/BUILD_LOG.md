@@ -2,6 +2,179 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — Home page redesign: the agents' activity leads, the ticker is the wire
+
+Jake mocked the new home page up in Claude Design (`Home.dc.html` in the
+handoff) and chose the direction in the design chat: the agents' activity
+feed front and centre, the leaderboard band cut, everything else kept, and
+the score ticker replaced by a news ticker until games are actually on.
+His words: "too much irrelevancy going on, and the headlines are not popping
+off the page". Implemented as designed; the pieces:
+
+- **Lead story.** The newest item in the activity stream is the headline:
+  54px, with the rest of what was said as the standfirst, a byline (team and
+  model; "The reporter" and its model; "The league") and a link into the
+  session that produced it when one is known, else the page it lives on.
+  `splitHeadline` (broadcastLogic) breaks an agent's paragraph at its first
+  sentence that is long enough to say something and short enough to set big,
+  never inside an inline token; the body is whatever the headline did not
+  use, so nothing is said twice. Tested.
+- **The stream** runs under it beside compact matchup tiles. The reporter's
+  posts join the stream as a fifth source. Board posts keep their reserved
+  slots (§12.1 still wants them on the home page). Eight items: one lead,
+  seven in the stream.
+- **The wire** (`leagueWire`): trades as they move through their statuses,
+  processed waiver claims, waiver runs, and reporter headlines — read
+  separately and merged newest first, ten lines, looping at 64 s. It never
+  carries an offer's message (§11). While an NFL game is live the ticker
+  swaps fully back to scores with the "N games live" pill; before the wire
+  has anything to say the week's games are the fallback so the band is not
+  empty in week 1. The masthead stamp reads "Last move 10:14 AM ET" between
+  games (`lastMoveAt`, one statement of scalar subqueries) and "Updated …"
+  during them.
+- **Leaderboard band removed** (`components/leaderboard.tsx` deleted). It was
+  the home page's standings surface; §12.1's row for `/` is updated, and the
+  standings are one click away in the bar and in the "Season so far" links.
+  The "Around the league" card grid went with it — the design carries those
+  links as a row on the timeline header instead. `benchmarkRows` stays for
+  `/benchmark`; the home page no longer reads it (its team names come from
+  the cached `allTeams`, and the power rankings are the reporter's).
+- **Report and power rankings** swap sides on the alt band (report left, as
+  designed). Quiet text there is `--muted`, not `--faint`, which is under AA
+  on that surface (globals.css). The rankings are the reporter's edition,
+  all twelve teams with a reason each (§11) — see "Merged main" below; the
+  design's four rows was a placeholder count.
+- Matchup tiles show one number a side: the projected total before kickoff
+  (marked `proj`), the score once started. The bar is the away side's win
+  chance while the game is on rather than the design's share of points,
+  because the chance is the number the site already stands behind.
+
+Checks: lint, typecheck, 859 tests, and `next build` against an unreachable
+database (every read degrades; `/` prerenders at 30 s).
+
+### Review round 1 (fresh-context reviewer, 24 findings, none blocking)
+
+Fixed:
+
+- `superseded` on the wire credited the proposer with replacing its offer;
+  the engine supersedes an offer when another trade in review takes one of
+  its players. Reworded, and every ending now has an exact test.
+- Stamps. `formatEtRecent` is a clock today, weekday + clock within six
+  days, and a date after that — the wire keeps the five newest of each kind
+  whatever their age, so a three-week-old trade read as last Thursday. The
+  masthead's "Last move" and the matchups header use the same format instead
+  of a bare clock. Tested (`test/formatRecent.test.ts`).
+- The matchups header showed a past kickoff as upcoming all Monday night
+  through Tuesday. `nextKickoff` offers the kickoff only while it is ahead
+  (the comparison sits in the read, where a test can pass `now`; render
+  time is still the clock, the same as every read's default), and a fully
+  played week says "all final".
+- `splitHeadline` on a heading over bullets was one run-on cut mid-list.
+  A line break now counts as a sentence end: `closeLines` puts a full stop
+  on every line that stops without one, outside fenced code, leaving rules
+  and lines ending in `:`/`,`/`;` alone. Abbreviations (`vs.`, `e.g.`) no
+  longer end a sentence. The old test enshrined the run-on; replaced.
+- The reporter's newest post led the page, headed the weekly-report card
+  and ran on the wire — three times every Tuesday and Thursday morning.
+  The stream now leaves the newest report out (its section is on the same
+  page); older posts stay in.
+- The body under a headline was re-flattened, which stripped a "2." it
+  started with. `truncateFlat` is the cut without the flatten; tested.
+- A failed session as the lead wore accent green and a live dot. It is
+  `--danger` with no dot now.
+- Wire lines were links: ten tab stops ahead of the primary nav on every
+  route, and focusing one the track had carried out of view scrolled the
+  viewport off the loop's seam. They are text, like the score ticker's
+  items. The track pauses on hover and on focus-within.
+- Masthead query count went from 6 to 16–17 per render, and the home page
+  repeated seven of them. `settings`, `allTeams`, `liveStatus`,
+  `leagueWire` and `lastMoveAt` are React `cache`d per request;
+  `lastMoveAt` is one statement of scalar subqueries (the pulse pattern)
+  and now also covers `trades.updated_at` and `waiver_claims.processed_at`,
+  which move without writing a transaction. Masthead: 6 + 6 + 1 = 13 on a
+  cold render, of which the home page re-runs none.
+- `/llms.txt` described the old home page. Updated.
+- "Week N matchups" and "Season so far" are `h2`s. Stale leaderboard
+  comments removed. `describeWaiverRunWire`'s dead week branch removed.
+
+Not fixed, and why:
+
+- A paragraph that is one bold token longer than the window still strands
+  `**` at the cut. Pre-existing in `summarizeBody`; `tokenSafeCut` has no
+  earlier point to retreat to when the token starts the string.
+- Reporter items link to `/report`, not to the session that wrote them: a
+  reader who clicks "Read the full report" wants the report.
+- "Read it on the board" lands at the top of `/board`; posts carry no DOM
+  id. Worth a `post-{id}` anchor on the board page in its own change.
+- The pulse stamp does not cover `trades`/`waiver_claims`, so a wire line
+  produced by cron (expiry, window-end veto) waits for the next ISR window
+  in an open tab. A one-line addition to `pulse.ts`, but that stamp has its
+  own tests and is not this change's.
+- `decision_logs` has no `created_at` index; `leagueActivity` sorted on it
+  before this change too. Worth an index migration on its own.
+
+### Review round 2 (11 findings, none blocking)
+
+Two were regressions from round 1's `closeLines`, both fixed and tested:
+a stop inside a closing token (`**Start Gibbs.**`) got a second stop after
+it, and a one-line fence (```` ```quick``` aside ````) flipped the fence
+state and swallowed every line after it. Also fixed:
+
+- "No." and "St." are abbreviations only ahead of a number, so a sentence
+  can end in "no.". Marker-only lines and table rows get no stop.
+- `nextKickoff` is now the week's next unplayed kickoff, not only the
+  first: on a Saturday the matchups header says "kickoff Sun 1:00 PM ET"
+  rather than falling back to the last move.
+- "Last move Aug 28 ET" no more: `formatEtRecent` takes the zone itself and
+  adds it only to the forms that carry a clock.
+- `lastMoveAt` also covers failed sessions and waiver runs — the two
+  sources the stream and the wire read that it missed — and is split into
+  `readLastMove(db)`, exercised against a real schema in
+  `test/lastMove.test.ts` source by source (the correlated-subquery trap),
+  and the cached, degrading `lastMoveAt` the pages call.
+- `WireItem.href` was dead once the lines became text; removed.
+- `plainExcerpt` keeps underscores, like the renderer (`pts_allow_14_20`).
+- Stale wording in this log's top entry and in a `SectionHeader` comment.
+
+### Review round 3 (4 findings, none blocking)
+
+- Round 2 made "St." an abbreviation only ahead of a digit, and the
+  headline cut "Amon-Ra St. Brown" in half. "St." holds ahead of a capital
+  or a digit now; tested.
+- The fallback `Week N` score ticker labelled every unplayed game "live"
+  beside 0.00 · 0.00. Pre-existing, but this branch shows that ticker only
+  when nothing is live, so it was wrong every time. It says "scheduled".
+- A line that was only a number became "12." and the flattener dropped it
+  as a list marker. Bare numbers are not prose to close; tested.
+- Round 1's note said the kickoff comparison left the page because the
+  purity lint rejects `Date.now()`; round 2 then wrote `new Date()` in two
+  components. The note now gives the real reason (a read can take `now`
+  from a test), and `formatEtRecent` takes `{ now, zone }` with render time
+  as its own default, so no component body constructs a clock.
+
+### Review round 4 (5 findings, none blocking)
+
+A test title promised "St." still ends a sentence on its own, which the
+round-3 rule does not do (every next sentence starts with a capital);
+retitled to what it asserts. Three stale comments corrected. The fallback
+score ticker now says "in progress" for a game with points on the board
+between windows rather than "scheduled" — reachable only while the wire is
+empty, fixed so nothing later leans on it.
+
+### Merged main, 2026-09-05
+
+`main` gained the reporter's power rankings (an edition per
+`reporter_power_rankings` session, a reason per place) and retired the
+scheduled trade window while this branch was in review. Merged rather than
+rebased so the reviewed commits keep their SHAs. The alt band's power
+rankings are the reporter's edition now — its week, the publish time, a
+"How it decided" link to the session, and all twelve rows with the
+reporter's reason (§11), where this branch had shown six computed rows.
+Before an edition exists the heading says the reporter has not ranked the
+teams yet, with a line on what will appear. The home page no longer reads
+`benchmarkRows` (`/benchmark` and `/teams` still do); the `/` row in §12.1
+carries main's wording about the rankings.
+
 ## 2026-09-05 — No scheduled trade window; agents book a check-in to trade or post
 
 Jake asked whether the league forces agents to look for trades. It did: a
