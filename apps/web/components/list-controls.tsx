@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { patchQuery } from "@/lib/listControls";
+import { EVENTS } from "@/lib/analytics";
+import { currentPage, trackEvent } from "@/lib/track";
 
 /**
  * Filter state that lives in the URL, so a filtered view is a link.
@@ -12,6 +14,11 @@ import { patchQuery } from "@/lib/listControls";
  * prerendered HTML is the unfiltered list and no Suspense bailout is needed),
  * and writes go through `history.replaceState`, which the App Router keeps
  * in sync without a navigation or a fetch. Back and forward re-read it.
+ *
+ * Every write is also one "Filter" custom event, keyed by page and by the
+ * first key patched. The value is not sent: a team slug or a sort key is a new
+ * dashboard row per value, and the question the event answers is "does anyone
+ * use the filters on this page", not "which team".
  */
 export function useUrlState(): {
   get: (key: string) => string;
@@ -32,6 +39,8 @@ export function useUrlState(): {
       const query = patchQuery(window.location.search, patch);
       window.history.replaceState(null, "", query ? `${window.location.pathname}?${query}` : window.location.pathname);
       setParams(new URLSearchParams(query));
+      const key = Object.keys(patch)[0];
+      if (key) trackEvent(EVENTS.filter, { page: currentPage(), key });
     },
     [],
   );
@@ -89,7 +98,10 @@ export function ShowMore({ more, onClick, noun }: { more: number; onClick: () =>
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={() => {
+        trackEvent(EVENTS.showMore, { page: currentPage(), noun });
+        onClick();
+      }}
       className="mt-3 rounded-md border border-border-strong bg-surface px-3 py-1.5 text-[13px] font-medium text-accent hover:border-accent"
     >
       Show more ({more} more {noun})

@@ -4066,3 +4066,43 @@ Decisions:
 - **Choices**:
   - Unit tests run against **PGlite** (in-memory Postgres) so `packages/engine` is fully testable with no server and no network; the same Drizzle schema runs on Neon PG 18 in deploys. Live-API tests are tagged and skipped when the key/fixture is absent (CLAUDE.md convention).
   - The starter app is Next 16.2.4 (React 19.2, Tailwind 4) — per `AGENTS.md`, Next 16 has breaking changes; I read `node_modules/next/dist/docs/` before writing any `apps/web` code (M3+/M5).
+
+## 2026-09-05 — Custom events on Vercel Web Analytics
+
+Four custom events now go to Web Analytics from the public site, next to the
+page views the 2026-08-29 entry added. They fire only on deliberate reader
+actions, never on scroll, poll, or render, because every custom event is
+billed like a page view.
+
+- `Filter` — any URL-state change from `useUrlState.set` (the filter selects,
+  the sessions chips, the spend sort). Properties: `page`, `key`. The value
+  is not sent: one row per team slug answers nothing the page count does not.
+- `Show more` — the long-list button. Properties: `page`, `noun`.
+- `Compare` — a model picked in the home-page compare panel. Properties:
+  `left`, `right` (model names).
+- `Toggle steps` — "Expand all" / "Collapse all" on a session transcript.
+  Properties: `open`, `steps`.
+
+Code: `apps/web/lib/analytics.ts` is the pure part (vocabulary, `buildEvent`,
+`pageOf`) and is unit-tested; `apps/web/lib/track.ts` is the one-line client
+wrapper over `track()` from `@vercel/analytics` (the package root, as the docs
+say; `/next` exports only the component). `apps/web/test/customEvents.test.ts`
+guards the plan limit, the value types, the 255-character caps, and that every
+call site sends at most two properties.
+
+**Pricing** (Vercel docs `/docs/analytics/limits-and-pricing`, checked
+2026-09-05; the team `jake-moses-personal` is on Pro):
+
+- A custom event costs the same as a page view: **$0.03 per 1,000 events**,
+  metered per team, no included allowance on Pro, on top of the Pro plan's
+  monthly usage credit. No separate fee to turn custom events on.
+- Pro allows **2 properties per custom event**. Web Analytics Plus
+  (**$10/month per team**) raises that to 8, extends the reporting window from
+  12 to 24 months, and adds UTM parameters. Hobby gets no custom events at all.
+- Order of magnitude: 10,000 reader actions a month is $0.30. Not worth the
+  Plus add-on; `MAX_PROPERTIES` is 2 for that reason and would move to 8 with
+  it.
+- Vercel drops properties past the plan limit without an error, so the cap is
+  enforced in `buildEvent` where a test can see it.
+- Development mode logs each event to the console via the debug script and
+  records nothing, same as page views.
