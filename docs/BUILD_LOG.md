@@ -36,8 +36,8 @@ tool showed the freeze, so an agent still had to search.
 - `get_my_team` / `get_team_roster` carry `frozen_in_trade: {trade_id,
   status}` (null otherwise). `get_league_rosters` carries the trade id only
   when set. A trade in review shows to everyone; an open offer shows only to
-  its owner, since a `proposed` offer is private to its two teams (same
-  visibility as `get_trade`).
+  its owner (narrower than `get_trade`, which shows a `proposed` offer to
+  both parties; the counterparty already sees it in `offers_to_me`).
 
 Tests: engine messages, the three roster tools and the visibility rule, the
 snapshot and `get_league_state` note, and the prompt bullet per kind.
@@ -50,6 +50,12 @@ trade too; a player in two open offers is named by the oldest one, stable
 across calls; the dead `frozenPlayerIdsExcluding` wrapper is gone; tests
 added for the reporter view, a `team_ids` subset, `addFreeAgent` and the
 claim path, precedence and determinism.
+
+Second pass: `get_pending_trades` said `i_can_vote: true` to every
+uninvolved reader in every session kind, even after it had voted — the same
+misdirection. It now carries `my_vote` (`not_a_voter`, `cast`, `owed`),
+`i_can_vote` only in a `trade_vote` session, and the same `votes_note`
+otherwise.
 
 Left alone: `runWaivers` keeps the `invalid_drop` reason for a claim that
 fails at run time because its drop is frozen — the reason is an enum shown

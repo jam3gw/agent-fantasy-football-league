@@ -1404,9 +1404,21 @@ export const getPendingTradesTool = readTool(
       .orderBy(desc(trades.id));
 
     const nameOf = (id: number) => idx.get(id)?.name ?? null;
+    const myVotes =
+      myId === null
+        ? new Set<number>()
+        : new Set(
+            (
+              await db.select({ tradeId: tradeVotes.tradeId }).from(tradeVotes).where(eq(tradeVotes.teamId, myId))
+            ).map((v) => v.tradeId),
+          );
     const inReview = [];
     for (const t of open.filter((t) => t.status === "accepted")) {
       const tally = await voteTally(db, t.id, [t.proposerTeamId, t.counterpartyTeamId]);
+      const party = myId === null || myId === t.proposerTeamId || myId === t.counterpartyTeamId;
+      // Where the vote is cast (§8.6): only a trade_vote session has the tool,
+      // so i_can_vote is true there alone; my_vote says why otherwise.
+      const myVote = party ? "not_a_voter" : myVotes.has(t.id) ? "cast" : "owed";
       inReview.push({
         trade_id: t.id,
         proposer_team_id: t.proposerTeamId,
@@ -1419,10 +1431,11 @@ export const getPendingTradesTool = readTool(
         review_ends_et: et(t.reviewEndsAt),
         // §3.5: counts only while in review.
         votes: tally,
-        i_can_vote:
-          myId !== null && myId !== t.proposerTeamId && myId !== t.counterpartyTeamId,
+        my_vote: myVote,
+        i_can_vote: myVote === "owed" && ctx.kind === "trade_vote",
       });
     }
+    const owed = inReview.some((r) => r.my_vote === "owed");
 
     const proposed = open.filter((t) => t.status === "proposed");
     return {
@@ -1456,6 +1469,7 @@ export const getPendingTradesTool = readTool(
                 proposed_at: iso(t.proposedAt),
               })),
       trades_in_review: inReview,
+      ...(owed && ctx.kind !== "trade_vote" ? { votes_note: VOTES_ELSEWHERE_NOTE } : {}),
       trade_deadline: {
         after_week: settings.tradeDeadlineWeek,
         passed: settings.currentWeek > settings.tradeDeadlineWeek,
