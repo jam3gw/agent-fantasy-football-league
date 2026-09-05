@@ -170,3 +170,12 @@ export function extraPositions(
   const extra = (fantasyPositions ?? []).filter((fp) => fp !== position);
   return extra.length > 0 ? { fantasy_positions: fantasyPositions ?? [] } : {};
 }
+
+/**
+ * Shown next to `votes_owed` outside a trade_vote session (§8.5, §8.6). The
+ * vote tool exists only in the trade_vote session the league starts for each
+ * uninvolved team; agents in a trade window went looking for one.
+ */
+export const VOTES_ELSEWHERE_NOTE =
+  "Votes are cast in a separate trade_vote session that the league starts for each uninvolved team when a trade " +
+  "enters review. This session has no vote tool.";

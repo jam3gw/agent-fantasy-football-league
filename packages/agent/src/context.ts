@@ -33,6 +33,7 @@ import {
   waiverClaims,
 } from "@league/engine";
 import type { ToolContext } from "./tools/types.ts";
+import { VOTES_ELSEWHERE_NOTE } from "./tools/types.ts";
 
 export interface ContextSnapshot {
   now_et: string;
@@ -113,6 +114,8 @@ interface PendingItems {
   offers_to_me: Array<{ trade_id: number; from_team_id: number; give: string[]; get: string[] }>;
   offers_from_me: Array<{ trade_id: number; to_team_id: number }>;
   votes_owed: Array<{ trade_id: number; review_ends_at: string }>;
+  /** Set when votes are owed outside a trade_vote session: where the vote happens (§8.6). */
+  votes_note?: string;
   my_waiver_claims: Array<{ add_player_id: string; drop_player_id: string | null; priority: number }>;
   roster_flags: string[];
 }
@@ -409,6 +412,9 @@ export async function buildContextSnapshot(ctx: ToolContext): Promise<ContextSna
     })),
     roster_flags: rosterFlags,
   };
+  if (snapshot.pending.votes_owed.length > 0 && ctx.kind !== "trade_vote") {
+    snapshot.pending.votes_note = VOTES_ELSEWHERE_NOTE;
+  }
 
   snapshot.scheduled_sessions = await scheduledSessions(ctx, team, roster, upcoming, settings);
 

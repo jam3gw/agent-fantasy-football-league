@@ -187,6 +187,10 @@ describe("get_league_state", () => {
     const pending = res.pending as Record<string, unknown>;
     expect((pending.offers_awaiting_my_response as Array<{ from_team_id: number }>)[0]!.from_team_id).toBe(b);
     expect((pending.votes_owed as unknown[]).length).toBe(1);
+    // This is a lineup_check context: the vote happens elsewhere, and the payload says so.
+    expect(pending.votes_note).toContain("separate trade_vote session");
+    const inVote = ok(await getLeagueStateTool.execute({}, ctxFor({ teamId: a, kind: "trade_vote" as SessionKind })));
+    expect((inVote.pending as Record<string, unknown>).votes_note).toBeUndefined();
     expect((pending.roster_flags as { ir_illegal: boolean }).ir_illegal).toBe(false);
     expect((pending.roster_flags as { empty_starting_slots: string[] }).empty_starting_slots).toHaveLength(9);
   });
@@ -389,6 +393,66 @@ describe("get_league_rosters", () => {
 /* ========================================================================== */
 /* get_matchup                                                                */
 /* ========================================================================== */
+
+
+describe("frozen_in_trade (§3.5)", () => {
+  it("names the trade that holds a player: in review to everyone, an open offer to its owner only", async () => {
+    await seedLeague(db);
+    const [a, b, c] = (await seedTeams(db)) as [number, number, number];
+    await seedWeek1Games();
+    const clock = new FixedClock(NOW);
+    const a1 = await makePlayer(db, { nflTeam: "SF", position: "WR", fullName: "Shopped" });
+    const a2 = await makePlayer(db, { nflTeam: "SF", position: "RB", fullName: "In Review" });
+    const b1 = await makePlayer(db, { nflTeam: "SF", position: "RB", fullName: "Wanted" });
+    const c1 = await makePlayer(db, { nflTeam: "SF", position: "TE", fullName: "Also Wanted" });
+    for (const p of [a1, a2]) await rosterPlayer(db, a, p);
+    await rosterPlayer(db, b, b1);
+    await rosterPlayer(db, c, c1);
+
+    // a -> b is accepted (in review); a -> c stays an open offer.
+    const review = await proposeTrade(db, clock, a, { toTeamId: b, givePlayerIds: [a2], getPlayerIds: [b1] });
+    if (!review.ok) throw new Error(review.message);
+    const accepted = await respondToTrade(db, clock, b, review.value.tradeId, "accept");
+    expect(accepted.ok).toBe(true);
+    const open = await proposeTrade(db, clock, a, { toTeamId: c, givePlayerIds: [a1], getPlayerIds: [c1] });
+    if (!open.ok) throw new Error(open.message);
+
+    // The owner sees both reasons on get_my_team.
+    const mine = ok(await getMyTeamTool.execute({}, ctxFor({ teamId: a })));
+    const byId = new Map((mine.players as Array<Record<string, unknown>>).map((r) => [r.player_id as string, r]));
+    expect(byId.get(a2)!.frozen_in_trade).toEqual({ trade_id: review.value.tradeId, status: "in_review" });
+    expect(byId.get(a1)!.frozen_in_trade).toEqual({ trade_id: open.value.tradeId, status: "my_open_offer" });
+
+    // A third team sees the trade in review on every roster, never another team's open offer.
+    const league = ok(await getLeagueRostersTool.execute({}, ctxFor({ teamId: c })));
+    const items = league.items as Array<{ team_id: number; players: Array<Record<string, unknown>> }>;
+    const rowsA = new Map(items.find((t) => t.team_id === a)!.players.map((r) => [r.id as string, r]));
+    const rowsB = new Map(items.find((t) => t.team_id === b)!.players.map((r) => [r.id as string, r]));
+    const rowsC = new Map(items.find((t) => t.team_id === c)!.players.map((r) => [r.id as string, r]));
+    expect(rowsA.get(a2)!.frozen_in_trade).toBe(review.value.tradeId);
+    expect(rowsB.get(b1)!.frozen_in_trade).toBe(review.value.tradeId);
+    expect(rowsA.get(a1)!.frozen_in_trade).toBeUndefined(); // a's open offer is a-c business
+    expect(rowsC.get(c1)!.frozen_in_trade).toBeUndefined(); // an open offer freezes nothing on the other side
+
+    // The other team's roster tool shows the review freeze the same way.
+    const other = ok(await getTeamRosterTool.execute({ team_id: a }, ctxFor({ teamId: b })));
+    const rows = new Map((other.players as Array<Record<string, unknown>>).map((r) => [r.player_id as string, r]));
+    expect(rows.get(a2)!.frozen_in_trade).toEqual({ trade_id: review.value.tradeId, status: "in_review" });
+    expect(rows.get(a1)!.frozen_in_trade).toBeNull();
+
+    // The reporter (no team) sees the review, never the open offer.
+    const reporter = ok(await getTeamRosterTool.execute({ team_id: a }, ctxFor({ teamId: null })));
+    const rRows = new Map((reporter.players as Array<Record<string, unknown>>).map((r) => [r.player_id as string, r]));
+    expect(rRows.get(a2)!.frozen_in_trade).toEqual({ trade_id: review.value.tradeId, status: "in_review" });
+    expect(rRows.get(a1)!.frozen_in_trade).toBeNull();
+
+    // A team_ids subset that leaves out the proposer still marks the counterparty's side.
+    const subset = ok(await getLeagueRostersTool.execute({ team_ids: [b] }, ctxFor({ teamId: null })));
+    const subItems = subset.items as Array<{ team_id: number; players: Array<Record<string, unknown>> }>;
+    expect(subItems.map((t) => t.team_id)).toEqual([b]);
+    expect(subItems[0]!.players.find((r) => r.id === b1)!.frozen_in_trade).toBe(review.value.tradeId);
+  });
+});
 
 describe("get_matchup", () => {
   it("returns both lineups with points and a summary of the other matchups", async () => {
@@ -845,7 +909,25 @@ describe("get_pending_trades", () => {
     const json = JSON.stringify(res);
     expect(json).not.toContain("COLLUSION SUSPECTED");
     expect(json).not.toContain("fine by me");
-    expect(review.i_can_vote).toBe(true);
+    // c already voted, and this is a lineup_check: no vote here.
+    expect(review.my_vote).toBe("cast");
+    expect(review.i_can_vote).toBe(false);
+    expect(res.votes_note).toBeUndefined();
+
+    // A team that still owes the vote is told where it is cast, outside trade_vote...
+    const [, , , , e] = teamIds as number[];
+    const owed = ok(await getPendingTradesTool.execute({}, ctxFor({ teamId: e, kind: "trade_window" as SessionKind })));
+    const owedRow = (owed.trades_in_review as Array<Record<string, unknown>>)[0]!;
+    expect(owedRow.my_vote).toBe("owed");
+    expect(owedRow.i_can_vote).toBe(false);
+    expect(owed.votes_note).toContain("separate trade_vote session");
+    // ...and can vote in the trade_vote session itself.
+    const inVote = ok(await getPendingTradesTool.execute({}, ctxFor({ teamId: e, kind: "trade_vote" as SessionKind })));
+    expect((inVote.trades_in_review as Array<Record<string, unknown>>)[0]!.i_can_vote).toBe(true);
+    expect(inVote.votes_note).toBeUndefined();
+    // A party never votes.
+    const asParty = ok(await getPendingTradesTool.execute({}, ctxFor({ teamId: a })));
+    expect((asParty.trades_in_review as Array<Record<string, unknown>>)[0]!.my_vote).toBe("not_a_voter");
   });
 
   it("separates offers to me from offers I sent", async () => {
