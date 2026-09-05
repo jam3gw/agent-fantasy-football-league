@@ -35,13 +35,13 @@ export interface PowerRankingEdition {
 /**
  * Write one edition: every team exactly once, ranks 1..N with no gaps, a
  * non-empty reason for each. One transaction; a second call from the same
- * session fails on the unique index rather than writing a second edition.
+ * session returns the edition already written rather than a second one.
  */
 export async function publishPowerRankings(
   db: EngineDb,
   clock: Clock,
   args: { sessionId: number; week: number; entries: PowerRankingEntry[] },
-): Promise<EngineResult<{ count: number }>> {
+): Promise<EngineResult<{ count: number; alreadyPublished: boolean }>> {
   const allTeams = await db.select({ id: teams.id, name: teams.name }).from(teams);
   const teamIds = new Set(allTeams.map((t) => t.id));
   const seenTeams = new Set<number>();
@@ -66,15 +66,17 @@ export async function publishPowerRankings(
     return fail("invalid_args", `every team must be ranked; missing: ${missing.join(", ")}`);
   }
 
-  const existing = await db
-    .select({ id: powerRankings.id })
-    .from(powerRankings)
-    .where(eq(powerRankings.sessionId, args.sessionId))
-    .limit(1);
-  if (existing.length > 0) return fail("bad_status", "this session has already published its rankings");
-
   const now = clock.now();
-  await db.transaction(async (tx) => {
+  return db.transaction(async (tx) => {
+    // A session publishes once. An edition already under this session is the
+    // interrupted-and-resumed case (§8.2): the insert landed, the tool result
+    // did not, and the model is calling again — that is a success, not a
+    // second edition, so the session can end on it.
+    const existing = await tx
+      .select({ id: powerRankings.id })
+      .from(powerRankings)
+      .where(eq(powerRankings.sessionId, args.sessionId));
+    if (existing.length > 0) return ok({ count: existing.length, alreadyPublished: true });
     await tx.insert(powerRankings).values(
       args.entries.map((e) => ({
         week: args.week,
@@ -85,8 +87,8 @@ export async function publishPowerRankings(
         createdAt: now,
       })),
     );
+    return ok({ count: args.entries.length, alreadyPublished: false });
   });
-  return ok({ count: args.entries.length });
 }
 
 /**

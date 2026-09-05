@@ -48,6 +48,22 @@ moves, and lineup management — and, before the first game, on the draft and
 the trades — and to read its previous edition first. It is not shown the
 retired formula.
 
+**Review round (fresh context).** Two real findings, both fixed. (1) A
+rankings session was keyed by week like the recap, and `createSession` is
+on-conflict-do-nothing — so next Tuesday's 10:30 run, in the same fantasy
+week as today's edition, would have created nothing, silently, and so would
+the runbook's "book it again". Rankings sessions now key on the booking
+minute; post kinds keep the week key. Test added. (2) A session interrupted
+between the engine insert and the recorded tool result would resume, call
+`publish_power_rankings` again, be refused, and fail `no_report` with a live
+edition on the site. The engine now returns the edition already under that
+session as a success (`already_published: true`); the check moved inside the
+transaction. Spec §8.2 step 4 and the §9.3 `draft.completed` row now name the
+new kind. Not done, recorded: the write records no `transactions` row and
+emits no event — the same as `reporter_posts`, since a ranking is the
+reporter's opinion and not league state; the zod cap of 12 mirrors the
+league's fixed size (§2) while the engine checks against the real team count.
+
 **Today's edition.** Jake asked for a ranking now, since the draft and six
 trades are in. Booked `reporter.run` with kind `reporter_power_rankings` on
 production after the deploy; the result is on `/` and `/report`.

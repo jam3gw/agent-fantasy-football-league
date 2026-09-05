@@ -74,11 +74,24 @@ describe("power rankings (§11)", () => {
     expect(await latestPowerRankings(db)).toEqual([]);
   });
 
-  it("a session publishes once", async () => {
-    expect((await publishPowerRankings(db, clock, { sessionId: 1, week: 1, entries: full(ids) })).ok).toBe(true);
-    const again = await publishPowerRankings(db, clock, { sessionId: 1, week: 1, entries: full(ids) });
-    expect(again.ok).toBe(false);
-    if (!again.ok) expect(again.error).toBe("bad_status");
+  it("a session publishes once: a second call is the resumed-session case and returns the first edition", async () => {
+    const first = await publishPowerRankings(db, clock, { sessionId: 1, week: 1, entries: full(ids) });
+    expect(first).toMatchObject({ ok: true, value: { count: 12, alreadyPublished: false } });
+    const again = await publishPowerRankings(db, clock, { sessionId: 1, week: 1, entries: full([...ids].reverse()) });
+    expect(again).toMatchObject({ ok: true, value: { count: 12, alreadyPublished: true } });
+    // The first edition stands; nothing was added.
+    const [edition] = await latestPowerRankings(db);
+    expect(edition?.entries.map((e) => e.teamId)).toEqual(ids);
+    expect(await latestPowerRankings(db, 5)).toHaveLength(1);
+  });
+
+  it("orders editions by publish time, and by session id when two share one", async () => {
+    await publishPowerRankings(db, clock, { sessionId: 5, week: 1, entries: full(ids) });
+    await publishPowerRankings(db, clock, { sessionId: 3, week: 1, entries: full(ids) });
+    expect((await latestPowerRankings(db, 2)).map((e) => e.sessionId)).toEqual([5, 3]);
+    // A lower session id published later is still the newest.
+    await publishPowerRankings(db, new FixedClock("2026-09-09T15:00:00Z"), { sessionId: 2, week: 1, entries: full(ids) });
+    expect((await latestPowerRankings(db, 3)).map((e) => e.sessionId)).toEqual([2, 5, 3]);
   });
 
   it("the newest edition comes first and movement is measured against the one before", async () => {

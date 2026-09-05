@@ -191,6 +191,24 @@ describe("§15.3 — every session kind runs", () => {
     expect(await db.select().from(reporterPosts)).toHaveLength(0);
   });
 
+  it("a rankings session that publishes nothing fails with no_report and leaves no edition", async () => {
+    const sessionId = await makeSession(null, RANKINGS_KIND, `k-${RANKINGS_KIND}-none`);
+    const result = await runSession(sessionId, {
+      ...depsFor(RANKINGS_KIND),
+      modelStep: async () => ({
+        text: "I would rather not.",
+        toolCalls: [],
+        usage: { inputTokens: 2000, outputTokens: 300, reasoningTokens: 0, cachedInputTokens: 0 },
+        gatewayCostUsd: null,
+        billedTo: "gateway",
+        assistantMessage: { role: "assistant", content: "I would rather not." } as never,
+      }),
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("no_report");
+    expect(await db.select().from(powerRankings)).toHaveLength(0);
+  });
+
   it.each(REPORTER_KINDS)("the reporter's %s session publishes a post", async (kind) => {
     const sessionId = await makeSession(null, kind, `k-${kind}`);
     const result = await runSession(sessionId, depsFor(kind));

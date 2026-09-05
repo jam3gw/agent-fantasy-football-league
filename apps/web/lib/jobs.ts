@@ -297,7 +297,7 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
   const nextTue4 = nextEtWeekdayTime(now, 2, 4, 0);
   await book("stats.finalize", nextTue4, { week: settings.currentWeek });
   await book("sessions.book", nextEtWeekdayTime(now, 2, 9, 0), { kind: "weekly_review" });
-  // §11: the rankings come first so the recap and the digest can point at them.
+  // §11: the rankings come first so the recap can point at them.
   await book("reporter.run", nextEtWeekdayTime(now, 2, 10, 30), { kind: "reporter_power_rankings" });
   await book("reporter.run", nextEtWeekdayTime(now, 2, 11, 0), { kind: "reporter_recap" });
   await book("digest.weekly", nextEtWeekdayTime(now, 2, 11, 30));
@@ -361,14 +361,21 @@ async function bookReporterSession(
   week: number,
 ): Promise<void> {
   const settings = await getSettings(db);
+  const now = clock.now();
+  // A post kind runs once per week: the recap and the preview key on the week
+  // alone, so a second booking is a no-op. A rankings edition is append-only
+  // and the site shows the newest, so a re-run (the runbook's "fresh edition
+  // on demand", or the Tuesday run in a week that already has the preseason
+  // edition) must create a new session: key it to the booking minute.
+  const suffix = kind === "reporter_power_rankings" ? `${week}:${now.toISOString().slice(0, 16)}` : week;
   await createSession(db, settings, {
     teamId: null,
     kind: kind as never,
     trigger: `job:${kind}`,
-    idempotencyKey: sessionKey("reporter", kind, settings.season, week, week),
+    idempotencyKey: sessionKey("reporter", kind, settings.season, week, suffix),
     modelId: reporterModelId(settings),
-    dueAt: clock.now(),
-    now: clock.now(),
+    dueAt: now,
+    now,
     context: { week },
   });
 }

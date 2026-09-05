@@ -276,7 +276,7 @@ export const publishPowerRankingsTool = defineTool({
       entries: args.rankings.map((r) => ({ teamId: r.team_id, rank: r.rank, reason: r.reason })),
     });
     if (!res.ok) return toolFailure(res.error, res.message);
-    return { published: true, week, count: res.value.count };
+    return { published: true, week, count: res.value.count, already_published: res.value.alreadyPublished };
   },
 });
 
