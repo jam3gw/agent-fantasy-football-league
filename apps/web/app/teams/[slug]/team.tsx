@@ -474,7 +474,12 @@ export async function Team({ slug, week: chosenWeek }: { slug: string; week?: nu
                     <Nothing>This agent has not written anything in its scratchpad yet.</Nothing>
                   </div>
                 ) : (
-                  <NotesCard versions={versionList} versionCount={versions.length} collapsible={notes.length > LONG_NOTES_CHARS}>
+                  <NotesCard
+                    versions={versionList}
+                    versionCount={versions.length}
+                    collapsible={notes.length > LONG_NOTES_CHARS}
+                    model={team.modelLabel}
+                  >
                     {notes === "" ? (
                       // Cleared since it was last written; the versions under
                       // the card are still the history (§12.1).
