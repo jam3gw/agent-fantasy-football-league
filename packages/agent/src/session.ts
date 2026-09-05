@@ -26,6 +26,7 @@ import type { UsageTokens } from "./spend.ts";
 /** The ending tool per session kind (§8.2 step 4). */
 export function endingToolFor(kind: SessionKind): string {
   if (kind === "draft_pick") return "make_pick";
+  if (kind === "reporter_power_rankings") return "publish_power_rankings";
   if (kind.startsWith("reporter_")) return "publish_report";
   return "write_decision_log";
 }

@@ -1,8 +1,9 @@
 /**
  * The redesigned pages show four things the league does not store: a chance to
- * win, a team's recent form, a power ranking with week-to-week movement, and a
- * sentence describing a transaction. Each is derived, so each is a claim the
- * site makes on its own account — these pin down what those claims mean.
+ * win, a team's recent form, and a sentence describing a transaction. Each is
+ * derived, so each is a claim the site makes on its own account — these pin
+ * down what those claims mean. (The power rankings are the reporter's own and
+ * are covered in the engine's `powerRankings.test.ts`.)
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -12,8 +13,6 @@ import {
   gameStatus,
   foldForm,
   newestFirst,
-  powerScore,
-  rankingBefore,
   summarizeBody,
   teamName,
   transactionPlayerIds,
@@ -220,61 +219,6 @@ describe("form", () => {
 
   it("returns nothing for a league that has not finalized a game", () => {
     expect(foldForm([]).size).toBe(0);
-  });
-});
-
-describe("power ranking", () => {
-  it("weighs winning above scoring: a worse-scoring team that wins ranks higher", () => {
-    const winner = powerScore(1, 200, 260, 0.9);
-    const scorer = powerScore(0.5, 260, 260, 0.9);
-    expect(winner).toBeGreaterThan(scorer);
-  });
-
-  it("rewards lineup efficiency when record and points match", () => {
-    expect(powerScore(0.5, 200, 200, 0.99)).toBeGreaterThan(powerScore(0.5, 200, 200, 0.8));
-  });
-
-  it("does not divide by zero before anyone has scored", () => {
-    expect(powerScore(0, 0, 0, null)).toBe(0);
-    expect(Number.isFinite(powerScore(0.5, 0, 0, null))).toBe(true);
-  });
-
-  describe("movement", () => {
-    const history: FinalGame[] = [
-      { week: 1, homeTeamId: 1, awayTeamId: 2, homePoints: 120, awayPoints: 90 },
-      { week: 1, homeTeamId: 3, awayTeamId: 4, homePoints: 110, awayPoints: 100 },
-      { week: 2, homeTeamId: 2, awayTeamId: 3, homePoints: 130, awayPoints: 80 },
-      { week: 2, homeTeamId: 4, awayTeamId: 1, homePoints: 125, awayPoints: 70 },
-    ];
-
-    it("ranks on the weeks before the one asked about, and no later", () => {
-      const afterWeekOne = rankingBefore(history, 2);
-      // Week 1 only: team 1 and team 3 won, team 1 by more.
-      expect(afterWeekOne.get(1)).toBe(1);
-      expect(afterWeekOne.get(3)).toBe(2);
-      expect(afterWeekOne.get(2)).toBeGreaterThan(2);
-    });
-
-    it("moves a team that wins big up the order", () => {
-      const before = rankingBefore(history, 2);
-      const after = rankingBefore(history, 3);
-      // Team 2 lost week 1 then won week 2 by fifty; it must climb.
-      expect(after.get(2)!).toBeLessThan(before.get(2)!);
-    });
-
-    it("is empty before any week has been played", () => {
-      expect(rankingBefore(history, 1).size).toBe(0);
-    });
-
-    it("orders ties the same way every time", () => {
-      const level: FinalGame[] = [
-        { week: 1, homeTeamId: 7, awayTeamId: 8, homePoints: 100, awayPoints: 100 },
-        { week: 1, homeTeamId: 9, awayTeamId: 10, homePoints: 100, awayPoints: 100 },
-      ];
-      const once = [...rankingBefore(level, 2).entries()];
-      const twice = [...rankingBefore(level, 2).entries()];
-      expect(once).toEqual(twice);
-    });
   });
 });
 

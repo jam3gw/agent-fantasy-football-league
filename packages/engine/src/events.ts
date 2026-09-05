@@ -364,6 +364,18 @@ async function handleDraftCompleted(db: EngineDb, clock: Clock, settings: League
     now,
     context: { week: startWeek },
   });
+  // ...and publishes the preseason power rankings (§11), after the grades so
+  // it can lean on its own reading of the draft.
+  await createSession(db, fresh, {
+    teamId: null,
+    kind: "reporter_power_rankings",
+    trigger: "draft.completed",
+    idempotencyKey: `session:reporter:reporter_power_rankings:${fresh.season}:${startWeek}:draft`,
+    modelId: reporterModelId(fresh),
+    dueAt: new Date(now.getTime() + 20 * 60_000),
+    now,
+    context: { week: startWeek },
+  });
 
   // §12.3: the commissioner digest also goes out once after the draft, not
   // only on Tuesdays — the draft is the biggest thing that happens all season.

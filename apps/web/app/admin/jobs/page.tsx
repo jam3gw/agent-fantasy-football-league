@@ -32,6 +32,7 @@ const BOOKABLE_JOBS = [
 const JOB_KINDS = [
   "reporter_recap",
   "reporter_preview",
+  "reporter_power_rankings",
   "reporter_draft_grades",
   "weekly_review",
   "post_waivers",

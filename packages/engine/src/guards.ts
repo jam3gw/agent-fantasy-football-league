@@ -33,6 +33,7 @@ export const DEFAULT_SESSION_GUARDS: Record<SessionKind, SessionGuard> = {
   reporter_recap: { toolCallCeiling: 100, deadlineMinutes: 90 },
   reporter_preview: { toolCallCeiling: 100, deadlineMinutes: 90 },
   reporter_trade_note: { toolCallCeiling: 100, deadlineMinutes: 90 },
+  reporter_power_rankings: { toolCallCeiling: 100, deadlineMinutes: 90 },
 };
 
 export function sessionGuard(settings: Pick<LeagueSettings, "extra">, kind: SessionKind): SessionGuard {

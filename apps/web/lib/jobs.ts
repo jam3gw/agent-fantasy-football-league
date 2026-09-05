@@ -71,6 +71,8 @@ export async function runJob(
   clock: Clock,
   type: string,
   payload: Record<string, unknown>,
+  /** The `scheduled_jobs` row being run, when the tick is the caller. */
+  job: { id: number } | null = null,
 ): Promise<void> {
   const settings = await getSettings(db);
   const season = settings.season;
@@ -157,17 +159,18 @@ export async function runJob(
     case "sessions.book": {
       // §2 (2026-09-05): scheduled trade windows are retired. Agents look for
       // trades in a check-in they book themselves (§8.10). A `sessions.book`
-      // row queued before the change books nothing when it fires; a new one
-      // (there is no admin path left that books it) fails loudly.
+      // row queued before the change books nothing when it fires, and no admin
+      // path books a new one; /admin/teams opens a window by hand.
       if (String(payload.kind) === "trade_window") {
-        throw new Error("sessions.book: scheduled trade windows are retired (§2, 2026-09-05); use /admin/teams to open one by hand");
+        console.warn("sessions.book: scheduled trade windows are retired (§2, 2026-09-05); nothing booked");
+        return;
       }
       await bookSessionsForKind(db, clock, String(payload.kind), payload);
       return;
     }
     case "reporter.run": {
       if (!inSeason(settings)) return; // §4.3 job gating
-      await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek));
+      await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek), job);
       return;
     }
     case "ingest.rankings": {
@@ -296,6 +299,8 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
   const nextTue4 = nextEtWeekdayTime(now, 2, 4, 0);
   await book("stats.finalize", nextTue4, { week: settings.currentWeek });
   await book("sessions.book", nextEtWeekdayTime(now, 2, 9, 0), { kind: "weekly_review" });
+  // §11: the rankings come first so the recap can point at them.
+  await book("reporter.run", nextEtWeekdayTime(now, 2, 10, 30), { kind: "reporter_power_rankings" });
   await book("reporter.run", nextEtWeekdayTime(now, 2, 11, 0), { kind: "reporter_recap" });
   await book("digest.weekly", nextEtWeekdayTime(now, 2, 11, 30));
   await book("sessions.book", nextEtWeekdayTime(now, 3, 9, 0), { kind: "post_waivers" });
@@ -341,16 +346,27 @@ async function bookReporterSession(
   clock: Clock,
   kind: string,
   week: number,
+  job: { id: number } | null,
 ): Promise<void> {
   const settings = await getSettings(db);
+  const now = clock.now();
+  // A post kind runs once per week: the recap and the preview key on the week
+  // alone, so a second booking is a no-op. A rankings edition is append-only
+  // and the site shows the newest, so a re-run (the runbook's "fresh edition
+  // on demand", or the Tuesday run in a week that already has the preseason
+  // edition) must create a new session. Key it to the job row, so a row the
+  // tick re-runs after a stale-claim release books the same session again
+  // rather than a second one; without a row (a direct call), the minute.
+  const suffix =
+    kind === "reporter_power_rankings" ? `${week}:${job ? `job${job.id}` : now.toISOString().slice(0, 16)}` : week;
   await createSession(db, settings, {
     teamId: null,
     kind: kind as never,
     trigger: `job:${kind}`,
-    idempotencyKey: sessionKey("reporter", kind, settings.season, week, week),
+    idempotencyKey: sessionKey("reporter", kind, settings.season, week, suffix),
     modelId: reporterModelId(settings),
-    dueAt: clock.now(),
-    now: clock.now(),
+    dueAt: now,
+    now,
     context: { week },
   });
 }
