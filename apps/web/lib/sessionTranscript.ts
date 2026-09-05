@@ -275,6 +275,7 @@ const TOOL_VERB: Record<string, string> = {
   get_league_state: "Checked the league",
   get_my_team: "Checked the roster",
   get_team_roster: "Checked a rival roster",
+  get_league_rosters: "Scouted every roster",
   get_matchup: "Looked at the matchup",
   get_team_week_results: "Read the week's results",
   get_player_stats: "Compared players",
@@ -390,6 +391,11 @@ export function callSummary(call: StepToolCall): string | null {
       const active = num(r.active_players);
       const size = active !== null && max !== null ? `${active} of ${max} active` : `${players} players`;
       return empty > 0 ? `${size}, ${empty} slot${empty === 1 ? "" : "s"} empty` : size;
+    }
+    case "get_league_rosters": {
+      const teams = items(r).length;
+      const total = num(r.total);
+      return total !== null && total > teams ? `${teams} of ${total} teams` : `${teams} teams`;
     }
     case "get_free_agents":
     case "get_available_players": {

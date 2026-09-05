@@ -7,6 +7,7 @@ import { parseMentions, postMessage } from "../src/board.ts";
 import { readScratchpad, writeScratchpad, MAX_SCRATCHPAD_LENGTH } from "../src/scratchpad.ts";
 import { writeDecisionLog } from "../src/decisionLog.ts";
 import { setTeamName } from "../src/teamNames.ts";
+import { parseTradeWindowDays, tradeWindowDays } from "../src/settings.ts";
 import { boardPosts, scratchpadVersions, sessions, teams } from "../src/db/schema.ts";
 
 let db: TestDb;
@@ -181,5 +182,20 @@ describe("team names", () => {
     const failures = outcomes.filter((o) => !o.ok);
     expect(failures).toHaveLength(1);
     expect((failures[0] as { error: string }).error).toBe("name_taken");
+  });
+});
+
+describe("tradeWindowDays (§2, 2026-09-05)", () => {
+  it("defaults to Wednesday and Friday, and reads a valid override", () => {
+    expect(tradeWindowDays({ extra: {} })).toEqual([3, 5]);
+    expect(tradeWindowDays({ extra: { tradeWindowDays: [6, 3, 3, 9, "x"] } })).toEqual([3, 6]);
+    expect(tradeWindowDays({ extra: { tradeWindowDays: [] } })).toEqual([3, 5]);
+  });
+
+  it("parses the admin form field by name or number", () => {
+    expect(parseTradeWindowDays("Wed, Fri")).toEqual([3, 5]);
+    expect(parseTradeWindowDays("5,3,wednesday")).toEqual([3, 5]);
+    expect(() => parseTradeWindowDays("Funday")).toThrow();
+    expect(() => parseTradeWindowDays("")).toThrow();
   });
 });

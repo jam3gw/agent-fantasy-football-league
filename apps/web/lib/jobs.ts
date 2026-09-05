@@ -8,7 +8,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import { etDay, jobKey, nextEtTime, nextEtWeekdayTime, sessionKey, zonedTimeToUtc } from "@league/shared";
-import type { EngineDb } from "@league/engine";
+import type { EngineDb, LeagueSettings } from "@league/engine";
 import {
   carryOverLineups,
   createSession,
@@ -31,7 +31,7 @@ import {
   upsertTrending,
   upsertWeekStats,
 } from "@league/data";
-import { reporterModelId } from "@league/engine";
+import { reporterModelId, tradeWindowDays } from "@league/engine";
 
 /**
  * §4.3 job gating: `waivers.run`, every `sessions.*` job, the `reporter.*`
@@ -135,6 +135,14 @@ export async function runJob(
       return;
     }
     case "sessions.book": {
+      // A trade window is booked two days ahead by date; the setting decides
+      // at fire time too, so a day the commissioner has since removed on
+      // /admin/settings books nothing (2026-09-05: the Sat 2026-09-05 row was
+      // already on the calendar when the count went from four to two).
+      if (String(payload.kind) === "trade_window" && !isTradeWindowDay(settings, String(payload.date ?? ""))) {
+        console.info(`sessions.book: ${String(payload.date)} is not a trade-window day any more; nothing booked`);
+        return;
+      }
       await bookSessionsForKind(db, clock, String(payload.kind), payload);
       return;
     }
@@ -271,14 +279,24 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
   await book("digest.weekly", nextEtWeekdayTime(now, 2, 11, 30));
   await book("sessions.book", nextEtWeekdayTime(now, 3, 9, 0), { kind: "post_waivers" });
   await book("reporter.run", nextEtWeekdayTime(now, 4, 10, 0), { kind: "reporter_preview" });
-  // Trade windows: Wednesday–Saturday at noon ET (§2: four per week).
-  for (const dow of [3, 4, 5, 6]) {
+  // Trade windows at noon ET on the days the commissioner set (§2: two per
+  // week since 2026-09-05, Wednesday and Friday by default).
+  for (const dow of tradeWindowDays(settings)) {
     const at = nextEtWeekdayTime(now, dow, 12, 0);
     if (settings.currentWeek <= settings.tradeDeadlineWeek) {
       await book("sessions.book", at, { kind: "trade_window", date: etDay(at) });
     }
   }
   return booked;
+}
+
+/** Whether an ET calendar date (YYYY-MM-DD) is one of the trade-window days. */
+export function isTradeWindowDay(settings: Pick<LeagueSettings, "extra">, etDate: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(etDate);
+  if (!m) return false;
+  // Noon UTC on that calendar date is the same calendar day, so its weekday is the ET weekday.
+  const dow = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12)).getUTCDay();
+  return tradeWindowDays(settings).includes(dow);
 }
 
 /** One session per active team, staggered a minute apart (§9.1). */
