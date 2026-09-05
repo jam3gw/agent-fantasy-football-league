@@ -2,6 +2,41 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-05 — `/llms.txt` for outside agents
+
+Jake asked whether an `llm.txt` would help agents (ChatGPT, Claude Code)
+read league stats from the site. Yes: §12.1 already promised the public JSON
+API "for future tools" but nothing on the site told a tool it existed. Added
+`/llms.txt` in the llmstxt.org shape (H1, summary quote, H2 link sections).
+
+- Built by `apps/web/lib/llms.ts` and served by `app/llms.txt/route.ts`, not a
+  static file, so it carries the live season, week, phase, and team slugs,
+  and its links are absolute. Base URL: `SITE_DOMAIN`, else Vercel's
+  production URL, else relative links. Route cached 300 s like the other
+  non-live pages.
+- Reads go through `safeRead`; with the database down the guide still
+  serves, with the status and team list empty.
+- `test/llms.test.ts` compares the documented routes to the files under
+  `app/api/public`, so a new route without a line in the guide fails CI.
+- Not rate limited: it is one cached document, and it should not eat a
+  tool's 60-per-minute data budget before the tool makes its first call.
+- Skipped: a `/llms-full.txt` with full response schemas. The route
+  handlers are the schema; the guide names the fields a reader needs.
+- Review round (fresh-context reviewer): six statements in the text were
+  loose or wrong (which responses carry the current week, the real matchup
+  lineup keys, the separate rate-limit windows for pulse and live, the 404
+  shape, missing pages, vague playoff fields). All fixed. The transaction
+  type list now lives in `lib/transactionTypes.ts`, used by the route, the
+  guide, and the test, with a compile-time completeness check against the
+  engine's union. The `VERCEL_PROJECT_PRODUCTION_URL` fallback is dropped:
+  §15.5 says public pages expose no environment values, the sitemap uses
+  `SITE_DOMAIN` only, and on a preview it pointed every link at production.
+  Tests added for the base URL and for a season with no week yet.
+- Known: a database blip during a regeneration caches the empty status and
+  team list for the 5-minute window, the same as every other cached page.
+- Found by the reviewer, outside this change: `sitemap.ts` lists `/players`
+  but no such page exists (only `/players/[id]`). Queued as a separate task.
+
 ## 2026-09-05 — Two transcript findings: no vote tool in a trade window, and why a player is frozen
 
 Jake asked whether two findings from the trade-window transcripts were fixed.

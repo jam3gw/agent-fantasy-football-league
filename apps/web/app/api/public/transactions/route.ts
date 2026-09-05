@@ -5,19 +5,9 @@
  */
 import { and, arrayContains, desc, eq } from "drizzle-orm";
 import { teams, transactions, type TransactionType } from "@league/engine";
+import { TRANSACTION_TYPES as TYPES } from "../../../../lib/transactionTypes";
 import { db } from "../../../../lib/db";
 import { publicJson, rateLimitResponse } from "../../../../lib/rateLimit";
-
-const TYPES: readonly TransactionType[] = [
-  "draft_pick",
-  "add",
-  "drop",
-  "waiver_add",
-  "trade",
-  "ir_move",
-  "lineup",
-  "commissioner",
-];
 
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 500;
