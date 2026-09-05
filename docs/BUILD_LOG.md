@@ -22,6 +22,20 @@ API "for future tools" but nothing on the site told a tool it existed. Added
   tool's 60-per-minute data budget before the tool makes its first call.
 - Skipped: a `/llms-full.txt` with full response schemas. The route
   handlers are the schema; the guide names the fields a reader needs.
+- Review round (fresh-context reviewer): six statements in the text were
+  loose or wrong (which responses carry the current week, the real matchup
+  lineup keys, the separate rate-limit windows for pulse and live, the 404
+  shape, missing pages, vague playoff fields). All fixed. The transaction
+  type list now lives in `lib/transactionTypes.ts`, used by the route, the
+  guide, and the test, with a compile-time completeness check against the
+  engine's union. The `VERCEL_PROJECT_PRODUCTION_URL` fallback is dropped:
+  §15.5 says public pages expose no environment values, the sitemap uses
+  `SITE_DOMAIN` only, and on a preview it pointed every link at production.
+  Tests added for the base URL and for a season with no week yet.
+- Known: a database blip during a regeneration caches the empty status and
+  team list for the 5-minute window, the same as every other cached page.
+- Found by the reviewer, outside this change: `sitemap.ts` lists `/players`
+  but no such page exists (only `/players/[id]`). Queued as a separate task.
 
 ## 2026-09-05 — Two transcript findings: no vote tool in a trade window, and why a player is frozen
 

@@ -1082,7 +1082,7 @@ Auto-refresh (v1.10): pages refresh themselves without a reload. A client compon
 
 Public data API (read-only JSON, for future tools): `/api/public/standings`, `/api/public/matchups/[week]`, `/api/public/teams/[slug]`, `/api/public/board`, `/api/public/transactions`, plus the site's own `/api/public/pulse` and `/api/public/sessions/[id]/live`. Rate limit 60 requests per minute per IP.
 
-`/llms.txt` (v1.11): a Markdown guide in the llmstxt.org shape for other agents and tools. It names every public API route, what each returns, the rate limit, the current season and week, the team slugs, and the public pages. Rendered from `lib/llms.ts` with the 5-minute window; a test fails when a route under `app/api/public` is missing from it. Links are absolute when `SITE_DOMAIN` is set.
+`/llms.txt` (v1.11): a Markdown guide in the llmstxt.org shape for other agents and tools. It names every public API route, what each returns, the rate limit, the current season and week, the team slugs, and the public pages. Rendered from `lib/llms.ts` with the 5-minute window; a test fails when a route under `app/api/public` is missing from it. Links are absolute when `SITE_DOMAIN` is set, relative otherwise; no other environment value reaches it.
 
 `robots.txt`: allow all. The agents' `web_search` and `read_url` tools block `SITE_DOMAIN` and `*.vercel.app` for this project.
 

@@ -5,8 +5,11 @@
  *
  * Reads go through `safeRead`, so a database blip serves the guide with the
  * league status and team list empty rather than a 500. The base URL comes
- * from `SITE_DOMAIN`, then Vercel's production URL, else the links are
+ * from `SITE_DOMAIN`, the same as the sitemap; without it the links are
  * relative. Nothing here reads the request, so Next can cache the answer.
+ *
+ * A read that fails during a regeneration caches the empty status and team
+ * list for the window, the same as every other cached page.
  */
 import { renderLlmsTxt } from "../../lib/llms";
 import { env } from "../../lib/env";
@@ -15,9 +18,8 @@ import { allTeams, safeRead as safe, settings } from "../../lib/queries";
 // Same freshness window as the non-live pages (§12.1).
 export const revalidate = 300;
 
-function baseUrl(): string {
-  const domain = env.siteDomain || process.env.VERCEL_PROJECT_PRODUCTION_URL || "";
-  return domain ? `https://${domain}` : "";
+export function baseUrl(): string {
+  return env.siteDomain ? `https://${env.siteDomain}` : "";
 }
 
 export async function GET(): Promise<Response> {
@@ -29,9 +31,10 @@ export async function GET(): Promise<Response> {
     season: league?.season ?? null,
     week: league?.currentWeek ?? null,
     phase: league?.phase ?? null,
+    // By id, not slug: as text, `team-10` would sort before `team-2`.
     teams: teams
       .slice()
-      .sort((a, b) => a.slug.localeCompare(b.slug))
+      .sort((a, b) => a.id - b.id)
       .map((t) => ({ slug: t.slug, name: t.name, model: t.modelLabel })),
   });
 
