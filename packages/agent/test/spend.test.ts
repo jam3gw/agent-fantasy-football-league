@@ -664,7 +664,7 @@ describe("billing: the gateway pays unless the provider is BYOK (2026-08-29)", (
       { inputTokens: 0, outputTokens: 100, reasoningTokens: 300, cachedInputTokens: 0 },
       null,
     );
-    expect(excess.costUsd).toBeCloseTo(0.001 + 0.002, 9); // 100 output + 200 excess reasoning at $10/M
+    expect(excess.costUsd).toBeCloseTo(0.001 + 0.003, 9); // 100 output + all 300 reasoning at $10/M
   });
 
   it("and the ledger row actually persists it", async () => {
