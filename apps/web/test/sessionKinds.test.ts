@@ -16,6 +16,7 @@ import {
   matchups,
   modelPrices,
   players,
+  powerRankings,
   reporterPosts,
   rosterEntries,
   sessions,
@@ -58,6 +59,7 @@ const REPORTER_KINDS = [
   "reporter_preview",
   "reporter_trade_note",
 ] as const;
+const RANKINGS_KIND = "reporter_power_rankings";
 
 beforeEach(async () => {
   ({ db, close } = await createTestDb());
@@ -156,6 +158,55 @@ describe("§15.3 — every session kind runs", () => {
     const ledger = await db.select().from(spendLedger).where(eq(spendLedger.sessionId, sessionId));
     expect(ledger.length).toBeGreaterThan(0);
     expect(ledger.every((r) => r.costUsd > 0)).toBe(true);
+  });
+
+  it("the reporter's power-rankings session publishes an edition, not a post (§11)", async () => {
+    const teamIds = await Promise.all([1, 2, 3].map((i) => makeTeam(`r-${i}`)));
+    const sessionId = await makeSession(null, RANKINGS_KIND, `k-${RANKINGS_KIND}`);
+    const endingTool = endingToolFor(RANKINGS_KIND);
+    expect(endingTool).toBe("publish_power_rankings");
+    expect(toolsForKind(RANKINGS_KIND).map((t) => t.name)).toContain(endingTool);
+    expect(toolsForKind(RANKINGS_KIND).map((t) => t.name)).not.toContain("publish_report");
+    const args = {
+      rankings: teamIds.map((team_id, i) => ({ team_id, rank: i + 1, reason: `Place ${i + 1} because.` })),
+    };
+    const result = await runSession(sessionId, {
+      ...depsFor(RANKINGS_KIND),
+      modelStep: async () => ({
+        text: "ranked",
+        toolCalls: [{ toolCallId: "c1", toolName: endingTool, args }],
+        usage: { inputTokens: 2000, outputTokens: 300, reasoningTokens: 0, cachedInputTokens: 0 },
+        gatewayCostUsd: null,
+        billedTo: "gateway",
+        assistantMessage: {
+          role: "assistant",
+          content: [{ type: "tool-call", toolCallId: "c1", toolName: endingTool, input: args }],
+        } as never,
+      }),
+    });
+    expect(result.status).toBe("succeeded");
+    expect(result.endedBy).toBe("ending_tool");
+    const rows = await db.select().from(powerRankings).where(eq(powerRankings.sessionId, sessionId));
+    expect(rows.map((r) => r.rank).sort()).toEqual([1, 2, 3]);
+    expect(await db.select().from(reporterPosts)).toHaveLength(0);
+  });
+
+  it("a rankings session that publishes nothing fails with no_report and leaves no edition", async () => {
+    const sessionId = await makeSession(null, RANKINGS_KIND, `k-${RANKINGS_KIND}-none`);
+    const result = await runSession(sessionId, {
+      ...depsFor(RANKINGS_KIND),
+      modelStep: async () => ({
+        text: "I would rather not.",
+        toolCalls: [],
+        usage: { inputTokens: 2000, outputTokens: 300, reasoningTokens: 0, cachedInputTokens: 0 },
+        gatewayCostUsd: null,
+        billedTo: "gateway",
+        assistantMessage: { role: "assistant", content: "I would rather not." } as never,
+      }),
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toBe("no_report");
+    expect(await db.select().from(powerRankings)).toHaveLength(0);
   });
 
   it.each(REPORTER_KINDS)("the reporter's %s session publishes a post", async (kind) => {

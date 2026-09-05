@@ -3,7 +3,7 @@ import "server-only";
  * The reads behind the redesigned public pages.
  *
  * The design asks for several things the site did not previously show: a
- * cross-team activity stream, a win chance on a live game, power rankings with
+ * cross-team activity stream, a win chance on a live game, the reporter's power rankings with
  * week-to-week movement, and a season timeline. None of them are a new source
  * of truth — each is derived here from tables the engine already writes, and
  * every derivation that involves a judgement call says what it assumes.
@@ -32,6 +32,8 @@ import {
   waiverClaims,
   waiverRuns,
   computeStandings,
+  latestPowerRankings,
+  rankingMovement,
 } from "@league/engine";
 import { db } from "./db";
 import { allTeams, safeRead as safe, settings } from "./queries";
@@ -47,8 +49,6 @@ import {
   remainingPoints,
   newestFirst,
   plainExcerpt,
-  powerScore,
-  rankingBefore,
   splitHeadline,
   teamName,
   transactionPlayerIds,
@@ -739,7 +739,7 @@ export async function gameCards(week: number, season: number): Promise<GameCard[
 }
 
 /* ------------------------------------------------------------------ *
- * Benchmark aggregates — shared by /benchmark and the power rankings
+ * Benchmark aggregates — /benchmark
  * ------------------------------------------------------------------ */
 
 export interface BenchRow {
@@ -780,9 +780,9 @@ export interface BenchRow {
 /**
  * Every per-team number the benchmark shows, in one pass.
  *
- * This was inline in `/benchmark`. The home page's power rankings read the
- * same figures, so it lives here and both read it rather than two
- * aggregations drifting apart.
+ * This was inline in `/benchmark` and moved here when the home page's power
+ * rankings were computed from it. The rankings are the reporter's now; this
+ * stays as `/benchmark`'s read.
  */
 export async function benchmarkRows(): Promise<BenchRow[]> {
   // `db()` reads DATABASE_URL and throws when it is missing, so it is called
@@ -928,105 +928,54 @@ export interface PowerRow {
   name: string;
   modelLabel: string;
   rank: number;
-  /** Places gained since the previous completed week; 0 when unchanged. */
+  /** Places gained since the reporter's previous edition; 0 when unchanged. */
   move: number;
-  note: string;
+  /** The reporter's reason for the place, one or two sentences. */
+  reason: string;
+}
+
+export interface PowerBoard {
+  /** The fantasy week in play when the edition was published. */
+  week: number;
+  publishedAt: Date;
+  sessionId: number;
+  rows: PowerRow[];
 }
 
 /**
- * A power ranking is a claim about who is actually good, which the standings
- * only approximate two weeks into a season. This one is a blend, in order of
- * weight: win percentage, points scored against the league's best, and lineup
- * efficiency — how much of its own roster's ceiling the agent actually played.
- *
- * The movement column is the same blend computed through the previous
- * completed week, so a team that climbs has climbed on the same measure. The
- * note is a fact about that team taken from its own row, never a generated
- * opinion: the reporter writes the prose on this site, not the page.
+ * A power ranking is a claim about who is actually good, and the page makes
+ * no such claim on its own: the league reporter publishes an edition in each
+ * `reporter_power_rankings` session (§11), with a reason for every place. The
+ * movement column compares the newest edition with the one before it, so an
+ * arrow means the reporter changed its mind, not that a formula's inputs
+ * shifted.
  */
-export async function powerRankings(limit = 6, prefetched?: BenchRow[]): Promise<PowerRow[]> {
-  const [rows, history] = await Promise.all([
-    prefetched ?? benchmarkRows(),
-    safe(
-      () =>
-        db()
-          .select({
-            week: matchups.week,
-            homeTeamId: matchups.homeTeamId,
-            awayTeamId: matchups.awayTeamId,
-            homePoints: matchups.homePoints,
-            awayPoints: matchups.awayPoints,
-          })
-          .from(matchups)
-          .where(and(eq(matchups.final, true), eq(matchups.isPlayoff, false)))
-          .orderBy(matchups.week),
-      [],
-    ),
+export async function powerRankings(): Promise<PowerBoard | null> {
+  const [editions, teamRows] = await Promise.all([
+    safe(() => latestPowerRankings(db(), 2), []),
+    safe(() => db().select().from(teams), []),
   ]);
-  if (rows.length === 0) return [];
-
-  const weeksPlayed = history.length === 0 ? 0 : Math.max(...history.map((m) => m.week));
-  const bestPf = Math.max(...rows.map((r) => r.pf), 0);
-  const current = [...rows]
-    .map((r) => {
-      const games = r.wins + r.losses + r.ties;
+  const [current, previous] = editions;
+  if (!current) return null;
+  const movement = rankingMovement(current, previous);
+  const byId = new Map(teamRows.map((t) => [t.id, t]));
+  return {
+    week: current.week,
+    publishedAt: current.createdAt,
+    sessionId: current.sessionId,
+    rows: current.entries.map((e) => {
+      const t = byId.get(e.teamId);
       return {
-        row: r,
-        value: powerScore(games > 0 ? (r.wins + r.ties * 0.5) / games : 0, r.pf, bestPf, r.efficiency),
+        teamId: e.teamId,
+        slug: t?.slug ?? String(e.teamId),
+        name: teamName(t),
+        modelLabel: t?.modelLabel ?? "",
+        rank: e.rank,
+        move: movement.get(e.teamId) ?? 0,
+        reason: e.reason,
       };
-    })
-    // Ties break on team id so the order is stable between renders.
-    .sort((a, b) => b.value - a.value || a.row.teamId - b.row.teamId);
-
-  // The same blend one week earlier, so a team that climbed climbed on the
-  // same measure it is being ranked by today.
-  const previousRank = weeksPlayed > 1 ? rankingBefore(history, weeksPlayed) : new Map<number, number>();
-
-  const leagueBench = rows.reduce((sum, r) => sum + r.bench, 0);
-  const bestEfficiency = Math.max(...rows.map((r) => r.efficiency ?? 0));
-  const cheapest = rows
-    .filter((r) => r.costPerPoint !== null)
-    .sort((a, b) => (a.costPerPoint ?? 0) - (b.costPerPoint ?? 0))[0];
-  const wastrel = [...rows].sort((a, b) => b.bench - a.bench)[0];
-  const spendiest = [...rows].sort((a, b) => b.costList - a.costList)[0];
-
-  const noteFor = (r: BenchRow): string => {
-    if (r.emptySlots > 0) {
-      return `Has started the season with ${r.emptySlots} empty starting slot${r.emptySlots === 1 ? "" : "s"}. An empty slot scores nothing.`;
-    }
-    if (r.efficiency !== null && r.efficiency === bestEfficiency && bestEfficiency > 0) {
-      return `Best lineup skill in the league at ${(r.efficiency * 100).toFixed(1)}%, with ${r.bench.toFixed(1)} points left behind.`;
-    }
-    if (cheapest && r.teamId === cheapest.teamId && r.costPerPoint !== null) {
-      return `The cheapest points in the league: $${r.costPerPoint.toFixed(3)} each, $${r.costList.toFixed(2)} spent so far.`;
-    }
-    if (wastrel && r.teamId === wastrel.teamId && r.bench > 0 && leagueBench > 0) {
-      return `Has left ${r.bench.toFixed(1)} points on its bench — more than anyone else in the league.`;
-    }
-    if (spendiest && r.teamId === spendiest.teamId && r.costList > 0) {
-      return `Spends the most in the league at $${r.costList.toFixed(2)}, for ${r.pf.toFixed(1)} points.`;
-    }
-    if (r.claimsWon > 0) {
-      return `${r.claimsWon} of ${r.claimsMade} waiver claims won, and ${r.fa.toFixed(1)} points from the players it added.`;
-    }
-    if (r.invalidToolCalls > 0) {
-      return `${r.invalidToolCalls} bad tool call${r.invalidToolCalls === 1 ? "" : "s"} across ${r.sessionsRun} sessions.`;
-    }
-    return `${r.pf.toFixed(1)} points scored, ${r.pa.toFixed(1)} against.`;
+    }),
   };
-
-  return current.slice(0, limit).map(({ row }, i) => {
-    const before = previousRank.get(row.teamId);
-    return {
-      teamId: row.teamId,
-      slug: row.slug,
-      name: row.name ?? row.modelLabel ?? row.slug,
-      modelLabel: row.modelLabel,
-      rank: i + 1,
-      move: before === undefined ? 0 : before - (i + 1),
-      note: noteFor(row),
-    };
-  });
 }
 
 /* ------------------------------------------------------------------ *

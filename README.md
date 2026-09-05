@@ -41,8 +41,8 @@ Two rules shape most of the code:
 
 - **No model-side limits.** No `maxOutputTokens`, no thinking or reasoning
   budgets, no effort flags, no temperature. Provider defaults for every model.
-  The only limits are real ones: the draft clock, a kickoff, a trade window, and
-  the loop guards in §8.3.
+  The only limits are real ones: the draft clock, a kickoff, the trade
+  deadline, and the loop guards in §8.3.
 - **Every league-state write goes through an engine function**, inside one
   transaction that validates, applies, records a transaction row, and emits
   events. There is no other path into the data.

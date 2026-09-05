@@ -8,7 +8,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import { etDay, jobKey, nextEtTime, nextEtWeekdayTime, sessionKey, zonedTimeToUtc } from "@league/shared";
-import type { EngineDb, LeagueSettings } from "@league/engine";
+import type { EngineDb } from "@league/engine";
 import {
   carryOverLineups,
   createSession,
@@ -32,7 +32,7 @@ import {
   upsertTrending,
   upsertWeekStats,
 } from "@league/data";
-import { reporterModelId, tradeWindowDays } from "@league/engine";
+import { reporterModelId } from "@league/engine";
 
 /**
  * §4.3 job gating: `waivers.run`, every `sessions.*` job, the `reporter.*`
@@ -71,6 +71,8 @@ export async function runJob(
   clock: Clock,
   type: string,
   payload: Record<string, unknown>,
+  /** The `scheduled_jobs` row being run, when the tick is the caller. */
+  job: { id: number } | null = null,
 ): Promise<void> {
   const settings = await getSettings(db);
   const season = settings.season;
@@ -155,12 +157,12 @@ export async function runJob(
       return;
     }
     case "sessions.book": {
-      // A trade window is booked two days ahead by date; the setting decides
-      // at fire time too, so a day the commissioner has since removed on
-      // /admin/settings books nothing (2026-09-05: the Sat 2026-09-05 row was
-      // already on the calendar when the count went from four to two).
-      if (String(payload.kind) === "trade_window" && !isTradeWindowDay(settings, String(payload.date ?? ""))) {
-        console.info(`sessions.book: ${String(payload.date)} is not a trade-window day any more; nothing booked`);
+      // §2 (2026-09-05): scheduled trade windows are retired. Agents look for
+      // trades in a check-in they book themselves (§8.10). A `sessions.book`
+      // row queued before the change books nothing when it fires, and no admin
+      // path books a new one; /admin/teams opens a window by hand.
+      if (String(payload.kind) === "trade_window") {
+        console.warn("sessions.book: scheduled trade windows are retired (§2, 2026-09-05); nothing booked");
         return;
       }
       await bookSessionsForKind(db, clock, String(payload.kind), payload);
@@ -168,7 +170,7 @@ export async function runJob(
     }
     case "reporter.run": {
       if (!inSeason(settings)) return; // §4.3 job gating
-      await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek));
+      await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek), job);
       return;
     }
     case "ingest.rankings": {
@@ -297,28 +299,15 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
   const nextTue4 = nextEtWeekdayTime(now, 2, 4, 0);
   await book("stats.finalize", nextTue4, { week: settings.currentWeek });
   await book("sessions.book", nextEtWeekdayTime(now, 2, 9, 0), { kind: "weekly_review" });
+  // §11: the rankings come first so the recap can point at them.
+  await book("reporter.run", nextEtWeekdayTime(now, 2, 10, 30), { kind: "reporter_power_rankings" });
   await book("reporter.run", nextEtWeekdayTime(now, 2, 11, 0), { kind: "reporter_recap" });
   await book("digest.weekly", nextEtWeekdayTime(now, 2, 11, 30));
   await book("sessions.book", nextEtWeekdayTime(now, 3, 9, 0), { kind: "post_waivers" });
   await book("reporter.run", nextEtWeekdayTime(now, 4, 10, 0), { kind: "reporter_preview" });
-  // Trade windows at noon ET on the days the commissioner set (§2: two per
-  // week since 2026-09-05, Wednesday and Friday by default).
-  for (const dow of tradeWindowDays(settings)) {
-    const at = nextEtWeekdayTime(now, dow, 12, 0);
-    if (settings.currentWeek <= settings.tradeDeadlineWeek) {
-      await book("sessions.book", at, { kind: "trade_window", date: etDay(at) });
-    }
-  }
+  // No scheduled trade window (§2, 2026-09-05): an agent that wants to shop
+  // books a check-in for it (§8.10). Offers still trigger `trade_response`.
   return booked;
-}
-
-/** Whether an ET calendar date (YYYY-MM-DD) is one of the trade-window days. */
-export function isTradeWindowDay(settings: Pick<LeagueSettings, "extra">, etDate: string): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(etDate);
-  if (!m) return false;
-  // Noon UTC on that calendar date is the same calendar day, so its weekday is the ET weekday.
-  const dow = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12)).getUTCDay();
-  return tradeWindowDays(settings).includes(dow);
 }
 
 /** One session per active team, staggered a minute apart (§9.1). */
@@ -357,16 +346,27 @@ async function bookReporterSession(
   clock: Clock,
   kind: string,
   week: number,
+  job: { id: number } | null,
 ): Promise<void> {
   const settings = await getSettings(db);
+  const now = clock.now();
+  // A post kind runs once per week: the recap and the preview key on the week
+  // alone, so a second booking is a no-op. A rankings edition is append-only
+  // and the site shows the newest, so a re-run (the runbook's "fresh edition
+  // on demand", or the Tuesday run in a week that already has the preseason
+  // edition) must create a new session. Key it to the job row, so a row the
+  // tick re-runs after a stale-claim release books the same session again
+  // rather than a second one; without a row (a direct call), the minute.
+  const suffix =
+    kind === "reporter_power_rankings" ? `${week}:${job ? `job${job.id}` : now.toISOString().slice(0, 16)}` : week;
   await createSession(db, settings, {
     teamId: null,
     kind: kind as never,
     trigger: `job:${kind}`,
-    idempotencyKey: sessionKey("reporter", kind, settings.season, week, week),
+    idempotencyKey: sessionKey("reporter", kind, settings.season, week, suffix),
     modelId: reporterModelId(settings),
-    dueAt: clock.now(),
-    now: clock.now(),
+    dueAt: now,
+    now,
     context: { week },
   });
 }

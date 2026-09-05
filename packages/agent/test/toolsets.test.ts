@@ -72,7 +72,7 @@ describe("tool sets (§8.6)", () => {
   it("reporter kinds get reporter tools and read tools, but no team write tools", () => {
     for (const kind of ALL_KINDS.filter((k) => k.startsWith("reporter_"))) {
       const n = names(kind);
-      expect(n, kind).toContain("publish_report");
+      expect(n, kind).toContain(kind === "reporter_power_rankings" ? "publish_power_rankings" : "publish_report");
       expect(n, kind).toContain("get_session_transcript");
       expect(n, kind).toContain("get_team_scratchpad");
       // no team writes
@@ -136,15 +136,24 @@ describe("tool sets (§8.6)", () => {
 });
 
 describe("§8.10 — check-in tools", () => {
-  it("a check-in cannot book another check-in, or start a trade, or post", () => {
+  it("a check-in cannot book another check-in, but can shop a trade and post", () => {
     const names = toolsForKind("self_check_in").map((t) => t.name);
     // The chaining guard, at the tool set as well as in the engine.
     expect(names).not.toContain("schedule_check_in");
-    // Proposing a trade and posting to the board have their own windows.
-    expect(names).not.toContain("propose_trade");
-    expect(names).not.toContain("post_message");
-    // But it can act on what it finds — that is the point of booking it.
-    for (const tool of ["set_lineup", "add_free_agent", "drop_player", "submit_waiver_claims", "respond_to_trade"]) {
+    expect(names).not.toContain("vote_on_trade");
+    // It can act on what it finds — that is the point of booking it. Since
+    // 2026-09-05 there is no scheduled trade window, so trades and the board
+    // are here too.
+    for (const tool of [
+      "set_lineup",
+      "add_free_agent",
+      "drop_player",
+      "submit_waiver_claims",
+      "propose_trade",
+      "respond_to_trade",
+      "cancel_trade",
+      "post_message",
+    ]) {
       expect(names, `a check-in needs ${tool}`).toContain(tool);
     }
     expect(names).toContain("write_decision_log");
@@ -162,13 +171,30 @@ describe("§8.10 — check-in tools", () => {
   });
 
   it("no reporter kind can schedule or cancel a check-in", () => {
-    for (const kind of ["reporter_draft_grades", "reporter_recap", "reporter_preview", "reporter_trade_note"] as const) {
+    for (const kind of REPORTER_KINDS) {
       const names = toolsForKind(kind).map((t) => t.name);
       expect(names).not.toContain("schedule_check_in");
       expect(names).not.toContain("cancel_check_in");
     }
   });
+
+  it("each reporter kind has exactly one ending tool, and the rankings kind cannot publish a post (§11)", () => {
+    for (const kind of REPORTER_KINDS) {
+      const names = toolsForKind(kind).map((t) => t.name);
+      const enders = names.filter((n) => n.startsWith("publish_"));
+      expect(enders, kind).toEqual([kind === "reporter_power_rankings" ? "publish_power_rankings" : "publish_report"]);
+      expect(names, kind).toContain("get_power_rankings");
+    }
+  });
 });
+
+const REPORTER_KINDS = [
+  "reporter_draft_grades",
+  "reporter_recap",
+  "reporter_preview",
+  "reporter_trade_note",
+  "reporter_power_rankings",
+] as const;
 
 describe("tool names are unique", () => {
   it("no two tools share a name", () => {

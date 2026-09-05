@@ -4,10 +4,11 @@
  * `lib/broadcast.ts` is server-only: it opens a database handle, so nothing in
  * it can be exercised without one. The decisions worth being sure about are
  * not the queries though — they are what a projected margin is worth as a
- * probability, what counts as a win, how a team moves in the power rankings,
- * how a transaction's free-form payload becomes a sentence, where an agent's
- * paragraph breaks into a headline, and what the wire says about a trade or a
- * waiver. Those live here, take plain data, and are tested in
+ * probability, what counts as a win, how a transaction's free-form payload
+ * becomes a sentence, where an agent's paragraph breaks into a headline, and
+ * what the wire says about a trade or a waiver. (The power rankings are the
+ * reporter's, read straight from its published edition — nothing here
+ * computes them.) Those live here, take plain data, and are tested in
  * `test/broadcast.test.ts`.
  */
 
@@ -171,54 +172,6 @@ export function foldForm(rows: FinalGame[], lastN = 5): Map<number, Result[]> {
   }
   for (const [teamId, list] of form) form.set(teamId, list.slice(-lastN));
   return form;
-}
-
-/* ------------------------------------------------------------------ *
- * Power rankings
- * ------------------------------------------------------------------ */
-
-/**
- * The blend behind the power rankings, in order of weight: win percentage,
- * points scored against the league's best, and lineup efficiency — how much of
- * its own roster's ceiling the agent actually played.
- */
-export function powerScore(winPct: number, pf: number, bestPf: number, efficiency: number | null): number {
-  return winPct * 0.5 + (bestPf > 0 ? pf / bestPf : 0) * 0.35 + (efficiency ?? 0) * 0.15;
-}
-
-/**
- * The same blend as it stood before `week`, from the finalized matchups alone.
- *
- * Efficiency is only kept as a season-to-date total, so the earlier ranking
- * uses record and points only. Both sides of the comparison then weigh the
- * same two things, which is what makes the movement mean anything.
- */
-export function rankingBefore(history: FinalGame[], week: number): Map<number, number> {
-  const tally = new Map<number, { w: number; l: number; t: number; pf: number }>();
-  const bump = (teamId: number, own: number, other: number) => {
-    const cur = tally.get(teamId) ?? { w: 0, l: 0, t: 0, pf: 0 };
-    cur.pf += own;
-    if (own > other) cur.w += 1;
-    else if (own < other) cur.l += 1;
-    else cur.t += 1;
-    tally.set(teamId, cur);
-  };
-  for (const m of history.filter((g) => g.week < week)) {
-    bump(m.homeTeamId, m.homePoints ?? 0, m.awayPoints ?? 0);
-    bump(m.awayTeamId, m.awayPoints ?? 0, m.homePoints ?? 0);
-  }
-  const bestPf = Math.max(...[...tally.values()].map((v) => v.pf), 0);
-  const ranks = new Map<number, number>();
-  [...tally.entries()]
-    .map(([teamId, v]) => {
-      const games = v.w + v.l + v.t;
-      return { teamId, value: powerScore(games > 0 ? (v.w + v.t * 0.5) / games : 0, v.pf, bestPf, null) };
-    })
-    // Ties break on team id so the order — and therefore the movement arrows —
-    // is the same on every render rather than depending on Map iteration.
-    .sort((a, b) => b.value - a.value || a.teamId - b.teamId)
-    .forEach((entry, i) => ranks.set(entry.teamId, i + 1));
-  return ranks;
 }
 
 /* ------------------------------------------------------------------ *

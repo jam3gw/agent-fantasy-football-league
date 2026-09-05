@@ -50,6 +50,13 @@
       "when": 1788454989083,
       "tag": "0006_spend_ledger_cache_write",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788619352129,
+      "tag": "0007_power_rankings",
+      "breakpoints": true
     }
   ]
 }
