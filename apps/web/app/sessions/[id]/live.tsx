@@ -126,7 +126,7 @@ export default function LiveSession({
 
   const active = ACTIVE_STATUSES.has(summary.status);
   const elapsed = useElapsed(summary.startedAt, active);
-  useLiveWatched("session", active);
+  useLiveWatched("session", summary.status === "running");
 
   const fetchLive = useCallback(async (): Promise<LiveResponse> => {
     const res = await fetch(`/api/public/sessions/${sessionId}/live?after=${after.current}`, {

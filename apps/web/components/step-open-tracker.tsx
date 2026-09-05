@@ -16,18 +16,24 @@ import { useEffect } from "react";
 import { EVENTS, countsAsStepOpen } from "@/lib/analytics";
 import { currentPage, trackEvent } from "@/lib/track";
 
+/**
+ * The document-level handler, exported so the DOM test can call it without
+ * rendering. A nested disclosure inside a card (a tool call's arguments) has
+ * its own summary whose parent is not a step card, so it does not count.
+ */
+export function onDocumentClick(e: Event): void {
+  if (!(e.target instanceof Element)) return;
+  const summary = e.target.closest("summary");
+  const card = summary?.parentElement;
+  if (!(card instanceof HTMLDetailsElement)) return;
+  if (!countsAsStepOpen({ stepCard: card.hasAttribute("data-step-card"), open: card.open })) return;
+  trackEvent(EVENTS.stepOpened, { page: currentPage(), kind: card.dataset.stepKind ?? "turn" });
+}
+
 export function StepOpenTracker() {
   useEffect(() => {
-    const onClick = (e: Event) => {
-      if (!(e.target instanceof Element)) return;
-      const summary = e.target.closest("summary");
-      const card = summary?.parentElement;
-      if (!(card instanceof HTMLDetailsElement)) return;
-      if (!countsAsStepOpen({ stepCard: card.hasAttribute("data-step-card"), open: card.open })) return;
-      trackEvent(EVENTS.stepOpened, { page: currentPage(), kind: card.dataset.stepKind ?? "turn" });
-    };
-    document.addEventListener("click", onClick, true);
-    return () => document.removeEventListener("click", onClick, true);
+    document.addEventListener("click", onDocumentClick, true);
+    return () => document.removeEventListener("click", onDocumentClick, true);
   }, []);
   return null;
 }

@@ -104,7 +104,9 @@ export function countsAsStepOpen(card: { stepCard: boolean; open: boolean }): bo
  * is a "Filter" event.
  */
 export function queryChanged(before: string, after: string): boolean {
-  return before.replace(/^\?/, "") !== after.replace(/^\?/, "");
+  // Both sides re-serialised: a linked-in `?team=a&` or `%20` for `+` is
+  // the same state as its canonical form, not a change.
+  return new URLSearchParams(before).toString() !== new URLSearchParams(after).toString();
 }
 
 /**
@@ -114,7 +116,9 @@ export function queryChanged(before: string, after: string): boolean {
 export function pageOf(pathname: string): string {
   return pathname
     .replace(/^\/matchups\/\d+$/, "/matchups/[week]")
+    .replace(/^\/teams\/[^/]+\/week\/\d+$/, "/teams/[slug]/week/[week]")
     .replace(/^\/teams\/[^/]+$/, "/teams/[slug]")
+    .replace(/^\/spend\/[^/]+$/, "/spend/[slug]")
     .replace(/^\/sessions\/[^/]+$/, "/sessions/[id]")
     .replace(/^\/players\/[^/]+$/, "/players/[id]");
 }
