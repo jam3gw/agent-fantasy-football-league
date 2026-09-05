@@ -137,37 +137,75 @@ export async function isIrIllegal(
   return !isIrEligible(settings, p);
 }
 
+/** Why a player is frozen: the trade that holds him and its status (§3.5). */
+export interface FrozenBy {
+  tradeId: number;
+  /** `proposed`: the owner's own open offer (drop freeze only). `accepted`: in review. */
+  status: "proposed" | "accepted";
+}
+
 /**
- * Players of `teamId` that cannot be **dropped** because of trades (§3.5):
- * give-side of its own `proposed` offers; both sides of `accepted` trades it
- * is a party to. This is the drop freeze only. Offers use the narrower
- * trades.ts `frozenPlayerIdsExcluding` — an open offer binds nobody for other
+ * Players of each team in `teamIds` that cannot be **dropped** because of
+ * trades (§3.5), each mapped to the trade that holds him: give-side of the
+ * team's own `proposed` offers; both sides of `accepted` trades it is a party
+ * to. This is the drop freeze only. Offers use the narrower trades.ts
+ * `frozenPlayerTradesExcluding` — an open offer binds nobody for other
  * offers (the same player may be shopped to several teams; the first accept
  * supersedes the rest), but a player is never dropped out from under the
- * offers he is in.
+ * offers he is in. A trade in review wins over an open offer for the same
+ * player, so the reason shown is the one that also blocks offers; among
+ * open offers the oldest (lowest id) is named, so the reason is stable.
  */
-export async function frozenPlayerIds(db: EngineDb, teamId: number): Promise<Set<string>> {
-  const frozen = new Set<string>();
+export async function frozenPlayerTradesForTeams(
+  db: EngineDb,
+  teamIds: number[],
+): Promise<Map<number, Map<string, FrozenBy>>> {
+  const out = new Map<number, Map<string, FrozenBy>>();
+  for (const id of teamIds) out.set(id, new Map());
+  if (teamIds.length === 0) return out;
   const open = await db
     .select()
     .from(trades)
     .where(
       and(
         inArray(trades.status, ["proposed", "accepted"]),
-        or(eq(trades.proposerTeamId, teamId), eq(trades.counterpartyTeamId, teamId)),
+        or(inArray(trades.proposerTeamId, teamIds), inArray(trades.counterpartyTeamId, teamIds)),
       ),
-    );
+    )
+    .orderBy(trades.id);
+  const hold = (teamId: number, playerId: string, by: FrozenBy): void => {
+    const m = out.get(teamId);
+    if (!m) return;
+    const cur = m.get(playerId);
+    if (cur && (cur.status === "accepted" || by.status === "proposed")) return;
+    m.set(playerId, by);
+  };
   for (const t of open) {
     if (t.status === "proposed") {
       // only the proposer's give-side is held (against drops) while proposed
-      if (t.proposerTeamId === teamId) for (const p of t.givePlayerIds) frozen.add(p);
+      for (const p of t.givePlayerIds) hold(t.proposerTeamId, p, { tradeId: t.id, status: "proposed" });
     } else {
       // accepted (in review): both sides
-      if (t.proposerTeamId === teamId) for (const p of t.givePlayerIds) frozen.add(p);
-      if (t.counterpartyTeamId === teamId) for (const p of t.getPlayerIds) frozen.add(p);
+      for (const p of t.givePlayerIds) hold(t.proposerTeamId, p, { tradeId: t.id, status: "accepted" });
+      for (const p of t.getPlayerIds) hold(t.counterpartyTeamId, p, { tradeId: t.id, status: "accepted" });
     }
   }
-  return frozen;
+  return out;
+}
+
+/** `frozenPlayerTradesForTeams` for one team. */
+export async function frozenPlayerTrades(db: EngineDb, teamId: number): Promise<Map<string, FrozenBy>> {
+  return (await frozenPlayerTradesForTeams(db, [teamId])).get(teamId) ?? new Map();
+}
+
+/** The player ids of `frozenPlayerTrades` (§3.5 drop freeze). */
+export async function frozenPlayerIds(db: EngineDb, teamId: number): Promise<Set<string>> {
+  return new Set((await frozenPlayerTrades(db, teamId)).keys());
+}
+
+/** One human line for a `frozen` failure, naming the trade (§3.5). */
+export function frozenReason(by: FrozenBy): string {
+  return by.status === "accepted" ? `trade ${by.tradeId} (in review)` : `trade ${by.tradeId} (your open offer)`;
 }
 
 /**

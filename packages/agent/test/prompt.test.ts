@@ -182,6 +182,11 @@ describe("system prompt (Appendix C)", () => {
       "- The whole league is open to you, all season: get_league_state has the standings and every team's record, get_team_roster shows any team's roster, get_league_rosters shows every roster at once in short rows, get_matchup covers every matchup, get_team_week_results shows what each team scored and left on its bench, week by week, and get_transactions lists every move every team has made — adds, drops, waiver adds, trades, and draft picks (pass team_id for one team's history). Scout another team's roster and recent moves before you offer it a trade, and check on your rivals whenever you want.",
     );
     expect(p).toContain("- set_lineup takes your 9 starters and your IR player.");
+    // Trade windows went looking for a vote tool (sessions 1906 and others); the prompt now says where votes happen.
+    expect(p).toContain("- Trade votes are not cast here.");
+    expect(buildSystemPrompt({ ...base, ...rules }, toolsForKind("trade_vote").map((t) => t.name))).not.toContain(
+      "Trade votes are not cast here",
+    );
     expect(p).toContain("- End every session by calling write_decision_log");
   });
 
