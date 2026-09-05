@@ -121,3 +121,38 @@ export async function updateSettings(
     .returning();
   return rows[0]!;
 }
+
+/**
+ * Days of the week a `trade_window` session is booked on, as ET weekday
+ * numbers (0 = Sunday). The commissioner cut the count from four (Wed–Sat,
+ * SPEC §2 as first written) to two on 2026-09-05: trade windows were half of
+ * every day's model spend. Wednesday because the waiver run has just moved
+ * rosters; Friday because a Friday offer, its response, and a 24-hour review
+ * all finish before Sunday's kickoffs, which a Saturday window cannot.
+ * Editable on /admin/settings (`extra.tradeWindowDays`).
+ */
+export const DEFAULT_TRADE_WINDOW_DAYS: readonly number[] = [3, 5];
+
+export function tradeWindowDays(settings: Pick<LeagueSettings, "extra">): number[] {
+  const raw = (settings.extra as { tradeWindowDays?: unknown }).tradeWindowDays;
+  if (!Array.isArray(raw)) return [...DEFAULT_TRADE_WINDOW_DAYS];
+  const days = [...new Set(raw.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
+  return days.length > 0 ? days : [...DEFAULT_TRADE_WINDOW_DAYS];
+}
+
+/** "3, 5" -> [3, 5]; also accepts weekday names. Throws on anything else. */
+export function parseTradeWindowDays(text: string): number[] {
+  const names = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+  const days = text
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean)
+    .map((s) => {
+      const byName = names.indexOf(s.slice(0, 3));
+      const n = byName >= 0 ? byName : Number(s);
+      if (!Number.isInteger(n) || n < 0 || n > 6) throw new Error(`trade window day "${s}" is not a weekday`);
+      return n;
+    });
+  if (days.length === 0) throw new Error("at least one trade window day is needed");
+  return [...new Set(days)].sort();
+}

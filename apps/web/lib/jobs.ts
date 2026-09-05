@@ -31,7 +31,7 @@ import {
   upsertTrending,
   upsertWeekStats,
 } from "@league/data";
-import { reporterModelId } from "@league/engine";
+import { reporterModelId, tradeWindowDays } from "@league/engine";
 
 /**
  * §4.3 job gating: `waivers.run`, every `sessions.*` job, the `reporter.*`
@@ -271,8 +271,9 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
   await book("digest.weekly", nextEtWeekdayTime(now, 2, 11, 30));
   await book("sessions.book", nextEtWeekdayTime(now, 3, 9, 0), { kind: "post_waivers" });
   await book("reporter.run", nextEtWeekdayTime(now, 4, 10, 0), { kind: "reporter_preview" });
-  // Trade windows: Wednesday–Saturday at noon ET (§2: four per week).
-  for (const dow of [3, 4, 5, 6]) {
+  // Trade windows at noon ET on the days the commissioner set (§2: two per
+  // week since 2026-09-05, Wednesday and Friday by default).
+  for (const dow of tradeWindowDays(settings)) {
     const at = nextEtWeekdayTime(now, dow, 12, 0);
     if (settings.currentWeek <= settings.tradeDeadlineWeek) {
       await book("sessions.book", at, { kind: "trade_window", date: etDay(at) });

@@ -36,6 +36,7 @@ import {
   getPendingTradesTool,
   getPlayerStatsTool,
   getTeamRosterTool,
+  getLeagueRostersTool,
   getTradeTool,
   getTransactionsTool,
   getWaiverClaimsTool,
@@ -105,6 +106,7 @@ describe("READ_TOOLS", () => {
         "player_research",
         "get_free_agents",
         "get_league_state",
+        "get_league_rosters",
         "get_matchup",
         "get_my_team",
         "get_nfl_schedule",
@@ -282,6 +284,86 @@ describe("get_team_roster", () => {
     const res = await getTeamRosterTool.execute({ team_id: 999 }, ctxFor({ teamId: 1 }));
     expect(res.ok).toBe(false);
     expect((res as { error: string }).error).toBe("not_found");
+  });
+});
+
+describe("get_league_rosters", () => {
+  it("returns every team in short rows, starters first, with only the fields that are set", async () => {
+    await seedLeague(db);
+    const teamIds = await seedTeams(db);
+    const [a, b] = teamIds as [number, number];
+    await seedWeek1Games();
+    const qb = await makePlayer(db, { nflTeam: "KC", position: "QB", fullName: "Starting QB" });
+    const rb = await makePlayer(db, { nflTeam: "DAL", position: "RB", fullName: "Bye Back" });
+    const wr = await makePlayer(db, { nflTeam: "SF", position: "WR", fullName: "Hurt Receiver" });
+    await db.update(players).set({ injuryStatus: "Questionable" }).where(eq(players.playerId, wr));
+    for (const p of [qb, rb, wr]) await rosterPlayer(db, a, p);
+    await db.insert(lineupEntries).values({ teamId: a, week: 1, playerId: qb, slot: "QB" });
+    await db.insert(playerWeekProj).values({ playerId: qb, season: SEASON, week: 1, projPtsPpr: 21.5 });
+    await db
+      .insert(playerWeekStats)
+      .values({ playerId: qb, season: SEASON, week: 1, stats: { pass_yd: 300 }, ptsPpr: 18 });
+    await db.insert(scratchpads).values({ teamId: b, content: "SECRET PLAN" });
+
+    const res = ok(await getLeagueRostersTool.execute({}, ctxFor({ teamId: b })));
+    const items = res.items as Array<Record<string, unknown>>;
+    expect(items.length).toBe(teamIds.length);
+    expect(res.has_more).toBe(false);
+    expect(JSON.stringify(res)).not.toContain("SECRET PLAN");
+
+    const teamA = items.find((t) => t.team_id === a)!;
+    const teamB = items.find((t) => t.team_id === b)!;
+    expect(teamB.mine).toBe(true);
+    expect(teamA.mine).toBeUndefined();
+    expect(teamA.record).toBe("0-0");
+
+    const rows = teamA.players as Array<Record<string, unknown>>;
+    expect(rows[0]!.id).toBe(qb); // the one starter leads the bench
+    expect(rows[0]).toMatchObject({ id: qb, name: "Starting QB", pos: "QB", nfl: "KC", slot: "QB", proj: 21.5, season_pts: 18, locked: true });
+    expect(rows[0]!.inj).toBeUndefined();
+    const hurt = rows.find((r) => r.id === wr)!;
+    expect(hurt).toMatchObject({ slot: "BN", inj: "Questionable", proj: null });
+    expect(hurt.season_pts).toBeUndefined();
+    expect(hurt.locked).toBeUndefined();
+    const bye = rows.find((r) => r.id === rb)!;
+    expect(bye.bye_now).toBe(true);
+    expect(bye.bye).toBe(1);
+    // No per-player detail that get_team_roster carries.
+    for (const r of rows) {
+      expect(r.kickoff_et).toBeUndefined();
+      expect(r.acquired_via).toBeUndefined();
+      expect(r.opponent).toBeUndefined();
+    }
+  });
+
+  it("filters to the asked teams and reports an unknown one", async () => {
+    await seedLeague(db);
+    const [a, b] = (await seedTeams(db)) as [number, number];
+    await seedWeek1Games();
+    const res = ok(await getLeagueRostersTool.execute({ team_ids: [b] }, ctxFor({ teamId: a })));
+    expect((res.items as Array<{ team_id: number }>).map((t) => t.team_id)).toEqual([b]);
+    const bad = await getLeagueRostersTool.execute({ team_ids: [999] }, ctxFor({ teamId: a }));
+    expect(bad.ok).toBe(false);
+    expect((bad as { error: string }).error).toBe("not_found");
+  });
+
+  it("stays under the §8.2 page cap with twelve full rosters", async () => {
+    await seedLeague(db);
+    const teamIds = await seedTeams(db);
+    await seedWeek1Games();
+    for (const t of teamIds) {
+      for (let i = 0; i < 16; i++) {
+        const p = await makePlayer(db, { nflTeam: "KC", position: "WR", fullName: `Wide Receiver Number ${i} Longname` });
+        await rosterPlayer(db, t, p);
+        await db.insert(playerWeekProj).values({ playerId: p, season: SEASON, week: 1, projPtsPpr: 12.34 });
+      }
+    }
+    const res = ok(await getLeagueRostersTool.execute({}, ctxFor({ teamId: teamIds[0]! })));
+    expect(JSON.stringify(res).length).toBeLessThanOrEqual(20_000);
+    // Either everything fit, or the page says how to get the rest.
+    const items = res.items as unknown[];
+    if (items.length < teamIds.length) expect(res.has_more).toBe(true);
+    else expect(res.has_more).toBe(false);
   });
 });
 
