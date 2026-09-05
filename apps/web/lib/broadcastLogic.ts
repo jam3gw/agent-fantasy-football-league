@@ -225,7 +225,7 @@ export function rankingBefore(history: FinalGame[], week: number): Map<number, n
  * Activity
  * ------------------------------------------------------------------ */
 
-/** Newest first, capped. The rail merges four sources into one stream. */
+/** Newest first, capped. The stream merges five sources; the wire merges four. */
 export function newestFirst<T extends { at: Date }>(items: T[], limit: number): T[] {
   return [...items].sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, limit);
 }
@@ -510,7 +510,7 @@ export function splitHeadline(
     const end = match.index + match[0].length;
     if (end > max) break;
     if (end < minSentence) continue;
-    // "vs." and its kind end no sentence; "No." and "St." only ahead of a number.
+    // "vs." and its kind end no sentence; "No." only ahead of a number, "St." ahead of a capital or a number.
     if (isAbbreviation(flat, match.index)) continue;
     // A sentence end inside `**Bold. Sentence**` is not a break to cut on.
     if (tokenSafeCut(flat, end) < end) continue;

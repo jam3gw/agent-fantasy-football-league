@@ -149,6 +149,15 @@ state and swallowed every line after it. Also fixed:
   components. The note now gives the real reason (a read can take `now`
   from a test), and `formatEtRecent` takes `{ now, zone }` with render time
   as its own default, so no component body constructs a clock.
+
+### Review round 4 (5 findings, none blocking)
+
+A test title promised "St." still ends a sentence on its own, which the
+round-3 rule does not do (every next sentence starts with a capital);
+retitled to what it asserts. Three stale comments corrected. The fallback
+score ticker now says "in progress" for a game with points on the board
+between windows rather than "scheduled" — reachable only while the wire is
+empty, fixed so nothing later leans on it.
 ## 2026-09-05 — `/llms.txt` for outside agents
 
 Jake asked whether an `llm.txt` would help agents (ChatGPT, Claude Code)

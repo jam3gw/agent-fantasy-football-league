@@ -699,7 +699,7 @@ describe("a headline out of an agent's paragraph", () => {
     );
   });
 
-  it("keeps St. Brown whole, and still ends a sentence on a bare st.", () => {
+  it("keeps St. Brown whole — St. holds ahead of a capital, which every next sentence starts with", () => {
     const trade =
       "Traded Jahmyr Gibbs for Amon-Ra St. Brown and a bench piece because the swing is worth it. The board can argue.";
     expect(splitHeadline(trade).headline).toBe(
