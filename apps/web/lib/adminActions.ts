@@ -33,6 +33,7 @@ import {
   rankings,
   recordTransaction,
   reporterModelId,
+  parseTradeWindowDays,
   rosterEntries,
   scheduledJobs,
   scoreWeek,
@@ -779,6 +780,13 @@ export async function saveSettingsAction(form: FormData): Promise<void> {
         Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4]), Number(m[5]),
       ).toISOString();
     }
+    extraTouched = true;
+  }
+
+  // §2 (2026-09-05): which weekdays get a trade window.
+  const windowDays = str(form, "tradeWindowDays");
+  if (windowDays) {
+    extra.tradeWindowDays = parseTradeWindowDays(windowDays);
     extraTouched = true;
   }
 

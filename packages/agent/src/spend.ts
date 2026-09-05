@@ -48,6 +48,17 @@ export interface ModelStepCost {
  * provider metadata carries it (§8.7 verify); otherwise the price table.
  * Cached input tokens are billed at the cache-read rate, cache writes at the
  * write rate, and neither is also billed as ordinary input.
+ *
+ * Reasoning tokens are a *part* of `outputTokens`, not an addition to it:
+ * the SDK reports the provider's total output and breaks reasoning out as a
+ * detail of it (`output_tokens >= reasoning_tokens` on all 628 price-table
+ * steps on production, 2026-08-30 to 2026-09-04). Billing the reasoning
+ * count again at the output rate — which this did until 2026-09-05 —
+ * overstated every Anthropic, OpenAI and xAI step by 8% overall and 15% on
+ * Fable ($7.09 across those rows, repriced; docs/BUILD_LOG.md). A model that
+ * prices reasoning *differently* from output pays the difference on those
+ * tokens, and only that. Should a provider ever report reasoning beyond its
+ * output count, both are billed in full — the output is never free.
  */
 export async function computeStepCost(
   db: EngineDb,
@@ -67,12 +78,20 @@ export async function computeStepCost(
   if (!p) return { costUsd: 0, source: "price_table" };
   const cacheWrite = usage.cacheWriteTokens ?? 0;
   const uncachedInput = Math.max(0, usage.inputTokens - usage.cachedInputTokens - cacheWrite);
+  const reasoningRate = p.reasoningUsdPerM ?? p.outputUsdPerM;
+  const outputSide =
+    usage.reasoningTokens <= usage.outputTokens
+      ? // Reasoning is a share of the output count: bill the output once,
+        // then only the rate difference on the reasoning share.
+        usage.outputTokens * p.outputUsdPerM + usage.reasoningTokens * (reasoningRate - p.outputUsdPerM)
+      : // A provider reporting reasoning *outside* its output count (none does
+        // today): visible output and reasoning are two separate quantities.
+        usage.outputTokens * p.outputUsdPerM + usage.reasoningTokens * reasoningRate;
   const cost =
     (uncachedInput * p.inputUsdPerM) / 1_000_000 +
     (usage.cachedInputTokens * (p.cachedInputUsdPerM ?? p.inputUsdPerM)) / 1_000_000 +
     (cacheWrite * p.inputUsdPerM * CACHE_WRITE_INPUT_MULTIPLIER) / 1_000_000 +
-    (usage.outputTokens * p.outputUsdPerM) / 1_000_000 +
-    (usage.reasoningTokens * (p.reasoningUsdPerM ?? p.outputUsdPerM)) / 1_000_000;
+    outputSide / 1_000_000;
   return { costUsd: round6(cost), source: "price_table" };
 }
 

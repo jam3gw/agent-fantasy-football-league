@@ -111,6 +111,7 @@ export function buildSystemPrompt(v: PromptVars, tools: readonly string[]): stri
   const scouting: Array<[string, string]> = [
     ["get_league_state", "get_league_state has the standings and every team's record"],
     ["get_team_roster", "get_team_roster shows any team's roster"],
+    ["get_league_rosters", "get_league_rosters shows every roster at once in short rows"],
     ["get_matchup", "get_matchup covers every matchup"],
     [
       "get_team_week_results",
