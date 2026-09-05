@@ -74,6 +74,13 @@ league's fixed size (§2) while the engine checks against the real team count.
 trades are in. Booked `reporter.run` with kind `reporter_power_rankings` on
 production after the deploy; the result is on `/` and `/report`.
 
+## 2026-09-05 — Sitemap: dropped the `/players` index URL
+
+The sitemap listed `/players`, but no players index page exists. Only
+`/players/[id]` does, and SPEC §12.1 specifies only the player card. The
+URL returned a 404 to crawlers. Removed `/players` from the sitemap's page
+list. No index page was built: the spec does not ask for one.
+
 ## 2026-09-05 — `/llms.txt` for outside agents
 
 Jake asked whether an `llm.txt` would help agents (ChatGPT, Claude Code)
@@ -4269,5 +4276,10 @@ per-row table clicks (each row is a link), server-side events for league
 actions (the database already has them in full), and the Web Analytics API on
 `/about` (a vanity number for another token).
 
-Still for Jake, a dashboard setting not code: a Spend Management alert on the
-Vercel team, since Pro meters events with no cap.
+Jake has set a Spend Management alert on the Vercel team (a dashboard
+setting, not code), since Pro meters events with no cap. Nothing open.
+
+Merged to `main` as `fa7e353` after three review rounds (the third found
+nothing new) and green CI. Production confirmed: `/api/healthz` ok, and the
+client chunk served on `league.jake-moses.com` carries both the event
+vocabulary and the `/admin/` drop in `beforeSend`.
