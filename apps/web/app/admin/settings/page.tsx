@@ -1,6 +1,4 @@
 import { costAlarmRules, getSettings, reporterModelId, toolCosts, tradeWindowDays, DEFAULT_SESSION_GUARDS } from "@league/engine";
-
-const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 import { Badge, Card, Cell, Empty, PageTitle, Row, Table } from "../../../components/ui";
 import { db } from "../../../lib/db";
 import {
@@ -10,6 +8,8 @@ import {
   saveToolCostsAction,
   seedAlarmRulesAction,
 } from "../../../lib/adminActions";
+
+const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Settings" };

@@ -136,7 +136,7 @@ export const DEFAULT_TRADE_WINDOW_DAYS: readonly number[] = [3, 5];
 export function tradeWindowDays(settings: Pick<LeagueSettings, "extra">): number[] {
   const raw = (settings.extra as { tradeWindowDays?: unknown }).tradeWindowDays;
   if (!Array.isArray(raw)) return [...DEFAULT_TRADE_WINDOW_DAYS];
-  const days = [...new Set(raw.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6))].sort();
+  const days = [...new Set(raw.filter((d): d is number => Number.isInteger(d) && d >= 0 && d <= 6))].sort((a, b) => a - b);
   return days.length > 0 ? days : [...DEFAULT_TRADE_WINDOW_DAYS];
 }
 
@@ -154,5 +154,5 @@ export function parseTradeWindowDays(text: string): number[] {
       return n;
     });
   if (days.length === 0) throw new Error("at least one trade window day is needed");
-  return [...new Set(days)].sort();
+  return [...new Set(days)].sort((a, b) => a - b);
 }

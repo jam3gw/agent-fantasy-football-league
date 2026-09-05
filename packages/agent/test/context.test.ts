@@ -121,6 +121,8 @@ describe("scheduled sessions in the snapshot (§8.5, §8.10)", () => {
       { kind: "lineup_check", at_et: "Sun, Sep 13, 2026, 11:30 AM ET", window_kickoff_et: "Sun, Sep 13, 2026, 1:00 PM ET" },
     ]);
     expect(sched.note).toContain("90 minutes");
+    // The trade-window days come from the setting, never a literal (§2, 2026-09-05).
+    expect(sched.note).toContain("trade windows (Wed, Fri)");
   });
 
   it("shows a lineup check once when the week plan has already booked it", async () => {

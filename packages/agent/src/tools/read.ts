@@ -633,7 +633,7 @@ export const getTeamRosterTool = readTool(
  */
 export const getLeagueRostersTool = readTool(
   "get_league_rosters",
-  "Every team's roster in one call, one short row per player: id, name, position, NFL team, slot (a starting slot, BN or IR), proj_pts_ppr, injury_status, bye week, and season_pts once a player has scored. Use it to scout the whole league before a trade; get_team_roster has the full detail for one team. Paged by team.",
+  "Every team's roster in one call, one short row per player: id, name, position, NFL team, slot (a starting slot, BN or IR), proj_pts_ppr, injury_status, bye week, and season_pts once a player has scored. Use it to scout the whole league before a trade; get_team_roster has the full detail for one team. Paged by team: offset is the team index from next_offset.",
   z.object({
     week: z.number().int().min(1).max(18).optional(),
     team_ids: z.array(z.number().int()).min(1).max(12).optional(),
@@ -703,7 +703,9 @@ export const getLeagueRostersTool = readTool(
             proj: proj.get(e.playerId) ?? null,
             ...(e.injuryStatus ? { inj: e.injuryStatus } : {}),
             ...(bye !== null ? { bye } : {}),
-            ...(e.nflTeam !== null && !gamesThisWeek.byTeam.has(e.nflTeam) ? { bye_now: true } : {}),
+            ...(e.nflTeam !== null && gamesThisWeek.games.length > 0 && !gamesThisWeek.byTeam.has(e.nflTeam)
+              ? { bye_now: true }
+              : {}),
             ...(pts > 0 ? { season_pts: pts } : {}),
             ...(locked.has(e.playerId) ? { locked: true } : {}),
           };

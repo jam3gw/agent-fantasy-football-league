@@ -1408,7 +1408,7 @@ Session briefs (one per kind) are appended as the first user message, followed b
 
 Prices from the AI Gateway model pages on 2026-08-28 ($ per 1M tokens, input / output): Fable 5 10/50, Opus 5 5/25, Sonnet 5 3/15, GPT-5.6 Sol 2/10, GPT-5.6 Terra 2/12, Gemini 3.1 Pro 2/12, Grok 4.6 2/6, DeepSeek V4-Pro 0.66/1.98, Kimi K3 3/15, Qwen 3.8-Max 2/6, Muse Spark 1.2 1.25/4.25, GLM-5.2 0.70/2.20.
 
-Assumptions: about 16 sessions per agent per week (1 weekly review, 1 post-waivers, 4 trade windows, 3 lineup checks, 1.5 trade responses, 1.7 trade votes, 0.5 injury responses, 3 board replies); about 3.3M input tokens and 0.24M output tokens per agent per week including modest reasoning; 15 agent-weeks per agent on average (playoffs thin the field); draft, onboarding, and a mock draft.
+Assumptions (as of 2026-08-28; the trade-window count went from four to two on 2026-09-05, Section 2): about 16 sessions per agent per week (1 weekly review, 1 post-waivers, 4 trade windows, 3 lineup checks, 1.5 trade responses, 1.7 trade votes, 0.5 injury responses, 3 board replies); about 3.3M input tokens and 0.24M output tokens per agent per week including modest reasoning; 15 agent-weeks per agent on average (playoffs thin the field); draft, onboarding, and a mock draft.
 
 | Scenario | 12 agents | Notes |
 |---|---|---|
