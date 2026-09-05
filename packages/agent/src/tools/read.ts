@@ -621,6 +621,117 @@ export const getTeamRosterTool = readTool(
   },
 );
 
+/**
+ * Every roster at once, one short row a player. Added 2026-09-05: in a trade
+ * window most agents called get_team_roster for all eleven other teams — 6.5k
+ * characters each, about 19k tokens together — and then re-read the lot on
+ * every later step, which made trade windows half of the league's daily
+ * spend. This carries what a scout compares (position, slot, projection,
+ * injury, bye, season points) and leaves the per-player detail (kickoff,
+ * opponent, lock, this week's points, how he was acquired) to
+ * get_team_roster. Same rows for every agent (§2).
+ */
+export const getLeagueRostersTool = readTool(
+  "get_league_rosters",
+  "Every team's roster in one call, one short row per player: id, name, position, NFL team, slot (a starting slot, BN or IR), proj_pts_ppr, injury_status, bye week, and season_pts once a player has scored. Use it to scout the whole league before a trade; get_team_roster has the full detail for one team. Paged by team.",
+  z.object({
+    week: z.number().int().min(1).max(18).optional(),
+    team_ids: z.array(z.number().int()).min(1).max(12).optional(),
+    offset: z.number().int().min(0).optional(),
+  }),
+  async (args, ctx) => {
+    const db = ctx.db;
+    const settings = await getSettings(db);
+    const season = settings.season;
+    const week = args.week ?? settings.currentWeek;
+    if (week >= settings.currentWeek) {
+      await Promise.all([ctx.refreshProjections?.(season, week), ctx.refreshPlayerFeed?.()]);
+    }
+    const idx = await teamIndex(db);
+    const wanted = args.team_ids ? new Set(args.team_ids) : null;
+    const teamRows = [...idx.values()]
+      .filter((t) => wanted === null || wanted.has(t.id))
+      .sort((a, b) => a.id - b.id);
+    if (wanted !== null) {
+      const missing = [...wanted].filter((id) => !idx.has(id));
+      if (missing.length > 0) return toolFailure("not_found", `no team with id ${missing.join(", ")}`);
+    }
+
+    const entries = await db
+      .select({
+        teamId: rosterEntries.teamId,
+        playerId: rosterEntries.playerId,
+        fullName: players.fullName,
+        position: players.position,
+        fantasyPositions: players.fantasyPositions,
+        nflTeam: players.nflTeam,
+        injuryStatus: players.injuryStatus,
+      })
+      .from(rosterEntries)
+      .innerJoin(players, eq(players.playerId, rosterEntries.playerId))
+      .where(inArray(rosterEntries.teamId, teamRows.map((t) => t.id)));
+    const ids = entries.map((e) => e.playerId);
+    const slotRows = await db
+      .select({ teamId: lineupEntries.teamId, playerId: lineupEntries.playerId, slot: lineupEntries.slot })
+      .from(lineupEntries)
+      .where(and(eq(lineupEntries.week, week), inArray(lineupEntries.teamId, teamRows.map((t) => t.id))));
+    const slotOf = new Map(slotRows.map((r) => [`${r.teamId}:${r.playerId}`, r.slot as string]));
+    const [byes, proj, seasonPts, standings] = await Promise.all([
+      byeWeeks(db, season),
+      weekProjections(db, season, week, ids),
+      seasonPoints(db, season, ids),
+      computeStandings(db),
+    ]);
+    const now = ctx.clock.now();
+    const locked = await lockedPlayerIds(db, ctx.clock, season, week, ids);
+    const gamesThisWeek = await weekGames(db, season, week, now);
+
+    const items = teamRows.map((t) => {
+      const record = standings.find((s) => s.teamId === t.id);
+      const mine = entries
+        .filter((e) => e.teamId === t.id)
+        .map((e) => {
+          const pts = seasonPts.get(e.playerId) ?? 0;
+          const bye = e.nflTeam ? (byes.get(e.nflTeam) ?? null) : null;
+          return {
+            id: e.playerId,
+            name: e.fullName,
+            pos: e.position,
+            ...extraPositions(e.position, e.fantasyPositions),
+            nfl: e.nflTeam,
+            slot: slotOf.get(`${t.id}:${e.playerId}`) ?? "BN",
+            proj: proj.get(e.playerId) ?? null,
+            ...(e.injuryStatus ? { inj: e.injuryStatus } : {}),
+            ...(bye !== null ? { bye } : {}),
+            ...(e.nflTeam !== null && !gamesThisWeek.byTeam.has(e.nflTeam) ? { bye_now: true } : {}),
+            ...(pts > 0 ? { season_pts: pts } : {}),
+            ...(locked.has(e.playerId) ? { locked: true } : {}),
+          };
+        })
+        .sort((a, b) => slotOrder(a.slot) - slotOrder(b.slot) || (b.proj ?? -1) - (a.proj ?? -1));
+      return {
+        team_id: t.id,
+        name: t.name,
+        model: t.modelLabel,
+        ...(ctx.teamId === t.id ? { mine: true } : {}),
+        record: record ? `${record.wins}-${record.losses}${record.ties ? `-${record.ties}` : ""}` : null,
+        players: mine,
+      };
+    });
+    return pageRows(items, args.offset ?? 0, items.length, {
+      week,
+      note: "Starters first, then BN, then IR. inj, bye, season_pts and locked appear only when set.",
+    });
+  },
+);
+
+/** Starting slots in lineup order, then the bench, then IR. */
+function slotOrder(slot: string): number {
+  const i = (STARTING_SLOTS as readonly string[]).indexOf(slot);
+  if (i >= 0) return i;
+  return slot === "IR" ? 100 : 50;
+}
+
 /* ------------------------------------------------------------------ *
  * get_matchup
  * ------------------------------------------------------------------ */
@@ -2011,6 +2122,7 @@ export const READ_TOOLS: LeagueTool[] = [
   getLeagueStateTool,
   getMyTeamTool,
   getTeamRosterTool,
+  getLeagueRostersTool,
   getMatchupTool,
   getTeamWeekResultsTool,
   getPlayerStatsTool,

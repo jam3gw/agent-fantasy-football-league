@@ -48,6 +48,16 @@ export interface ModelStepCost {
  * provider metadata carries it (§8.7 verify); otherwise the price table.
  * Cached input tokens are billed at the cache-read rate, cache writes at the
  * write rate, and neither is also billed as ordinary input.
+ *
+ * Reasoning tokens are a *part* of `outputTokens`, not an addition to it:
+ * the SDK reports the provider's total output and breaks reasoning out as a
+ * detail of it (`output_tokens >= reasoning_tokens` on all 628 price-table
+ * steps on production, 2026-08-30 to 2026-09-04). Billing the reasoning
+ * count again at the output rate — which this did until 2026-09-05 —
+ * overstated every Anthropic, OpenAI and xAI step by 8% overall and 15% on
+ * Fable ($7.09 across those rows, repriced; docs/BUILD_LOG.md). A model that
+ * prices reasoning *differently* from output pays the difference on those
+ * tokens, and only that.
  */
 export async function computeStepCost(
   db: EngineDb,
@@ -72,7 +82,9 @@ export async function computeStepCost(
     (usage.cachedInputTokens * (p.cachedInputUsdPerM ?? p.inputUsdPerM)) / 1_000_000 +
     (cacheWrite * p.inputUsdPerM * CACHE_WRITE_INPUT_MULTIPLIER) / 1_000_000 +
     (usage.outputTokens * p.outputUsdPerM) / 1_000_000 +
-    (usage.reasoningTokens * (p.reasoningUsdPerM ?? p.outputUsdPerM)) / 1_000_000;
+    (Math.min(usage.reasoningTokens, usage.outputTokens) *
+      ((p.reasoningUsdPerM ?? p.outputUsdPerM) - p.outputUsdPerM)) /
+      1_000_000;
   return { costUsd: round6(cost), source: "price_table" };
 }
 
