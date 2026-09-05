@@ -71,8 +71,22 @@ reporter's opinion and not league state; the zod cap of 12 mirrors the
 league's fixed size (§2) while the engine checks against the real team count.
 
 **Today's edition.** Jake asked for a ranking now, since the draft and six
-trades are in. Booked `reporter.run` with kind `reporter_power_rankings` on
-production after the deploy; the result is on `/` and `/report`.
+trades are in. After the production deploy (migration 0007 applied by the
+build; `/api/healthz` ok) I booked `reporter.run` with kind
+`reporter_power_rankings` — the same row `/admin/jobs` "Book a job" writes.
+Job 2126 ran on the next tick and booked session 2261 (key
+`...:1:job2126`); the sweeper started it and it ended on
+`publish_power_rankings` after 5 tool calls. Two of them were invalid, both
+handled by the §8.8 nudge: the first sent the arguments as a JSON string
+instead of an object, the second ran two reasons past the 400-character
+cap. The cap stays — the reasons it then published run 250–400 characters
+and read as one or two dense sentences, which is what the page wants.
+Preseason edition, week 1: The Gibbs Sample first ("the deepest, most
+talented 15 in the league"), The Gibbs Factor twelfth (fewest projected
+starting points, an empty FLEX, three lateral trades). It named the empty
+FLEX on Five Alarm Spark too, and Moonshot Marauders' twenty lineup flips
+in an hour — the kind of reason the formula could never have given. Live
+on `/` and `/report` once the 300 s cache turned over.
 
 ## 2026-09-05 — Sitemap: dropped the `/players` index URL
 
