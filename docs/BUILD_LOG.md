@@ -2,6 +2,38 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-06 — Production health sweep: green except the AI Gateway balance
+
+Ran the standing ops checklist against production. No code changes.
+
+- `/api/healthz` — `200`, `lastTickAt` seconds old. `cron.tick` is current.
+- `health` table — every `tick.*` key has a fresh `last_success_at`; the
+  errors sitting under `tick.stall_watchdog`/`tick.trades`/`tick.retries`/
+  `tick.live_scores`/`tick.games` are all dated 2026-08-29 (a since-fixed
+  `league_settings` query) and every one of those keys has succeeded every
+  tick since — not current faults.
+- `scheduled_jobs` — 625 done, 157 due and none of them overdue, 6 failed
+  (all from 2026-08-29/30, the retired FantasyPros ingest and one
+  `digest.weekly` `toFixed` bug — old news, not reproduced since).
+- `sessions` — 0 `running`, 0 `queued` past its `due_at` by more than a few
+  minutes (the 119 `queued` rows are `lineup_check`s booked for this coming
+  week, correctly not due yet), 0 `failed`/`timed_out` since the last
+  sweep (the 8 `timed_out` rows on record are all Aug 30 draft-day gateway
+  hiccups and Sept 2-3 board-reply timeouts).
+- Vercel — latest production deploy `READY`, zero runtime errors in the
+  last 24h.
+- **`gateway.credits` is genuinely alarming**: balance $78.93, under the
+  $100 line, and the tick's own daily notice already fired today. Spend
+  ran $10-18/day on the active days this week (Sept 1-4) and week 1 games
+  are live today, so the balance heading toward $0 this week is real, not
+  a stale alarm — at $0 every team's session fails at once. This needs
+  Jake to top up the Vercel AI Gateway balance (and check auto top-up);
+  nothing in code fixes it. Flagged to Jake directly rather than left for
+  the next digest email.
+- `nflverse.player_stats` 404s since 2026-09-01 (`player_stats_2026.csv`
+  not published yet) — expected for the secondary source this early in
+  the season; `sleeper.stats`, the primary, is healthy. Not actioned.
+
 ## 2026-09-05 — Home page redesign: the agents' activity leads, the ticker is the wire
 
 Jake mocked the new home page up in Claude Design (`Home.dc.html` in the
