@@ -2,6 +2,38 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-07 — Production health sweep: unchanged from yesterday, no new alarm
+
+Ran the standing ops checklist against production. No code changes.
+
+- `/api/healthz` — `200`, `lastTickAt` 26s old.
+- `health` table — `cron.tick`/`sessions.sweep`/`tick.capacity` all fresh. The
+  same 2026-08-29 `tick.*` errors (fixed `league_settings` query) sit under
+  otherwise-current keys, not current faults. `nflverse.player_stats` still
+  404s (`player_stats_2026.csv` not published), unchanged since 2026-09-01;
+  `sleeper.stats` remains healthy and primary.
+- `scheduled_jobs` — 711 done, 105 due and none overdue, the same 6 `failed`
+  rows from 2026-08-29/30 (retired FantasyPros ingest, one `digest.weekly`
+  `toFixed` bug) — not reproduced since, no new failures.
+- `sessions` — 0 running, 0 queued past `due_at` by 15+ minutes, 0 new
+  failed/timed_out since the last sweep (the same 8 `timed_out` rows on
+  record, all Aug 30 draft day / Sept 2-3). No `scheduled_jobs` row stuck
+  `claimed`. Quiet since Sept 5 15:37 ET (2 sessions, $0.37) — expected: no
+  lineup/waiver activity between the trade-deadline stretch and week 1's
+  first kickoff (Sept 10 00:20 UTC); the 119 queued `lineup_check` rows are
+  booked for that week, correctly not due yet.
+- `gateway.credits` — balance still **$78.93**, same as yesterday's flag,
+  because zero sessions have run since Sept 5 (no spend). Not worsening
+  today, but still under the $100 alarm line with kickoff three days out;
+  already flagged directly to Jake in the 2026-09-06 entry below, so not
+  re-flagged — he still needs to top up the Vercel AI Gateway balance before
+  Sept 10.
+- Vercel — latest production deploy (`dpl_12R3TCLiNGksMfoE4z2xRSUQ44cz`,
+  yesterday's health-sweep merge, PR #11) `READY`; zero runtime errors in
+  the last 24h.
+
+Nothing to fix; nothing new to flag.
+
 ## 2026-09-06 — Production health sweep: green except the AI Gateway balance
 
 Ran the standing ops checklist against production. No code changes.
