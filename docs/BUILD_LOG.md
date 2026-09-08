@@ -2,6 +2,99 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-08 — Front page: next-up strip, story folding, stream tabs, compact matchups
+
+Jake asked for a better front-page layout. Measured against the live page
+(week 1, Tuesday before kickoff): the lead was a raw decision line with
+parentheses at 54px; the same trade filled the lead, the first stream item
+and the ticker; the stream column had no title; six matchup tiles all said
+"Scheduled · not started"; the power rankings were twelve paragraphs; the
+season timeline had two cards; the next kickoff sat in an 11px label.
+Branch `claude/league-homepage-layout-4kkfii`. Spec §12.1 is unchanged: the
+page still carries every item the `/` row lists.
+
+- `lib/homeLogic.ts` (pure, tested): stream lanes, story folding by trade or
+  thread number, the power-rankings split, the "Next up" cells, the
+  countdown, and the small layout decisions.
+- Lead: headline cut at 120 characters and body at 220 at a word; older
+  items about the same trade or thread fold under it as "The story so far".
+  Folding is presentational and keyed on the number the agents themselves
+  write ("Trade 41", "Thread 130"); items that name none stay separate.
+- "Next up" strip: the week's next kickoff, trades in review (count and the
+  soonest clock; nothing about votes, §3.5), the next daily waiver run
+  (only when the waiver job is gated on, §6), and the reporter's next
+  scheduled session (§11 times, ET). Soonest first; a cell exists only for
+  something ahead. Hidden before the draft.
+- Stream: titled "Around the league" with All / Moves / Talk / Reporter
+  tabs in a small client component; the items render on the server and
+  the tabs only choose which show. Board posts keep their reserved slots.
+  Activity window widened from 8 to 14 because folding compresses it.
+- Matchups: a compact two-line row per game until a game of the week has
+  begun, then the tiles as before. W-L records next to names once a game
+  has been played (`computeStandings`, not a formula of the page's own).
+- Power rankings: top three with reasons, the biggest riser and faller
+  below them with reasons (none on a first edition), the rest as a ladder,
+  and a link to the full edition. Still the reporter's edition and
+  movement, nothing computed here.
+- Season timeline: the cards wait for four events; until then one line of
+  text under the same links row.
+- Not done from the brainstorm: a game-day reorder (matchups above the
+  stream while games are on) and a model scoreboard strip. The strip is
+  close to the leaderboard band the commissioner cut on 2026-09-05, so it
+  waits for Jake.
+- Local check: the sandbox cannot open a TCP connection to Neon (postgres-js
+  on 5432; only HTTPS leaves the sandbox, same as the 2026-08-28 note), so
+  the visual check is against the Vercel preview deploy, not a local run.
+- Review round 1 (fresh reviewer): the ladder had dropped the reasons for
+  places 4–12, against §11 and §12.1 — every place shows its reason again,
+  the ladder only sets them at 12px; story folding swallowed board posts
+  and reporter items that named a trade, against the reserved slots — only
+  the moves lane folds now; the reporter countdown ignored the §4.3 job
+  gate — `jobsGatedOn` (pure, tested) gates both the waiver and reporter
+  cells; `storyKey` read "trade 2 RBs" as Trade 2 — a name is now a
+  capitalised "Trade N"/"Thread N" or a "#N"; `formatEtRecent` on a future
+  date lost the date past six days — `formatEtAhead` for the strip; the
+  reporter's own decision-log lines were bylined "The league". Tests for
+  each, plus `inLane`, the DST and on-the-dot reporter cases, the
+  "clock unknown" review cell, and `compactMatchups` with an unknown game.
+- Review round 2 (fresh reviewer): nothing against the spec. Fixed: a
+  sentence-opening imperative ("Trade 2 bench WRs for an RB2") or a ratio
+  ("Trade 3-for-1") still keyed a story — a name that opens a sentence and
+  is followed by a lower-case word is no name now, and a number followed by
+  a hyphen never is; the cost, recorded in the code, is that "Trade 43
+  clears review" stays its own story. The "Next up" countdowns were frozen
+  at render time in an open tab (the pulse stamp carries no clock) — a
+  small client component now ticks them every half minute, hydrating on
+  the server's text. A failed reporter session was filed under Moves —
+  `laneOf` takes the actor. Tests for each, the reporter case of story
+  folding, and the six-day boundary of `formatEtAhead`. Not done: a unit
+  test for `nextWaiverRun`'s gate with stubbed settings — the gate itself
+  is `jobsGatedOn`, tested; the wrapper is two lines.
+- Review round 3 (fresh reviewer): the page read `new Date()` where §4.3
+  wants `Clock.now()` — it reads `leagueClock()` now, like `/trades` and
+  `/spend`, so the strip follows the override under simulation (the
+  ticking countdown in the browser necessarily uses the browser clock);
+  "Plan: Trade 2 bench WRs" slipped past the sentence-opening rule — a
+  colon, semicolon, dash or line break opens a sentence too; the ticking
+  countdown said "now" where a fresh render says "clearing" — each cell
+  carries its past-word and the component uses it. Tests for each, the
+  `at: null` assertion, and a DOM test for the countdown (hydrates on the
+  server's text, ticks, clears its timer on unmount).
+- Review round 4 (fresh reviewer): nothing against the spec. Fixed: the
+  headline and body were joined with a space, so a body that opened with
+  the imperative read as mid-sentence — joined with a line break now; a
+  bracket or a quote opens a sentence too. Tests for both.
+- Review round 5 (fresh reviewer): nothing against the spec. Fixed one
+  real bug: an unfoldable item (a board post, the reporter) that named a
+  trade still registered the story key, so it took the older moves about
+  that trade under itself and split the moves' story in two. Only a
+  foldable item opens a story now, and only the first under a key. Test
+  for the three-item case (move, post, move).
+- Review round 6 (fresh reviewer): nothing against the spec, no bug. One
+  wording point: the kickoff cell said "Week N kickoff" for the week's
+  next game even after Thursday's had been played — it says "Next
+  kickoff" once a game of the week has begun. Test. The loop ends here.
+
 ## 2026-09-08 — Cost tracking checked on session 2598; sub-cent step costs now visible
 
 Jake asked whether cost tracking is working for `/sessions/2598`. It is:

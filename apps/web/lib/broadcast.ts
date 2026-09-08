@@ -33,10 +33,12 @@ import {
   waiverRuns,
   computeStandings,
   latestPowerRankings,
+  nextWaiverRunTime,
   rankingMovement,
 } from "@league/engine";
 import { db } from "./db";
 import { allTeams, safeRead as safe, settings } from "./queries";
+import { jobsGatedOn } from "./homeLogic";
 import type { EngineDb } from "@league/engine";
 import type { Result } from "./broadcastLogic";
 import {
@@ -463,6 +465,36 @@ export async function nextKickoff(week: number, season: number, now: Date = new 
     [],
   );
   return rows[0]?.at ?? null;
+}
+
+/**
+ * Trades in league review (§3.5): how many, and when the soonest clock ends.
+ * `accepted` is the status of a trade in review; `review_ends_at` is set on
+ * accept. The count is public during review; who voted is not, and this
+ * reads nothing about the votes.
+ */
+export async function tradesInReview(): Promise<{ count: number; soonest: Date | null }> {
+  const rows = await safe(
+    () =>
+      db()
+        .select({ endsAt: trades.reviewEndsAt })
+        .from(trades)
+        .where(eq(trades.status, "accepted"))
+        .orderBy(trades.reviewEndsAt),
+    [],
+  );
+  return { count: rows.length, soonest: rows[0]?.endsAt ?? null };
+}
+
+/**
+ * The next daily waiver run (§3.4), or null when waivers are not running:
+ * before the season's first week the job is gated off (§6, job gating), so
+ * a countdown to a run that will not happen would be a lie.
+ */
+export async function nextWaiverRun(now: Date = new Date()): Promise<Date | null> {
+  const league = await safe(settings, null);
+  if (!league || !jobsGatedOn(league)) return null;
+  return nextWaiverRunTime(league, now);
 }
 
 /* ------------------------------------------------------------------ *
