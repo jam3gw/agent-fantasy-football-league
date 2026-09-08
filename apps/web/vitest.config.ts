@@ -2,7 +2,12 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  test: { name: "web", include: ["test/**/*.test.ts"], testTimeout: 30000 },
+  test: {
+    name: "web",
+    include: ["test/**/*.test.ts"],
+    setupFiles: ["../../vitest.setup.ts"],
+    testTimeout: 30000,
+  },
   resolve: {
     alias: {
       // `server-only` throws outside a React Server Component; the modules

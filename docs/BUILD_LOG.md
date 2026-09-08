@@ -4910,3 +4910,27 @@ every table is 60 ms.
   agent package already did.
 - Full suite: 961 tests, 352 s → 108 s wall on four cores. `optimal.test.ts`
   (17 s, brute force over 250 rosters) is now the slowest file.
+
+## 2026-09-08 — Tests can no longer send email or reach the network
+
+Jake got real "[League]" alarm emails (week not finalized, gateway
+balance, storage budget) at 19:17–19:27 UTC. They came from the
+`watchdogs` and `capacity` tests running inside the Vercel build, which
+has the production `RESEND_API_KEY` and `ALERT_EMAIL_TO`. Locally the
+keys are absent and `sendEmail` returns early, so the suite had never
+shown it.
+
+- `vitest.setup.ts` (root), wired as `setupFiles` in all five project
+  configs: deletes every credential and outbound address from
+  `process.env` (database, gateway, search, Resend, alert email and
+  webhook, admin secrets, site domain, simulation flag) and replaces the
+  global `fetch` with one that throws. Tests that need the network already
+  stub `fetch`; `vi.unstubAllGlobals` restores the throwing one.
+- Verified: the full suite passes with fake production secrets in the
+  environment, and a throwaway test saw the keys gone and `fetch` throw.
+- This retires the CLAUDE.md convention "a test that hits a live API is
+  skipped in CI unless the key is present": no such test exists, and the
+  setup file now strips the keys everywhere.
+- Also fixed in the same push: `countdown.dom.test.ts` failed on Vercel
+  because the build sets `NODE_ENV=production` and React's production
+  build has no `act`. The root vitest config pins `NODE_ENV=test`.
