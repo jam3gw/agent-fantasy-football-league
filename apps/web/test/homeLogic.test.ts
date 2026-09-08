@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  LANE_TABS,
   clusterStories,
   compactMatchups,
   countdown,
+  inLane,
+  jobsGatedOn,
   laneOf,
   nextReporterPost,
   nextUpCells,
@@ -23,7 +26,23 @@ describe("laneOf", () => {
   });
 });
 
+describe("inLane", () => {
+  it("shows everything under All and one lane otherwise", () => {
+    expect(inLane("talk", "all")).toBe(true);
+    expect(inLane("talk", "talk")).toBe(true);
+    expect(inLane("talk", "moves")).toBe(false);
+    expect(LANE_TABS.map(([k]) => k)).toEqual(["all", "moves", "talk", "reporter"]);
+  });
+});
+
 describe("storyKey", () => {
+  it("does not read prose that puts a number after the word as a name", () => {
+    expect(storyKey("I'd trade 2 RBs for a WR1")).toBeNull();
+    expect(storyKey("a 2-for-1 trade 3 days ago")).toBeNull();
+    expect(storyKey("thread 2 of my plan")).toBeNull();
+    expect(storyKey("Trade 41 is the one")).toBe("trade:41");
+    expect(storyKey("see trade #41")).toBe("trade:41");
+  });
   it("reads a trade or thread number out of agent text", () => {
     expect(storyKey("Declined The Gibbs Factor's Trade 41 (Stafford for Bowers)")).toBe("trade:41");
     expect(storyKey("Voted to allow trade #38 between two teams")).toBe("trade:38");
@@ -55,6 +74,14 @@ describe("clusterStories", () => {
     expect(stories[2]!.more).toHaveLength(1);
     expect(stories[1]!.key).toBeNull();
   });
+  it("leaves items the caller marks unfoldable in their own place", () => {
+    const post = { headline: "@Gibbs Trade 41 declined, here is the math", body: "", kind: "board post" };
+    const move = { headline: "Declined Trade 41, no counter.", body: "", kind: "trade response" };
+    const stories = clusterStories([move, post], (i) => i.kind !== "board post");
+    expect(stories).toHaveLength(2);
+    expect(stories[0]!.more).toEqual([]);
+    expect(stories[1]!.lead).toBe(post);
+  });
   it("never folds two keyless items together", () => {
     const stories = clusterStories([item("Waivers ran: no claims"), item("Waivers ran: no claims")]);
     expect(stories).toHaveLength(2);
@@ -78,6 +105,12 @@ describe("splitPower", () => {
     expect(split.riser?.rank).toBe(6);
     expect(split.faller?.rank).toBe(7);
     expect(split.rest.map((r) => r.rank)).toEqual([4, 5, 8]);
+  });
+  it("copes with fewer rows than the top", () => {
+    const split = splitPower([{ rank: 2, move: 0 }, { rank: 1, move: 1 }]);
+    expect(split.top.map((r) => r.rank)).toEqual([1, 2]);
+    expect(split.rest).toEqual([]);
+    expect(split.riser).toBeNull();
   });
   it("has no movers on a first edition", () => {
     const split = splitPower(rows.map((r) => ({ ...r, move: 0 })));
@@ -112,6 +145,14 @@ describe("nextReporterPost", () => {
     const fri = new Date("2026-09-11T14:00:00Z");
     expect(nextReporterPost(fri).label).toBe("power rankings");
   });
+  it("is strictly after now and follows the clock change", () => {
+    // Exactly Tuesday 10:30 AM EDT: the rankings are now, so the recap is next.
+    const onTheDot = new Date("2026-09-08T14:30:00Z");
+    expect(nextReporterPost(onTheDot).label).toBe("weekly recap");
+    // Sunday Nov 1 2026, after the clocks go back: Tuesday 10:30 AM EST is 15:30Z.
+    const afterDst = new Date("2026-11-01T20:00:00Z");
+    expect(nextReporterPost(afterDst).at.toISOString()).toBe("2026-11-03T15:30:00.000Z");
+  });
 });
 
 describe("nextUpCells", () => {
@@ -143,6 +184,18 @@ describe("nextUpCells", () => {
     });
     expect(cells).toEqual([]);
   });
+  it("says so when a review has no clock", () => {
+    const [cell] = nextUpCells({
+      now,
+      week: 1,
+      kickoff: null,
+      waiverRun: null,
+      review: { count: 2, soonest: null },
+      reporter: null,
+      format,
+    });
+    expect(cell).toMatchObject({ label: "2 trades in review", value: "clock unknown", sub: "" });
+  });
   it("keeps a review whose clock has already run out as 'clearing'", () => {
     const [cell] = nextUpCells({
       now,
@@ -162,11 +215,20 @@ describe("layout decisions", () => {
     expect(compactMatchups(["upcoming", "upcoming"])).toBe(true);
     expect(compactMatchups(["upcoming", "live"])).toBe(false);
     expect(compactMatchups(["final", "final"])).toBe(false);
+    expect(compactMatchups(["upcoming", "unknown"])).toBe(false);
     expect(compactMatchups([])).toBe(false);
   });
   it("shows the timeline once it has four cards", () => {
     expect(showTimeline(2)).toBe(false);
     expect(showTimeline(4)).toBe(true);
+  });
+  it("gates the scheduled runs on the season being under way (§4.3)", () => {
+    expect(jobsGatedOn(null)).toBe(false);
+    expect(jobsGatedOn({ phase: "pre_draft", currentWeek: 1, startWeek: 1 })).toBe(false);
+    expect(jobsGatedOn({ phase: "regular", currentWeek: 1, startWeek: 2 })).toBe(false);
+    expect(jobsGatedOn({ phase: "regular", currentWeek: 2, startWeek: 2 })).toBe(true);
+    expect(jobsGatedOn({ phase: "playoffs", currentWeek: 15, startWeek: 1 })).toBe(true);
+    expect(jobsGatedOn({ phase: "complete", currentWeek: 17, startWeek: 1 })).toBe(false);
   });
   it("labels a record once a game has been played", () => {
     expect(recordLabel(undefined)).toBeNull();

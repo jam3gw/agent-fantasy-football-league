@@ -45,6 +45,18 @@ page still carries every item the `/` row lists.
 - Local check: the sandbox cannot open a TCP connection to Neon (postgres-js
   on 5432; only HTTPS leaves the sandbox, same as the 2026-08-28 note), so
   the visual check is against the Vercel preview deploy, not a local run.
+- Review round 1 (fresh reviewer): the ladder had dropped the reasons for
+  places 4–12, against §11 and §12.1 — every place shows its reason again,
+  the ladder only sets them at 12px; story folding swallowed board posts
+  and reporter items that named a trade, against the reserved slots — only
+  the moves lane folds now; the reporter countdown ignored the §4.3 job
+  gate — `jobsGatedOn` (pure, tested) gates both the waiver and reporter
+  cells; `storyKey` read "trade 2 RBs" as Trade 2 — a name is now a
+  capitalised "Trade N"/"Thread N" or a "#N"; `formatEtRecent` on a future
+  date lost the date past six days — `formatEtAhead` for the strip; the
+  reporter's own decision-log lines were bylined "The league". Tests for
+  each, plus `inLane`, the DST and on-the-dot reporter cases, the
+  "clock unknown" review cell, and `compactMatchups` with an unknown game.
 
 ## 2026-09-08 — Production health sweep: unchanged, but kickoff (and spend) resumes tomorrow
 
