@@ -21,6 +21,19 @@ Jake looked at the live page after #17 and asked for three more fixes.
   screens and the list a third of one.
 - Tests for both helpers. Not done: capping the stream at ten items with a
   "more" link — Jake asked for these three.
+- Review round 1 (fresh reviewer): the lead's rejoin read a trailing "…"
+  as the splitter's cut, so an agent's own "and then…" was fused with the
+  next sentence — `splitHeadline` returns `cut` and `cutMidWord` now, the
+  item carries them, and the lead rejoins only on `cut`, without a space
+  when the cut fell inside a word. The sticky column ran past a laptop's
+  viewport with six tiles — sticky only while the list is compact. The
+  `leadText!` assertions became a guard. Tests for the agent's ellipsis,
+  the mid-word join, a body cut at 300, an uncut 120+ headline, and the
+  echo filter's edges (no post, a league line, the two-minute boundary).
+  Noted, no change: a board act's stream item is the post, whose link is
+  the board, not the transcript — board posts carry no session id; the
+  echo survives when the session's decision line lands more than two
+  minutes after the post, or when the post fell out of the query batch.
 
 ### Questions for Jake
 
