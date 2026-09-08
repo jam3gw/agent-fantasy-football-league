@@ -38,6 +38,7 @@ import {
 } from "@league/engine";
 import { db } from "./db";
 import { allTeams, safeRead as safe, settings } from "./queries";
+import { jobsGatedOn } from "./homeLogic";
 import type { EngineDb } from "@league/engine";
 import type { Result } from "./broadcastLogic";
 import {
@@ -492,9 +493,7 @@ export async function tradesInReview(): Promise<{ count: number; soonest: Date |
  */
 export async function nextWaiverRun(now: Date = new Date()): Promise<Date | null> {
   const league = await safe(settings, null);
-  if (!league) return null;
-  const gated = (league.phase === "regular" || league.phase === "playoffs") && league.currentWeek >= league.startWeek;
-  if (!gated) return null;
+  if (!league || !jobsGatedOn(league)) return null;
   return nextWaiverRunTime(league, now);
 }
 

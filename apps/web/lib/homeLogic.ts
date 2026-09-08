@@ -43,13 +43,16 @@ export function inLane(lane: Lane, filter: LaneFilter): boolean {
 
 /**
  * The key a stream item shares with the others about the same thing. Agents
- * name trades and threads by number ("Trade 41", "trade #41", "Thread 130"),
- * so the number is the story. Text that names none is its own story.
+ * name trades and threads by number as a proper noun ("Trade 41", "Thread
+ * 130") or with a hash ("trade #41"), so that number is the story. Prose
+ * that happens to put a number after the word — "trade 2 RBs for a WR1",
+ * "thread 2 of my plan" — is not a name and keys nothing. Text that names
+ * none is its own story.
  */
 export function storyKey(text: string): string | null {
-  const trade = /\btrade\s*#?\s*(\d{1,6})\b/i.exec(text);
+  const trade = /\b(?:Trade\s*#?\s*|trade\s*#\s*)(\d{1,6})\b/.exec(text);
   if (trade) return `trade:${trade[1]}`;
-  const thread = /\bthread\s*#?\s*(\d{1,6})\b/i.exec(text);
+  const thread = /\b(?:Thread\s*#?\s*|thread\s*#\s*)(\d{1,6})\b/.exec(text);
   if (thread) return `thread:${thread[1]}`;
   return null;
 }
@@ -63,17 +66,25 @@ export interface Story<T> {
 }
 
 /**
- * Fold a newest-first list into stories. An item that names a trade or a
- * thread already seen joins that story; every other item opens one. The
- * order of the stories is the order of their newest items, so the list still
- * reads newest first.
+ * Fold a newest-first list into stories. A foldable item that names a trade
+ * or a thread already seen joins that story; every other item opens one.
+ * The order of the stories is the order of their newest items, so the list
+ * still reads newest first.
+ *
+ * `foldable` says which items may join another's story. The page passes
+ * the moves lane only: a board post has a reserved slot in the stream
+ * (SPEC §12.1) and the reporter has its own tab, and either would be lost
+ * as a one-line footnote under a decision that named the same trade.
  */
-export function clusterStories<T extends { headline: string; body: string }>(items: readonly T[]): Story<T>[] {
+export function clusterStories<T extends { headline: string; body: string }>(
+  items: readonly T[],
+  foldable: (item: T) => boolean = () => true,
+): Story<T>[] {
   const stories: Story<T>[] = [];
   const byKey = new Map<string, Story<T>>();
   for (const item of items) {
     const key = storyKey(`${item.headline} ${item.body}`);
-    const open = key === null ? undefined : byKey.get(key);
+    const open = key === null || !foldable(item) ? undefined : byKey.get(key);
     if (open) {
       open.more.push(item);
       continue;
@@ -225,6 +236,19 @@ export function nextUpCells(input: NextUpInput): NextUpCell[] {
 /* ------------------------------------------------------------------ *
  * Small layout decisions
  * ------------------------------------------------------------------ */
+
+/**
+ * SPEC §4.3 job gating: the waiver run, the reporter's sessions and every
+ * agent session run only once the season is under way — the phase is
+ * regular or playoffs and the current week has reached the start week. A
+ * countdown to a run that the gate will skip would be a lie, so the cells
+ * for those runs exist only when this is true. The same rule as `inSeason`
+ * in `lib/jobs.ts`, kept pure here so the page can be tested against it.
+ */
+export function jobsGatedOn(league: { phase: string; currentWeek: number; startWeek: number } | null): boolean {
+  if (!league) return false;
+  return (league.phase === "regular" || league.phase === "playoffs") && league.currentWeek >= league.startWeek;
+}
 
 /** The matchup column is a compact list until any game of the week has begun. */
 export function compactMatchups(statuses: readonly ("final" | "live" | "upcoming" | "unknown")[]): boolean {

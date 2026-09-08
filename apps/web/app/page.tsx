@@ -32,6 +32,7 @@ import {
   LiveDot,
   Nothing,
   Panel,
+  formatEtAhead,
   formatEtRecent,
   formatEtTime,
 } from "@/components/broadcast";
@@ -57,6 +58,7 @@ import {
 import {
   clusterStories,
   compactMatchups,
+  jobsGatedOn,
   laneOf,
   nextReporterPost,
   nextUpCells,
@@ -80,13 +82,16 @@ function chipTone(item: Pick<ActivityItem, "kind" | "bad">): string {
 /**
  * The names an item is signed with. A team's own name and its model; the
  * league for a transaction nobody in particular made; the reporter by name,
- * with the model that writes it.
+ * with the model that writes it. The reporter's own decision-log lines
+ * carry no team and a `reporter_*` kind, and are the reporter's too.
  */
 function byline(
-  item: Pick<ActivityItem, "teamId" | "actor">,
+  item: Pick<ActivityItem, "teamId" | "actor" | "kind">,
   teams: Map<number, { name: string; model: string }>,
 ): { who: string; model: string } {
-  if (item.actor === "reporter") return { who: "The reporter", model: REPORTER_MODEL.label };
+  if (item.actor === "reporter" || (item.teamId === null && item.kind.startsWith("reporter"))) {
+    return { who: "The reporter", model: REPORTER_MODEL.label };
+  }
   if (item.teamId === null) return { who: "The league", model: "" };
   const team = teams.get(item.teamId);
   return team ? { who: team.name, model: team.model } : { who: "A team", model: "" };
@@ -300,9 +305,10 @@ export default async function HomePage() {
 
   const teamsById = new Map(teams.map((t) => [t.id, { name: teamName(t), model: t.modelLabel }]));
   const records = new Map(table.map((r) => [r.teamId, recordLabel(r)]));
-  // Items about one trade or thread fold into one story; the newest story
-  // is the lead, and the older items about it are "the story so far".
-  const [leadStory, ...stories] = clusterStories(activity);
+  // Moves about one trade or thread fold into one story; the newest story
+  // is the lead, and the older items about it are "the story so far". Board
+  // posts and the reporter never fold: they keep their own place and tab.
+  const [leadStory, ...stories] = clusterStories(activity, (item) => laneOf(item.kind) === "moves");
   const lead = leadStory?.lead;
   const leadBy = lead ? byline(lead, teamsById) : null;
   const isLive = live.liveGames > 0;
@@ -314,7 +320,8 @@ export default async function HomePage() {
   const compact = compactMatchups(statuses);
 
   // The strip of what happens next. Nothing in it before the draft: the
-  // draft panel under the lead is the whole story then.
+  // draft panel under the lead is the whole story then. The reporter's
+  // sessions run only under the §4.3 gate, same as the waiver run.
   const nextUp = preDraft
     ? []
     : nextUpCells({
@@ -323,8 +330,8 @@ export default async function HomePage() {
         kickoff,
         waiverRun,
         review,
-        reporter: nextReporterPost(now),
-        format: (d) => formatEtRecent(d, { now, zone: true }),
+        reporter: jobsGatedOn(league) ? nextReporterPost(now) : null,
+        format: (d) => formatEtAhead(d, { now }),
       });
 
   // Before the draft the page carries the draft's state under the lead.
@@ -633,7 +640,9 @@ export default async function HomePage() {
                             <div className="mt-4 text-[11px] font-bold uppercase tracking-[0.1em] text-muted">
                               The rest
                             </div>
-                            <ul className="mt-1 grid grid-cols-1 gap-x-6 sm:grid-cols-2" aria-label="The rest of the rankings">
+                            {/* Every place keeps its reason (§11, §12.1); the
+                                ladder only sets them smaller. */}
+                            <ul className="mt-1" aria-label="The rest of the rankings">
                               {split.rest.map((row) => (
                                 <li
                                   key={row.teamId}
@@ -641,19 +650,20 @@ export default async function HomePage() {
                                 >
                                   <span className="text-[14px] font-bold tabular-nums">{row.rank}</span>
                                   <MoveArrow move={row.move} />
-                                  <span className="min-w-0 truncate text-[14px]">
-                                    <Link href={`/teams/${row.slug}`} className="font-semibold text-foreground hover:text-accent">
+                                  <div className="min-w-0">
+                                    <Link href={`/teams/${row.slug}`} className="text-[14px] font-semibold text-foreground hover:text-accent">
                                       {row.name}
                                     </Link>
                                     <span className="ml-1.5 text-[11px] text-muted">{row.modelLabel}</span>
-                                  </span>
+                                    <div className="mt-0.5 text-[12px] leading-[1.5] text-muted">{row.reason}</div>
+                                  </div>
                                 </li>
                               ))}
                             </ul>
                           </>
                         ) : null}
                         <div className="mt-4">
-                          <CardLink href="/report">All twelve, with the reporter&apos;s reasons</CardLink>
+                          <CardLink href="/report">The full edition on the report page</CardLink>
                         </div>
                       </>
                     );

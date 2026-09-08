@@ -277,6 +277,20 @@ export function formatEtRecent(d: Date, { now = new Date(), zone = false }: { no
   return d.toLocaleString("en-US", { timeZone: ET, month: "short", day: "numeric" });
 }
 
+/**
+ * "Wed 8:20 PM ET" within the week ahead, "Sep 20, 8:20 PM ET" beyond it —
+ * the stamp on something that has not happened yet. `formatEtRecent` reads
+ * the other way: a date ahead of `now` is always "within six days" to it,
+ * so a kickoff two Sundays out would read as this Sunday's.
+ */
+export function formatEtAhead(d: Date, { now = new Date() }: { now?: Date } = {}): string {
+  const clock = d.toLocaleString("en-US", { timeZone: ET, hour: "numeric", minute: "2-digit" });
+  if (d.getTime() - now.getTime() < 6 * 86_400_000) {
+    return `${d.toLocaleString("en-US", { timeZone: ET, weekday: "short" })} ${clock} ET`;
+  }
+  return `${d.toLocaleString("en-US", { timeZone: ET, month: "short", day: "numeric" })}, ${clock} ET`;
+}
+
 /** "Sep 20" — the season timeline's card labels. */
 export function formatEtDay(d: Date): string {
   return d.toLocaleString("en-US", { timeZone: ET, month: "short", day: "numeric" });
