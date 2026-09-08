@@ -1,16 +1,7 @@
-import { fileURLToPath } from "node:url";
-import { PGlite } from "@electric-sql/pglite";
-import { drizzle } from "drizzle-orm/pglite";
-import { migrate } from "drizzle-orm/pglite/migrator";
-import { schema } from "@league/engine";
-
-export type TestDb = ReturnType<typeof drizzle<typeof schema>>;
-
-export async function createTestDb(): Promise<{ db: TestDb; close: () => Promise<void> }> {
-  const client = new PGlite();
-  const db = drizzle(client, { schema });
-  await migrate(db, {
-    migrationsFolder: fileURLToPath(new URL("../../../engine/drizzle", import.meta.url)),
-  });
-  return { db, close: () => client.close() };
-}
+/**
+ * PGlite harness for data tests. The engine package builds one from the real
+ * migrations (one instance per test file, emptied between tests); re-export
+ * it so every package shares the same harness and its speed.
+ */
+export { createTestDb } from "../../../engine/test/helpers/db.ts";
+export type { TestDb } from "../../../engine/test/helpers/db.ts";

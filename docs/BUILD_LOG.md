@@ -4890,3 +4890,23 @@ lint, typecheck, tests and a database-less `next build`.
   `DATABASE_URL`, so a page that throws during prerender still fails the
   deploy.
 - RUNBOOK "If `main` is failing" and a VERIFIED note updated.
+
+## 2026-09-08 — Test suite 352 s → 108 s: one PGlite per test file
+
+Jake asked whether the unit tests could run faster. Vitest already ran
+files in parallel on every core; the time was inside the tests. Forty-two
+files booted a fresh PGlite and ran the migrations in `beforeEach`.
+Measured on this box: booting PGlite is 2–3 s, the migrations on top of it
+are near zero, loading a pre-migrated data dir is 1.4 s, and truncating
+every table is 60 ms.
+
+- `packages/engine/test/helpers/db.ts`: `createTestDb()` boots one
+  instance per file (Vitest isolates files, so a module-level cache is
+  per file) and truncates every table with `restart identity cascade` on
+  each later call. `close` is a no-op. `createTestDb({ isolated: true })`
+  still gives a real second instance; `live.test.ts` uses it for its
+  "un-seeded database" case.
+- `packages/data/test/helpers/db.ts` re-exports the engine helper, as the
+  agent package already did.
+- Full suite: 961 tests, 352 s → 108 s wall on four cores. `optimal.test.ts`
+  (17 s, brute force over 250 rosters) is now the slowest file.
