@@ -163,7 +163,7 @@ describe("computePulseStamp", () => {
   });
 
   it("stamps an un-seeded database rather than throwing", async () => {
-    const fresh = await createTestDb();
+    const fresh = await createTestDb({ isolated: true });
     try {
       expect(await computePulseStamp(fresh.db)).toBe("unseeded");
     } finally {
