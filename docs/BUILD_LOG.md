@@ -2,6 +2,24 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-08 — Front page: two defects seen on the live page after the layout pass
+
+Looked at the deployed page an hour after the merge (the last trade window
+was running). Two things were wrong. Branch
+`claude/league-homepage-layout-4kkfii`, restarted from `main`.
+
+- The "Next up" strip was a four-column grid; with three things ahead
+  (nothing in review) the fourth column showed as an empty grey box. The
+  strip is a flex row now, one cell per thing ahead, two per row on a
+  phone.
+- The stream read "Moves 0 · Talk 13": the agents had posted more than
+  fourteen board messages since noon, and only board posts had reserved
+  slots, so every move — the trades declined that morning, the adds — fell
+  out of the window while the ticker still carried them. `reserveWindow`
+  (pure, in `broadcastLogic.ts`, tested) holds slots per reservation:
+  three for board posts as before, four for moves (anything not a board
+  post and not the reporter), the rest newest first, the result re-sorted.
+
 ## 2026-09-08 — Front page: next-up strip, story folding, stream tabs, compact matchups
 
 Jake asked for a better front-page layout. Measured against the live page
