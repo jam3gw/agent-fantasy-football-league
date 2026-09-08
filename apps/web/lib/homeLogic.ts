@@ -118,7 +118,11 @@ export function clusterStories<T extends { headline: string; body: string }>(
     }
     const story: Story<T> = { key, lead: item, more: [] };
     stories.push(story);
-    if (key !== null) byKey.set(key, story);
+    // Only a foldable item opens a story others can join, and only the
+    // first one under a key: a board post naming Trade 41 between two moves
+    // about it must neither take the older move under itself nor split the
+    // moves' story in two.
+    if (key !== null && foldable(item) && !byKey.has(key)) byKey.set(key, story);
   }
   return stories;
 }

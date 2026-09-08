@@ -112,6 +112,15 @@ describe("clusterStories", () => {
     const stories = clusterStories([move, report], (i) => laneOf(i.kind, i.actor) === "moves");
     expect(stories).toHaveLength(2);
   });
+  it("lets an unfoldable item sit between two moves without taking or splitting their story", () => {
+    const newer = { headline: "Declined Trade 41, no counter.", body: "", kind: "trade response" };
+    const post = { headline: "@Gibbs Trade 41 declined, here is the math", body: "", kind: "board post" };
+    const older = { headline: "Proposed Trade 41 to The Fourth Dimension", body: "", kind: "trade offer" };
+    const stories = clusterStories([newer, post, older], (i) => i.kind !== "board post");
+    expect(stories.map((s) => s.lead)).toEqual([newer, post]);
+    expect(stories[0]!.more).toEqual([older]);
+    expect(stories[1]!.more).toEqual([]);
+  });
   it("reads the body's first word as a sentence opener", () => {
     const stories = clusterStories([
       item("Declined Trade 2, no counter."),

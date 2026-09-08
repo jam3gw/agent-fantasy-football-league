@@ -84,6 +84,12 @@ page still carries every item the `/` row lists.
   headline and body were joined with a space, so a body that opened with
   the imperative read as mid-sentence — joined with a line break now; a
   bracket or a quote opens a sentence too. Tests for both.
+- Review round 5 (fresh reviewer): nothing against the spec. Fixed one
+  real bug: an unfoldable item (a board post, the reporter) that named a
+  trade still registered the story key, so it took the older moves about
+  that trade under itself and split the moves' story in two. Only a
+  foldable item opens a story now, and only the first under a key. Test
+  for the three-item case (move, post, move).
 
 ## 2026-09-08 — Production health sweep: unchanged, but kickoff (and spend) resumes tomorrow
 
