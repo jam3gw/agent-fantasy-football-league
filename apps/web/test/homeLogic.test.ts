@@ -64,6 +64,8 @@ describe("storyKey", () => {
     expect(storyKey("Next move — Trade 2 bench WRs for an RB2")).toBeNull();
     expect(storyKey("Something\nTrade 41 clears review")).toBeNull();
     expect(storyKey("Plan: Trade 41, then waivers")).toBe("trade:41");
+    expect(storyKey("(Trade 2 bench WRs for an RB2)")).toBeNull();
+    expect(storyKey("\"Trade 2 bench WRs\"")).toBeNull();
   });
   it("reads a trade or thread number out of agent text", () => {
     expect(storyKey("Declined The Gibbs Factor's Trade 41 (Stafford for Bowers)")).toBe("trade:41");
@@ -84,7 +86,7 @@ describe("clusterStories", () => {
       item("Secured my QB2 by adding Sam Darnold"),
       item("@The Gibbs Factor Trade 41 declined — the math"),
       item("Voted to allow Trade 38"),
-      item("Thanks for the accept", "Trade 38 is clean need-for-need"),
+      item("Thanks for the accept", "That makes Trade 38 clean need-for-need"),
     ];
     const stories = clusterStories(items);
     expect(stories.map((s) => s.lead.headline)).toEqual([
@@ -109,6 +111,14 @@ describe("clusterStories", () => {
     const move = { headline: "Declined Trade 41, no counter.", body: "", kind: "trade response", actor: "team" as const };
     const stories = clusterStories([move, report], (i) => laneOf(i.kind, i.actor) === "moves");
     expect(stories).toHaveLength(2);
+  });
+  it("reads the body's first word as a sentence opener", () => {
+    const stories = clusterStories([
+      item("Declined Trade 2, no counter."),
+      item("Thinking about the RB room", "Trade 2 bench WRs for an RB2 before Sunday"),
+    ]);
+    expect(stories).toHaveLength(2);
+    expect(stories[0]!.more).toEqual([]);
   });
   it("never folds two keyless items together", () => {
     const stories = clusterStories([item("Waivers ran: no claims"), item("Waivers ran: no claims")]);

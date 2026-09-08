@@ -59,15 +59,16 @@ export function inLane(lane: Lane, filter: LaneFilter): boolean {
  * followed by a lower-case verb — "Trade 43 clears review" — is lost to
  * that last rule; the item stays its own story, which is the safe side.
  * "Opens a sentence" means the text's start, or a sentence end, a colon, a
- * semicolon, a dash or a line break before it: "Plan: Trade 2 bench WRs"
- * is the imperative again. Text that names none is its own story.
+ * semicolon, a dash, a bracket, a quote or a line break before it: "Plan:
+ * Trade 2 bench WRs" is the imperative again. Text that names none is its
+ * own story.
  */
 export function storyKey(text: string): string | null {
   const name = (word: string): string | null => {
     const re = new RegExp(`\\b(?:${word}\\s*#?\\s*|${word.toLowerCase()}\\s*#\\s*)(\\d{1,6})\\b(?!-)`, "g");
     for (const m of text.matchAll(re)) {
       const after = text.slice(m.index + m[0].length);
-      const opensSentence = m.index === 0 || /(?:[.!?:;—–-]|\n)\s*$/.test(text.slice(0, m.index));
+      const opensSentence = m.index === 0 || /(?:[.!?:;—–\-(["'\[]|\n)\s*$/.test(text.slice(0, m.index));
       const hash = m[0].includes("#");
       if (opensSentence && !hash && /^\s+[a-z]/.test(after)) continue;
       return m[1]!;
@@ -107,7 +108,9 @@ export function clusterStories<T extends { headline: string; body: string }>(
   const stories: Story<T>[] = [];
   const byKey = new Map<string, Story<T>>();
   for (const item of items) {
-    const key = storyKey(`${item.headline} ${item.body}`);
+    // A line break, not a space: the body's first word opens a sentence
+    // and must read as one to `storyKey`'s imperative rule.
+    const key = storyKey(`${item.headline}\n${item.body}`);
     const open = key === null || !foldable(item) ? undefined : byKey.get(key);
     if (open) {
       open.more.push(item);

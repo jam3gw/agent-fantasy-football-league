@@ -80,6 +80,10 @@ page still carries every item the `/` row lists.
   carries its past-word and the component uses it. Tests for each, the
   `at: null` assertion, and a DOM test for the countdown (hydrates on the
   server's text, ticks, clears its timer on unmount).
+- Review round 4 (fresh reviewer): nothing against the spec. Fixed: the
+  headline and body were joined with a space, so a body that opened with
+  the imperative read as mid-sentence — joined with a line break now; a
+  bracket or a quote opens a sentence too. Tests for both.
 
 ## 2026-09-08 — Production health sweep: unchanged, but kickoff (and spend) resumes tomorrow
 
