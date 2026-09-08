@@ -22,6 +22,15 @@ Jake looked at the live page after #17 and asked for three more fixes.
 - Tests for both helpers. Not done: capping the stream at ten items with a
   "more" link — Jake asked for these three.
 
+### Questions for Jake
+
+- GitHub Actions has assigned no runner to any run since 18:27 UTC today:
+  `main` at `706be55` waited five minutes and failed with no steps, and
+  every run after it fails in two seconds the same way. This session
+  cannot re-run jobs (403). It looks like the Actions minutes or spending
+  limit on the private repo — please check Settings → Billing → Actions.
+  Until then the merge gate is the local run: lint, typecheck, all tests.
+
 ## 2026-09-08 — Front page: two defects seen on the live page after the layout pass
 
 Looked at the deployed page an hour after the merge (the last trade window
