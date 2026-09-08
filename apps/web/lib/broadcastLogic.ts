@@ -184,6 +184,31 @@ export function newestFirst<T extends { at: Date }>(items: T[], limit: number): 
 }
 
 /**
+ * A newest-first window with slots held for kinds that would otherwise be
+ * crowded out. Each reservation names the items it covers and how many of
+ * the newest of them go in first; the rest of the window fills from
+ * everything left, newest first; and the result is re-sorted so the window
+ * still reads strictly newest-first. An item matched by two reservations is
+ * held once. Reservations are taken in order and can never exceed `limit`.
+ */
+export function reserveWindow<T extends { at: Date }>(
+  items: T[],
+  limit: number,
+  reservations: readonly { match: (item: T) => boolean; slots: number }[],
+): T[] {
+  const held = new Set<T>();
+  for (const { match, slots } of reservations) {
+    const room = Math.max(0, Math.min(slots, limit - held.size));
+    for (const item of newestFirst(items.filter((i) => match(i) && !held.has(i)), room)) held.add(item);
+  }
+  const rest = newestFirst(
+    items.filter((i) => !held.has(i)),
+    Math.max(0, limit - held.size),
+  );
+  return newestFirst([...held, ...rest], limit);
+}
+
+/**
  * Every player id a transaction payload can mention, so a caller can fetch the
  * names in one query before turning payloads into sentences. The key list has
  * to cover what the engine actually writes: waivers.ts uses camelCase

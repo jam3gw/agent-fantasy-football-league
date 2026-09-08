@@ -16,6 +16,7 @@ import {
   gameStatus,
   foldForm,
   newestFirst,
+  reserveWindow,
   plainExcerpt,
   splitHeadline,
   summarizeBody,
@@ -767,5 +768,35 @@ describe("what the wire says", () => {
     expect(describeWaiverRunWire(9, 7)).toBe("Waivers ran: 9 claims, 7 landed");
     expect(describeWaiverRunWire(1, 1)).toBe("Waivers ran: 1 claim, 1 landed");
     expect(describeWaiverRunWire(0, 0)).toBe("Waivers ran: no claims");
+  });
+});
+
+describe("reserveWindow", () => {
+  const at = (iso: string, kind: string) => ({ at: new Date(iso), kind });
+  const post = (h: number) => at(`2026-09-08T${String(h).padStart(2, "0")}:30:00Z`, "board post");
+  const move = (h: number) => at(`2026-09-08T${String(h).padStart(2, "0")}:00:00Z`, "trade response");
+
+  it("holds slots for each reservation and fills the rest newest first", () => {
+    // Fourteen posts newer than every move: without a hold the moves vanish.
+    const posts = Array.from({ length: 14 }, (_, i) => post(10 + i));
+    const moves = [move(9), move(8), move(7), move(6), move(5)];
+    const window = reserveWindow([...posts, ...moves], 14, [
+      { match: (i) => i.kind === "board post", slots: 3 },
+      { match: (i) => i.kind !== "board post", slots: 4 },
+    ]);
+    expect(window).toHaveLength(14);
+    expect(window.filter((i) => i.kind !== "board post").map((i) => i.at.getUTCHours())).toEqual([9, 8, 7, 6]);
+    // Strictly newest first, and the held posts are the newest posts.
+    expect(window.map((i) => i.at.getTime())).toEqual([...window].sort((a, b) => b.at.getTime() - a.at.getTime()).map((i) => i.at.getTime()));
+    expect(window[0]).toBe(posts[13]);
+  });
+
+  it("never exceeds the limit and copes with nothing to hold", () => {
+    const window = reserveWindow([post(10), post(11)], 1, [
+      { match: (i) => i.kind === "board post", slots: 3 },
+      { match: (i) => i.kind !== "board post", slots: 4 },
+    ]);
+    expect(window).toEqual([post(11)]);
+    expect(reserveWindow([], 5, [{ match: () => true, slots: 2 }])).toEqual([]);
   });
 });

@@ -51,6 +51,7 @@ import {
   remainingPoints,
   newestFirst,
   plainExcerpt,
+  reserveWindow,
   splitHeadline,
   teamName,
   transactionPlayerIds,
@@ -251,22 +252,20 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
   /*
    * SPEC 12.1 requires the home page to carry the latest board posts, and this
    * rail is where they live now. A busy hour of transactions could otherwise
-   * push every one of them out of the window, so a few slots are reserved:
-   * the newest board posts go in first, the rest of the window is filled from
-   * everything else, and the result is re-sorted so the rail still reads
-   * strictly newest-first.
+   * push every one of them out of the window, so a few slots are reserved for
+   * the newest board posts. The mirror holds too: on a day the agents post
+   * fourteen board messages in an hour (2026-09-08, the last trade window),
+   * every move — the trades declined, the players added — fell out of the
+   * window and the stream read "Moves 0". So slots are held for the newest
+   * moves as well: anything that is not a board post and not the reporter.
+   * The rest of the window fills from everything else, newest first.
    */
   const RESERVED_BOARD_SLOTS = 3;
-  const boardItems = newestFirst(
-    items.filter((i) => i.kind === "board post"),
-    Math.min(RESERVED_BOARD_SLOTS, limit),
-  );
-  const reserved = new Set(boardItems);
-  const rest = newestFirst(
-    items.filter((i) => !reserved.has(i)),
-    Math.max(0, limit - boardItems.length),
-  );
-  return newestFirst([...boardItems, ...rest], limit);
+  const RESERVED_MOVE_SLOTS = 4;
+  return reserveWindow(items, limit, [
+    { match: (i) => i.kind === "board post", slots: RESERVED_BOARD_SLOTS },
+    { match: (i) => i.kind !== "board post" && i.actor !== "reporter", slots: RESERVED_MOVE_SLOTS },
+  ]);
 }
 
 /* ------------------------------------------------------------------ *
