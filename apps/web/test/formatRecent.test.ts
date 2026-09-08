@@ -41,4 +41,9 @@ describe("formatEtAhead", () => {
     expect(formatEtAhead(new Date("2026-09-28T00:20:00Z"), { now })).toBe("Sun 8:20 PM ET");
     expect(formatEtAhead(new Date("2026-10-05T00:20:00Z"), { now })).toBe("Oct 4, 8:20 PM ET");
   });
+  it("switches to the date at six days, and stamps a past instant with its date form too", () => {
+    expect(formatEtAhead(new Date("2026-10-01T14:13:00Z"), { now })).toBe("Thu 10:13 AM ET");
+    expect(formatEtAhead(new Date("2026-10-01T14:14:00Z"), { now })).toBe("Oct 1, 10:14 AM ET");
+    expect(formatEtAhead(new Date("2026-09-25T13:00:00Z"), { now })).toBe("Fri 9:00 AM ET");
+  });
 });

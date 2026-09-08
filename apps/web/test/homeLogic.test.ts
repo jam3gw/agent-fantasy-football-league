@@ -24,6 +24,10 @@ describe("laneOf", () => {
     expect(laneOf("waiver add")).toBe("moves");
     expect(laneOf("session failed")).toBe("moves");
   });
+  it("files anything the reporter did under the reporter, whatever its kind", () => {
+    expect(laneOf("session failed", "reporter")).toBe("reporter");
+    expect(laneOf("session failed", "team")).toBe("moves");
+  });
 });
 
 describe("inLane", () => {
@@ -40,8 +44,21 @@ describe("storyKey", () => {
     expect(storyKey("I'd trade 2 RBs for a WR1")).toBeNull();
     expect(storyKey("a 2-for-1 trade 3 days ago")).toBeNull();
     expect(storyKey("thread 2 of my plan")).toBeNull();
-    expect(storyKey("Trade 41 is the one")).toBe("trade:41");
+    expect(storyKey("On Trade 41 the answer is no")).toBe("trade:41");
     expect(storyKey("see trade #41")).toBe("trade:41");
+    // The documented loss: a name that opens the sentence ahead of a lower-case verb.
+    expect(storyKey("Trade 41 is the one")).toBeNull();
+  });
+  it("does not read a sentence-opening imperative or a ratio as a name", () => {
+    expect(storyKey("Trade 3-for-1 with Gibbs: McBride and two backs")).toBeNull();
+    expect(storyKey("Trade 2 bench WRs for an RB2")).toBeNull();
+    expect(storyKey("Done. Trade 2 bench WRs for an RB2")).toBeNull();
+    // A hash or punctuation after the number is a name wherever it sits.
+    expect(storyKey("Trade #2 bench WRs")).toBe("trade:2");
+    expect(storyKey("Trade 41, declined.")).toBe("trade:41");
+    expect(storyKey("Trade 38 (Dowdle for Downs) is fair")).toBe("trade:38");
+    expect(storyKey("Trade 41 declined — here is the math")).toBeNull();
+    expect(storyKey("Reviewed Trade 38 as a voter")).toBe("trade:38");
   });
   it("reads a trade or thread number out of agent text", () => {
     expect(storyKey("Declined The Gibbs Factor's Trade 41 (Stafford for Bowers)")).toBe("trade:41");
@@ -81,6 +98,12 @@ describe("clusterStories", () => {
     expect(stories).toHaveLength(2);
     expect(stories[0]!.more).toEqual([]);
     expect(stories[1]!.lead).toBe(post);
+  });
+  it("keeps the reporter's items apart under the page's rule", () => {
+    const report = { headline: "Trade 41 Note: a fair deal", body: "", kind: "reporter", actor: "reporter" as const };
+    const move = { headline: "Declined Trade 41, no counter.", body: "", kind: "trade response", actor: "team" as const };
+    const stories = clusterStories([move, report], (i) => laneOf(i.kind, i.actor) === "moves");
+    expect(stories).toHaveLength(2);
   });
   it("never folds two keyless items together", () => {
     const stories = clusterStories([item("Waivers ran: no claims"), item("Waivers ran: no claims")]);
@@ -170,6 +193,7 @@ describe("nextUpCells", () => {
     });
     expect(cells.map((c) => c.label)).toEqual(["Reporter files", "Waivers run", "2 trades in review", "Week 1 kickoff"]);
     expect(cells[3]!.value).toBe("in 1d 9h");
+    expect(cells[3]!.at).toBe("2026-09-10T00:20:00.000Z");
     expect(cells[2]!.href).toBe("/trades");
   });
   it("drops a past kickoff, an absent waiver run and an empty review", () => {
@@ -206,7 +230,7 @@ describe("nextUpCells", () => {
       reporter: null,
       format,
     });
-    expect(cell).toMatchObject({ label: "Trade in review", value: "clearing" });
+    expect(cell).toMatchObject({ label: "Trade in review", value: "clearing", at: null });
   });
 });
 

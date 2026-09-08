@@ -57,6 +57,19 @@ page still carries every item the `/` row lists.
   reporter's own decision-log lines were bylined "The league". Tests for
   each, plus `inLane`, the DST and on-the-dot reporter cases, the
   "clock unknown" review cell, and `compactMatchups` with an unknown game.
+- Review round 2 (fresh reviewer): nothing against the spec. Fixed: a
+  sentence-opening imperative ("Trade 2 bench WRs for an RB2") or a ratio
+  ("Trade 3-for-1") still keyed a story — a name that opens a sentence and
+  is followed by a lower-case word is no name now, and a number followed by
+  a hyphen never is; the cost, recorded in the code, is that "Trade 43
+  clears review" stays its own story. The "Next up" countdowns were frozen
+  at render time in an open tab (the pulse stamp carries no clock) — a
+  small client component now ticks them every half minute, hydrating on
+  the server's text. A failed reporter session was filed under Moves —
+  `laneOf` takes the actor. Tests for each, the reporter case of story
+  folding, and the six-day boundary of `formatEtAhead`. Not done: a unit
+  test for `nextWaiverRun`'s gate with stubbed settings — the gate itself
+  is `jobsGatedOn`, tested; the wrapper is two lines.
 
 ## 2026-09-08 — Production health sweep: unchanged, but kickoff (and spend) resumes tomorrow
 
