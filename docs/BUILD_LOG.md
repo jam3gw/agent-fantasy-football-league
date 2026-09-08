@@ -2,6 +2,25 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-08 — Cost tracking checked on session 2598; sub-cent step costs now visible
+
+Jake asked whether cost tracking is working for `/sessions/2598`. It is:
+ledger rows, session totals, token columns, team and league rollups, and
+both pages agree with each other, and the gateway's own cost matches the
+price table on all 12 steps (full table in `docs/VERIFIED.md`). This closes
+the §8.7 **verify** on the gateway cost field.
+
+Two things came out of the check:
+
+- Every step on that page read "$0.00" because `money()` rounds to the
+  cent and the Contributor-tier model costs $0.0002–$0.0031 a step. Added
+  `stepMoney` (four places under a cent, two otherwise) for the per-step
+  figure on the transcript and the live thinking card. Totals unchanged.
+- Anthropic steps (Fable 5, Sonnet 5) record `source = price_table`: the
+  gateway reports no cost for them, so the spec's fallback applies. Left
+  as is — the fallback uses the same catalog prices — and noted so nobody
+  reads the `/spend` source column as a billing gap.
+
 ## 2026-09-08 — Production health sweep: unchanged, but kickoff (and spend) resumes tomorrow
 
 Ran the standing ops checklist against production. No code changes.
