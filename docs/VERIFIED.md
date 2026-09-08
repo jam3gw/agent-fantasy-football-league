@@ -420,6 +420,6 @@ Read from the bundled docs at `node_modules/next/dist/docs/` before writing any 
 - **`middleware.ts` → `proxy.ts`.** The named export becomes `proxy`. The `edge` runtime is not supported in `proxy` (it is nodejs, not configurable). Config flags renamed (`skipMiddlewareUrlNormalize` → `skipProxyUrlNormalize`). Commissioner cookie checks therefore live in `proxy.ts` on the Node runtime — which suits us, since the engine needs Node.
 - **`revalidateTag(tag)` now requires a `cacheLife` profile** as a second argument; the one-argument form is a TypeScript error. `updateTag(tag)` is the new Server-Actions-only read-your-writes API.
 - **Turbopack is the default** for `next dev` and `next build`; a custom webpack config makes the build fail rather than silently fall back.
-- **`next lint` was removed** and `next build` no longer lints — CI runs ESLint directly, which this repo already does.
+- **`next lint` was removed** and `next build` no longer lints — the Vercel build runs ESLint directly through `pnpm check`, which this repo already does.
 - **Route handlers are not cached by default**, which is what the public JSON API and `/api/draft/state` need (§12.1 asks for `no-store` on draft state). Page-level `export const revalidate = N` still applies for the 30 s live / 5 min default rendering rule.
 - Node 20.9+ and TypeScript 5.1+ minimums; the Vercel project is Node 24.x, so this is satisfied.
