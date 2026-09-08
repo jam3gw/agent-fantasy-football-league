@@ -417,7 +417,7 @@ export default async function HomePage() {
     <div>
       {/* The lead: the newest thing any agent did, set as the headline. */}
       <Container className="pt-10">
-        {lead ? (
+        {lead && leadText ? (
           <div>
             {/* A failure is the newest thing often enough that the lead must
                 not dress it in the site's "good" green with a live dot. */}
@@ -432,16 +432,16 @@ export default async function HomePage() {
             {/* The whole first sentence, a size down when it is long (see leadHeadline). */}
             <h1
               className={`mt-3 max-w-[900px] text-balance font-extrabold tracking-[-0.035em] ${
-                leadText!.size === "big"
+                leadText.size === "big"
                   ? "text-[clamp(2rem,5vw,50px)] leading-[1.05]"
                   : "text-[clamp(1.5rem,3.4vw,34px)] leading-[1.15]"
               }`}
             >
-              <InlineMarkdown source={leadText!.headline} id="lead-h" />
+              <InlineMarkdown source={leadText.headline} id="lead-h" />
             </h1>
-            {leadText!.body ? (
+            {leadText.body ? (
               <p className="mt-4 max-w-[640px] text-[17px] leading-[1.55] text-muted">
-                <InlineMarkdown source={truncateFlat(leadText!.body, LEAD_BODY_MAX)} id="lead-b" />
+                <InlineMarkdown source={truncateFlat(leadText.body, LEAD_BODY_MAX)} id="lead-b" />
               </p>
             ) : null}
             <div className="mt-3.5 flex flex-wrap items-center gap-x-3.5 gap-y-1">
@@ -538,9 +538,11 @@ export default async function HomePage() {
             </div>
           </div>
 
-          {/* Sticky on a wide screen: the stream runs three screens and the
-              list a third of one, so the games stay in view while it scrolls. */}
-          <div className="lg:sticky lg:top-6">
+          {/* Sticky on a wide screen while the list is compact: the stream
+              runs three screens and the list a third of one, so the games
+              stay in view while it scrolls. Six tiles run past a laptop's
+              viewport, so once a game has begun the column scrolls normally. */}
+          <div className={compact ? "lg:sticky lg:top-6" : ""}>
             <div className="flex items-baseline justify-between gap-3 border-b-2 border-foreground pb-2.5">
               <h2 className="text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">
                 Week {week} matchups

@@ -108,14 +108,18 @@ export const LEAD_HEADLINE_MAX = 200;
  * the wire RB". The lead gets the whole first sentence instead, set a size
  * down when it is long, and is cut only when even that runs past 200.
  */
-export function leadHeadline(item: { headline: string; body: string }): {
+export function leadHeadline(item: { headline: string; body: string; cut: boolean; cutMidWord: boolean }): {
   headline: string;
   body: string;
   size: "big" | "small";
 } {
-  const cut = item.headline.endsWith("…");
-  if (!cut) return { headline: item.headline, body: item.body, size: item.headline.length > LEAD_BIG_MAX ? "small" : "big" };
-  const whole = `${item.headline.slice(0, -1).trimEnd()} ${item.body}`.trim();
+  // `cut` is the splitter's word, not the trailing character: an agent's
+  // own "and then…" ends a sentence and stays as written.
+  if (!item.cut) {
+    return { headline: item.headline, body: item.body, size: item.headline.length > LEAD_BIG_MAX ? "small" : "big" };
+  }
+  const head = item.headline.endsWith("…") ? item.headline.slice(0, -1) : item.headline;
+  const whole = `${item.cutMidWord ? head : `${head.trimEnd()} `}${item.body}`.trim();
   const { headline, body } = splitHeadline(whole, LEAD_HEADLINE_MAX);
   return { headline, body, size: headline.length > LEAD_BIG_MAX ? "small" : "big" };
 }
