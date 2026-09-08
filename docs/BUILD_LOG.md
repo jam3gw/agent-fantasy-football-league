@@ -4589,3 +4589,48 @@ Merged to `main` as `fa7e353` after three review rounds (the third found
 nothing new) and green CI. Production confirmed: `/api/healthz` ok, and the
 client chunk served on `league.jake-moses.com` carries both the event
 vocabulary and the `/admin/` drop in `beforeSend`.
+
+## 2026-09-08 — Session keys carry the booking day; the manual trade window can book a check-in
+
+Jake asked which check-in runs next. The answer came from the production
+database, and two things fell out of it.
+
+**Bug: `sessions.book` was a silent no-op on the second Tuesday and Wednesday
+of Week 1.** `bookSessionsForKind` keyed each session on
+`season:currentWeek:currentWeek`. Week 1 runs from the draft (Aug 30) to the
+first kickoff (Sep 10), so it holds two Tuesdays and two Wednesdays. The
+Sep 1 weekly review and the Sep 2 post-waivers session took the keys
+`…:2026:1:1`; this morning's weekly-review booking (09:00:31, 110 ms) hit the
+same twelve keys, `createSession` skipped every team, and the job reported
+done. Tomorrow's post-waivers booking would have done the same, one day before
+the first kickoff. In season a week holds one of each weekday, so the bug only
+bites in the preseason stretch; it would have bitten again in any week the
+finalization defers.
+
+- Fix: the key suffix now ends in the ET booking day (`etDay(now)`), so the
+  same job re-run within a day is still idempotent and a second weekday in the
+  same week books fresh sessions. Two tests in `tradeWindows.test.ts`: both
+  Wednesdays book, and a same-day re-run books nothing twice.
+- No production data change: tomorrow's 09:00 job fires on the new code once
+  this deploys. This morning's missed weekly review is not re-booked — the
+  next one is Sep 15, after Week 1 finalizes, and the agents get Wednesday's
+  post-waivers session for this week's wire and lineup.
+
+**Trade windows.** Jake asked whether to keep a weekly window or rely on
+agents booking their own, and whether an agent would miss an offer. It would
+not: `trade.proposed` books a `trade_response` for the counterparty at once
+(37 proposals so far, 37 response sessions, none timed out), and a counter is
+a new proposal back the other way. What nothing triggers is the first look.
+Decision (Jake, 2026-09-08): no scheduled window. He opens one last manual
+`trade_window` for every team from `/admin/teams`, and that session tells the
+agents the league opens no more, that offers still wake them, and that a look
+at the market is a check-in they book.
+
+- The `trade_window` tool set gains `schedule_check_in`, `cancel_check_in`
+  and `list_check_ins`; without them the brief would tell an agent to book a
+  check-in it could not book. Spec §8.6 and §8.10 updated, `toolsets.test.ts`
+  extended.
+- `briefs/trade_window.md` rewritten: the announcement, plus a step that says
+  to book a check-in now for another look this week. Regenerated.
+- The scratchpad scan (12 teams) found seven agents deferring trade moves to
+  the "next trade session". They will read the new rule in that window.

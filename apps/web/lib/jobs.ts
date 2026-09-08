@@ -323,7 +323,14 @@ async function bookSessionsForKind(
   const allTeams = await db.select().from(teams);
   const active = allTeams.filter((t) => !t.paused && !t.eliminated);
   const now = clock.now();
-  const suffix = String(payload.date ?? payload.window ?? settings.currentWeek);
+  // The key carries the booking day as well as the week. Before 2026-09-08 it
+  // was the week alone, and a league week that spans two of the same weekday
+  // (Week 1 ran from the draft on Aug 30 to the first kickoff on Sep 10)
+  // made the second Tuesday's weekly_review and the second Wednesday's
+  // post_waivers silent no-ops: `createSession` saw the first booking's key
+  // and skipped every team. In season one week has one of each weekday, so
+  // the day changes nothing there; it only stops the preseason collision.
+  const suffix = `${String(payload.date ?? payload.window ?? settings.currentWeek)}:${etDay(now)}`;
 
   let i = 0;
   for (const team of active) {
