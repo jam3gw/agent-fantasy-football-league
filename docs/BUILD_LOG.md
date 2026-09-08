@@ -4992,9 +4992,15 @@ shown it.
   across all 51 branches (329 commits parsed, 120 author/committer fields
   now carry the gmail address, none carry the old one). Every branch was
   force-pushed with a lease on its previous tip.
-- `main` moved from `bfac7732ab38` to `abadc76f6dd7`. Anyone with a clone
+- `main` moved from `bfac7732ab38` to `706be55`. Anyone with a clone
   must reset to the new history (`git fetch && git reset --hard
   origin/main`); no pull requests were open at the time.
+- Mistake during the rewrite, fixed within minutes: the session's clone
+  carried a stale local `main` from Sept 4 (`77d32ae`). The rewrite pushed
+  that old tip (`abadc76`, 85 commits behind) over `main` for a few minutes,
+  and production deployed it. `main` was then fast-forwarded to the rewritten
+  Sept 8 tip (`706be55`, the same tree as `bfac773`), which redeployed. No
+  data changed; the front-end briefly served the Sept 4 build.
 - The 14 GitHub-made merge commits lost their "Verified" badge, since GitHub
   signs only commits it creates. Vercel deployments made before this note
   keep the old commit hashes and the old author; deployments are immutable.
