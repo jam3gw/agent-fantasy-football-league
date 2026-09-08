@@ -17,9 +17,9 @@ import { useLiveWatched } from "@/lib/useLiveWatched";
 import useSWR from "swr";
 import { LiveDot } from "@/components/broadcast";
 import { SessionFacts, SessionHeader, SessionTranscript } from "@/components/session-view";
-import { Empty } from "@/components/ui";
+import { Empty, money } from "@/components/ui";
 import type { SessionSummaryData, SessionTeamData, TranscriptEvent } from "@/components/transcript";
-import { compactTokens, formatSeconds, groupSteps, stepMoney, toDate } from "@/lib/sessionTranscript";
+import { compactTokens, formatSeconds, groupSteps, toDate } from "@/lib/sessionTranscript";
 
 interface LiveResponse {
   session: SessionSummaryData;
@@ -76,7 +76,7 @@ function ThinkingCard({
         <span className="text-[14px] font-semibold text-accent">Thinking</span>
         {elapsed ? <span className="text-[13px] tabular-nums text-muted">{elapsed}</span> : null}
         <span className="ml-auto text-[12px] tabular-nums text-muted">
-          {stepMoney(costUsd)} · {compactTokens(tokens)} tokens
+          {money(costUsd)} · {compactTokens(tokens)} tokens
         </span>
       </div>
       {stream.reasoning !== "" ? (

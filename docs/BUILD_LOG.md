@@ -14,8 +14,11 @@ Two things came out of the check:
 
 - Every step on that page read "$0.00" because `money()` rounds to the
   cent and the Contributor-tier model costs $0.0002–$0.0031 a step. Added
-  `stepMoney` (four places under a cent, two otherwise) for the per-step
-  figure on the transcript and the live thinking card. Totals unchanged.
+  `stepMoney` (four places under a cent, "<$0.0001" below that, two
+  otherwise) for the per-step figure on the transcript. Totals unchanged,
+  including the live thinking card, which shows the session's running
+  total — a fresh-context review caught the first draft applying the step
+  formatter there.
 - Anthropic steps (Fable 5, Sonnet 5) record `source = price_table`: the
   gateway reports no cost for them, so the spec's fallback applies. Left
   as is — the fallback uses the same catalog prices — and noted so nobody
