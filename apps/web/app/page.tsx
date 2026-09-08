@@ -332,6 +332,7 @@ export default async function HomePage() {
         now,
         week,
         kickoff,
+        weekBegun: cards.length > 0 && !compact,
         waiverRun,
         review,
         reporter: jobsGatedOn(league) ? nextReporterPost(now) : null,

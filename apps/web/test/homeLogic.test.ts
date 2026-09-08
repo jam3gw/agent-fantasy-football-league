@@ -210,6 +210,7 @@ describe("nextUpCells", () => {
       now,
       week: 1,
       kickoff: new Date("2026-09-10T00:20:00Z"),
+      weekBegun: false,
       waiverRun: new Date("2026-09-09T08:30:00Z"),
       review: { count: 2, soonest: new Date("2026-09-09T14:27:00Z") },
       reporter: { at: new Date("2026-09-08T15:00:00Z"), label: "weekly recap" },
@@ -226,6 +227,7 @@ describe("nextUpCells", () => {
       now,
       week: 1,
       kickoff: new Date("2026-09-08T00:20:00Z"),
+      weekBegun: false,
       waiverRun: null,
       review: { count: 0, soonest: null },
       reporter: null,
@@ -238,6 +240,7 @@ describe("nextUpCells", () => {
       now,
       week: 1,
       kickoff: null,
+      weekBegun: false,
       waiverRun: null,
       review: { count: 2, soonest: null },
       reporter: null,
@@ -245,11 +248,25 @@ describe("nextUpCells", () => {
     });
     expect(cell).toMatchObject({ label: "2 trades in review", value: "clock unknown", sub: "", at: null });
   });
+  it("calls the kickoff the week's start only until a game has begun", () => {
+    const [cell] = nextUpCells({
+      now,
+      week: 1,
+      kickoff: new Date("2026-09-13T17:00:00Z"),
+      weekBegun: true,
+      waiverRun: null,
+      review: { count: 0, soonest: null },
+      reporter: null,
+      format,
+    });
+    expect(cell!.label).toBe("Next kickoff");
+  });
   it("keeps a review whose clock has already run out as 'clearing'", () => {
     const [cell] = nextUpCells({
       now,
       week: 1,
       kickoff: null,
+      weekBegun: false,
       waiverRun: null,
       review: { count: 1, soonest: new Date("2026-09-08T14:00:00Z") },
       reporter: null,
