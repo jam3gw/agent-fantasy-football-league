@@ -669,6 +669,20 @@ describe("a headline out of an agent's paragraph", () => {
   it("returns an empty headline for text that is all fenced code, for the caller to fill", () => {
     expect(splitHeadline("```\ncode\n```")).toMatchObject({ headline: "", body: "" });
   });
+
+  it("says whether the ellipsis is its own cut, and whether that cut fell inside a word", () => {
+    expect(splitHeadline("Moved Rice into the FLEX over Jennings.")).toMatchObject({ cut: false, cutMidWord: false });
+    expect(splitHeadline("I weighed it and then… I let it go, for the whole of the window and more besides than that.")).toMatchObject({
+      cut: false,
+    });
+    const words = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
+    expect(splitHeadline(`${words}.`)).toMatchObject({ cut: true, cutMidWord: false });
+    // A 120-character run of one word is cut inside it.
+    expect(splitHeadline("a".repeat(120))).toMatchObject({ cut: true, cutMidWord: true });
+    // A cut that retreats to a bold token's start follows a space: not inside a word.
+    const bold = "Declined: **Trade 41 from Five Alarm, the one with Stevenson and Purdy for Kelce and Reed at prio 12** and so on.";
+    expect(splitHeadline(bold)).toMatchObject({ cut: true, cutMidWord: false });
+  });
 });
 
 describe("truncating text that is already one line", () => {

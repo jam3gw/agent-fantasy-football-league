@@ -120,7 +120,14 @@ export function leadHeadline(item: { headline: string; body: string; cut: boolea
   }
   const head = item.headline.endsWith("…") ? item.headline.slice(0, -1) : item.headline;
   const whole = `${item.cutMidWord ? head : `${head.trimEnd()} `}${item.body}`.trim();
-  const { headline, body } = splitHeadline(whole, LEAD_HEADLINE_MAX);
+  // The first sentence of the rejoined text, not all of it: the splitter
+  // hands back everything under its cap unsplit, so the cap is held just
+  // under the text's length to make it look for the sentence end. A text
+  // whose only sentence end is its last character is then cut at a word;
+  // when it fits the lead's cap anyway, it is the headline whole.
+  const split = splitHeadline(whole, Math.min(LEAD_HEADLINE_MAX, Math.max(1, whole.length - 1)));
+  const { headline, body } =
+    split.cut && whole.length <= LEAD_HEADLINE_MAX ? { headline: whole, body: "" } : split;
   return { headline, body, size: headline.length > LEAD_BIG_MAX ? "small" : "big" };
 }
 

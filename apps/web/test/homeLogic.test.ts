@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { splitHeadline } from "@/lib/broadcastLogic";
 import {
   LANE_TABS,
   RESERVED_BOARD_SLOTS,
@@ -87,6 +88,11 @@ describe("dropBoardEchoes", () => {
     expect(dropBoardEchoes([post, before, tooEarly, league])).toEqual([post, tooEarly, league]);
     expect(dropBoardEchoes([{ kind: "board reply", teamId: 9, at: at("2026-09-08T16:16:00Z") }])).toHaveLength(1);
   });
+  it("drops a decision line that landed before its post", () => {
+    const echo = { kind: "board reply", teamId: 4, at: at("2026-09-08T16:15:00Z") };
+    const post = { kind: "board post", teamId: 4, at: at("2026-09-08T16:16:30Z") };
+    expect(dropBoardEchoes([post, echo])).toEqual([post]);
+  });
 });
 
 describe("leadHeadline", () => {
@@ -116,6 +122,26 @@ describe("leadHeadline", () => {
     expect(out.headline).toBe(`${first} is 11.76 minus the wire RB I can't reach at prio 12, so I was paying 3.6 of insurance.`);
     expect(out.body).toBe("A deal that fails my own test.");
     expect(out.size).toBe("small");
+  });
+  it("takes the first sentence of the rejoined text, not all of it", () => {
+    const text = "Traded for Amon-Ra St. Brown because the WR room needed a real one for the stretch run and the price was a bench RB. Body sentence here.";
+    const stream = splitHeadline(text);
+    expect(stream.cut).toBe(true);
+    const out = leadHeadline({ ...stream });
+    expect(out.headline).toBe("Traded for Amon-Ra St. Brown because the WR room needed a real one for the stretch run and the price was a bench RB.");
+    expect(out.body).toBe("Body sentence here.");
+  });
+  it("rejoins at a bold token's start with the space it had", () => {
+    const text = "Declined: **Trade 41 from Five Alarm, the one with Stevenson and Purdy for Kelce and Reed at prio 12** and I said so.";
+    const stream = splitHeadline(text);
+    expect(stream).toMatchObject({ cut: true, cutMidWord: false });
+    const out = leadHeadline({ ...stream });
+    expect(out.headline).toBe(text);
+  });
+  it("sets the size by the thresholds exactly", () => {
+    const at120 = `${"x".repeat(119)}.`;
+    expect(leadHeadline({ headline: at120, body: "", ...uncut }).size).toBe("big");
+    expect(leadHeadline({ headline: `${at120}y`, body: "", ...uncut }).size).toBe("small");
   });
   it("rejoins a cut inside a word without a space", () => {
     const out = leadHeadline({ headline: "See https://example.com/a-very-long-path-that-goes-on-and…", body: "on-and-on/end for the note.", cut: true, cutMidWord: true });
