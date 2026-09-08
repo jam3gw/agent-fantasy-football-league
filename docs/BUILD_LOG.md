@@ -28,6 +28,13 @@ was running). Two things were wrong. Branch
   both and for the overlap case. Noted, no change: held moves about one
   trade still fold under the lead as "the story so far", so the Moves tab
   can read a smaller number than the window holds.
+- Review round 2 (fresh reviewer): the decision log is one table for every
+  session kind, so the fourteen-row cap on that source could be all
+  `board_reply` lines before the window's holds ran — it is read as two
+  sources now, the board kinds and the rest, each with its own cap. The
+  reservation list moved into `activityWindow` (pure, `homeLogic.ts`) so
+  the wiring itself is tested: a board reply takes no move slot, the
+  reporter's failed session is not a move, the newest item is the lead.
 
 ## 2026-09-08 — Front page: next-up strip, story folding, stream tabs, compact matchups
 

@@ -5,6 +5,7 @@
  * reading in full and the ladder, and what goes in the "Next up" strip.
  */
 import { nextEtWeekdayTime } from "@league/shared";
+import { reserveWindow } from "./broadcastLogic";
 import { countdown } from "./countdown";
 
 export { countdown };
@@ -41,6 +42,33 @@ export function laneOf(kind: string, actor?: "team" | "league" | "reporter"): La
 
 export function inLane(lane: Lane, filter: LaneFilter): boolean {
   return filter === "all" || lane === filter;
+}
+
+/* ------------------------------------------------------------------ *
+ * The activity window — what the stream gets to show
+ * ------------------------------------------------------------------ */
+
+export const RESERVED_BOARD_SLOTS = 3;
+export const RESERVED_MOVE_SLOTS = 4;
+
+/**
+ * The stream's window out of everything the agents did, newest first, with
+ * slots held so one kind cannot crowd the others out. SPEC §12.1 reserves
+ * slots for board posts; the mirror holds too — on 2026-09-08 the agents
+ * posted fourteen board messages in an hour and the stream read "Moves 0"
+ * while the ticker still carried the morning's trades — so slots are held
+ * for the newest moves as well, by the same rule the Moves tab counts them.
+ * The newest item of all goes in first, whatever it is: it is the lead.
+ */
+export function activityWindow<T extends { at: Date; kind: string; actor: "team" | "league" | "reporter" }>(
+  items: T[],
+  limit: number,
+): T[] {
+  return reserveWindow(items, limit, [
+    { match: () => true, slots: 1 },
+    { match: (i) => i.kind === "board post", slots: RESERVED_BOARD_SLOTS },
+    { match: (i) => laneOf(i.kind, i.actor) === "moves", slots: RESERVED_MOVE_SLOTS },
+  ]);
 }
 
 /* ------------------------------------------------------------------ *
