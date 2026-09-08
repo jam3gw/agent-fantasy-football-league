@@ -21,7 +21,6 @@ import Link from "next/link";
 import { formatEt } from "@league/shared";
 import { formatEtClock } from "@/components/broadcast";
 import { Json } from "@/components/transcript";
-import { money } from "@/components/ui";
 import {
   type KnownPlayer,
   type Outcome,
@@ -37,6 +36,7 @@ import {
   objects,
   playerLabel,
   stepAnchor,
+  stepMoney,
   stepSummary,
   stepTitle,
   str,
@@ -574,7 +574,7 @@ export function StepCard({
           </span>
         ) : null}
         <span className="ml-auto flex shrink-0 items-center gap-2.5 text-[12px] tabular-nums text-faint">
-          {step.costUsd !== null ? <span title="cost of this model step">{money(step.costUsd)}</span> : null}
+          {step.costUsd !== null ? <span title="cost of this model step">{stepMoney(step.costUsd)}</span> : null}
           {at ? (
             <time dateTime={at.toISOString()} title={formatEt(at)}>
               {formatEtClock(at)}
