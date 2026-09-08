@@ -117,6 +117,7 @@ export const SETS: Record<SessionKind, string[]> = {
   ],
   trade_window: [
     ...READ_ONLY_NO_PAD,
+    ...CHECK_IN,
     "propose_trade",
     "respond_to_trade",
     "cancel_trade",

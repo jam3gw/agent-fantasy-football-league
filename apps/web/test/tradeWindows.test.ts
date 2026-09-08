@@ -53,6 +53,31 @@ describe("no scheduled trade window (§2, 2026-09-05)", () => {
   });
 });
 
+describe("sessions.book keys carry the booking day", () => {
+  /*
+   * Week 1 ran from the draft (Aug 30) to the first kickoff (Sep 10), so it
+   * held two Wednesdays. The key used to be the week alone, and the second
+   * Wednesday's post_waivers booking matched the first one's key for every
+   * team: `createSession` skipped all twelve and the job reported success.
+   * The same happened to the second Tuesday's weekly_review.
+   */
+  it("books post_waivers on both Wednesdays of a week that spans two", async () => {
+    await runJob(db, new FixedClock("2026-09-02T13:00:00Z"), "sessions.book", { kind: "post_waivers" });
+    await runJob(db, new FixedClock("2026-09-09T13:00:00Z"), "sessions.book", { kind: "post_waivers" });
+    const rows = await db.select().from(sessions);
+    expect(rows.length).toBe(24);
+    expect(new Set(rows.map((r) => r.idempotencyKey)).size).toBe(24);
+    expect(rows.every((r) => r.kind === "post_waivers" && r.status === "queued")).toBe(true);
+  });
+
+  it("stays idempotent within a day, so a re-run tick books nothing twice", async () => {
+    const clock = new FixedClock("2026-09-08T13:00:00Z");
+    await runJob(db, clock, "sessions.book", { kind: "weekly_review" });
+    await runJob(db, clock, "sessions.book", { kind: "weekly_review" });
+    expect((await db.select().from(sessions)).length).toBe(12);
+  });
+});
+
 describe("prices.sync job (§8.7)", () => {
   it("fails loudly when the catalog cannot be read, and writes a health row when it can", async () => {
     const clock = new FixedClock("2026-09-07T07:00:00Z");
