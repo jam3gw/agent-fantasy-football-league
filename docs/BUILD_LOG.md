@@ -2,6 +2,47 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-08 — Front page: two defects seen on the live page after the layout pass
+
+Looked at the deployed page an hour after the merge (the last trade window
+was running). Two things were wrong. Branch
+`claude/league-homepage-layout-4kkfii`, restarted from `main`.
+
+- The "Next up" strip was a four-column grid; with three things ahead
+  (nothing in review) the fourth column showed as an empty grey box. The
+  strip is a flex row now, one cell per thing ahead, two per row on a
+  phone.
+- The stream read "Moves 0 · Talk 13": the agents had posted more than
+  fourteen board messages since noon, and only board posts had reserved
+  slots, so every move — the trades declined that morning, the adds — fell
+  out of the window while the ticker still carried them. `reserveWindow`
+  (pure, in `broadcastLogic.ts`, tested) holds slots per reservation:
+  three for board posts as before, four for moves (anything not a board
+  post and not the reporter), the rest newest first, the result re-sorted.
+- Review (fresh reviewer): the move hold used its own rule where the Moves
+  tab uses `laneOf` — a "board reply" decision is talk to the tab and was
+  a move to the hold, so a hot board hour could fill the move slots with
+  replies and read "Moves 0" again; the hold uses `laneOf` now. A window
+  smaller than the holds' total could drop the newest item of all, which
+  is the lead — the newest item is held first, whatever it is. Tests for
+  both and for the overlap case. Noted, no change: held moves about one
+  trade still fold under the lead as "the story so far", so the Moves tab
+  can read a smaller number than the window holds.
+- Review round 2 (fresh reviewer): the decision log is one table for every
+  session kind, so the fourteen-row cap on that source could be all
+  `board_reply` lines before the window's holds ran — it is read as two
+  sources now, the board kinds and the rest, each with its own cap. The
+  reservation list moved into `activityWindow` (pure, `homeLogic.ts`) so
+  the wiring itself is tested: a board reply takes no move slot, the
+  reporter's failed session is not a move, the newest item is the lead.
+- Review round 3 (fresh reviewer): nothing new. It ran the two decision
+  queries against a PGlite database seeded with every session kind:
+  `like 'board%'` returns `board_reply` alone, `notLike` the other twelve,
+  and `kind` is NOT NULL so nothing is lost. Not done: a DB-backed test of
+  the split — `leagueActivity` reads `db()` rather than taking an
+  `EngineDb`, so the test needs the injection `readLastMove(db)` has;
+  the pure window is tested and the query was checked as above.
+
 ## 2026-09-08 — Front page: next-up strip, story folding, stream tabs, compact matchups
 
 Jake asked for a better front-page layout. Measured against the live page

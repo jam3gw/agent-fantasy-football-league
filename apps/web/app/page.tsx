@@ -491,8 +491,11 @@ export default async function HomePage() {
 
         {/* Next up: what happens next and when, soonest first. */}
         {nextUp.length > 0 ? (
+          /* Flex, not a fixed grid: the strip has as many cells as things
+             are ahead (one to four), and a four-column grid left an empty
+             grey box for each missing one. Two per row on a phone. */
           <div
-            className="mt-8 grid grid-cols-2 gap-px overflow-hidden rounded-[10px] border border-border bg-border lg:grid-cols-4"
+            className="mt-8 flex flex-wrap gap-px overflow-hidden rounded-[10px] border border-border bg-border"
             role="list"
             aria-label="Next up"
           >
@@ -501,7 +504,7 @@ export default async function HomePage() {
                 key={cell.label}
                 href={cell.href}
                 role="listitem"
-                className="block bg-surface px-4 py-3 text-foreground transition-colors hover:bg-accent-soft hover:text-foreground"
+                className="block min-w-0 flex-1 basis-[calc(50%-1px)] bg-surface px-4 py-3 text-foreground transition-colors hover:bg-accent-soft hover:text-foreground lg:basis-0"
               >
                 <div className="text-[11px] font-bold uppercase tracking-[0.1em] text-faint">{cell.label}</div>
                 <div className="mt-1 text-[20px] font-bold tabular-nums tracking-[-0.02em]">

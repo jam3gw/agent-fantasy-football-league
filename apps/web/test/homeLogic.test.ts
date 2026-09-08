@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   LANE_TABS,
+  RESERVED_BOARD_SLOTS,
+  RESERVED_MOVE_SLOTS,
+  activityWindow,
   clusterStories,
   compactMatchups,
   countdown,
@@ -36,6 +39,31 @@ describe("inLane", () => {
     expect(inLane("talk", "talk")).toBe(true);
     expect(inLane("talk", "moves")).toBe(false);
     expect(LANE_TABS.map(([k]) => k)).toEqual(["all", "moves", "talk", "reporter"]);
+  });
+});
+
+describe("activityWindow", () => {
+  const stamp = (h: number, m = 0) => new Date(`2026-09-08T${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:00Z`);
+  const post = (h: number, m = 0) => ({ at: stamp(h, m), kind: "board post", actor: "team" as const });
+  const reply = (h: number, m = 0) => ({ at: stamp(h, m), kind: "board reply", actor: "team" as const });
+  const move = (h: number, m = 0) => ({ at: stamp(h, m), kind: "trade response", actor: "team" as const });
+  const failedReporter = (h: number) => ({ at: stamp(h), kind: "session failed", actor: "reporter" as const });
+
+  it("holds moves by the Moves tab's rule: a board reply is talk and takes no move slot", () => {
+    const talk = [...Array.from({ length: 8 }, (_, i) => post(15, 59 - i)), ...Array.from({ length: 8 }, (_, i) => reply(15, 40 - i))];
+    const moves = [move(9), move(8), move(7), move(6), move(5)];
+    const window = activityWindow([...talk, ...moves, failedReporter(4)], 14);
+    expect(window).toHaveLength(14);
+    expect(window.filter((i) => i.kind === "trade response")).toHaveLength(RESERVED_MOVE_SLOTS);
+    expect(window.filter((i) => i.kind === "board post").length).toBeGreaterThanOrEqual(RESERVED_BOARD_SLOTS);
+    // The reporter's failure is the reporter's, not a move, and the moves outrank it for the held slots.
+    expect(window.some((i) => i.actor === "reporter")).toBe(false);
+  });
+
+  it("always carries the newest item, which is the lead", () => {
+    const newest = reply(16);
+    const window = activityWindow([newest, ...Array.from({ length: 10 }, (_, i) => move(10 - i))], 3);
+    expect(window[0]).toBe(newest);
   });
 });
 

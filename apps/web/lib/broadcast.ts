@@ -9,7 +9,7 @@ import "server-only";
  * every derivation that involves a judgement call says what it assumes.
  */
 import { cache } from "react";
-import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, like, notLike, sql } from "drizzle-orm";
 import {
   STARTING_SLOTS,
   boardPosts,
@@ -38,7 +38,7 @@ import {
 } from "@league/engine";
 import { db } from "./db";
 import { allTeams, safeRead as safe, settings } from "./queries";
-import { jobsGatedOn } from "./homeLogic";
+import { activityWindow, jobsGatedOn } from "./homeLogic";
 import type { EngineDb } from "@league/engine";
 import type { Result } from "./broadcastLogic";
 import {
@@ -94,26 +94,32 @@ export interface ActivityItem {
  * Thursday morning. Its older posts stay in the stream.
  *
  * Each source is limited before the merge, so a chatty week on the board
- * cannot starve the others out of the window.
+ * cannot starve the others out of the window; the decision log counts as
+ * two sources for that reason, its board kinds and the rest.
  */
 export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
   const each = Math.max(limit, 8);
-  const [decisions, posts, txns, failures, reports] = await Promise.all([
-    safe(
-      () =>
-        db()
-          .select({
-            at: decisionLogs.createdAt,
-            teamId: decisionLogs.teamId,
-            sessionId: decisionLogs.sessionId,
-            kind: decisionLogs.kind,
-            summary: decisionLogs.summary,
-          })
-          .from(decisionLogs)
-          .orderBy(desc(decisionLogs.createdAt))
-          .limit(each),
-      [],
-    ),
+  // The decision log is one table for every session kind, so a board_reply
+  // session's line and a trade_response session's line share it. Read the
+  // board kinds and the rest as two sources, each with its own cap, or an
+  // hour of board replies would push every trade decision out before the
+  // window's holds ever see one.
+  const decisionQuery = (boardKinds: boolean) =>
+    db()
+      .select({
+        at: decisionLogs.createdAt,
+        teamId: decisionLogs.teamId,
+        sessionId: decisionLogs.sessionId,
+        kind: decisionLogs.kind,
+        summary: decisionLogs.summary,
+      })
+      .from(decisionLogs)
+      .where(boardKinds ? like(decisionLogs.kind, "board%") : notLike(decisionLogs.kind, "board%"))
+      .orderBy(desc(decisionLogs.createdAt))
+      .limit(each);
+  const [moveDecisions, boardDecisions, posts, txns, failures, reports] = await Promise.all([
+    safe(() => decisionQuery(false), []),
+    safe(() => decisionQuery(true), []),
     safe(
       () =>
         db()
@@ -193,6 +199,7 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
       body: truncateFlat(body, max),
     };
   };
+  const decisions = [...moveDecisions, ...boardDecisions];
   const items: ActivityItem[] = [
     ...decisions.map((d) => ({
       at: d.at,
@@ -248,25 +255,7 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
     })),
   ];
 
-  /*
-   * SPEC 12.1 requires the home page to carry the latest board posts, and this
-   * rail is where they live now. A busy hour of transactions could otherwise
-   * push every one of them out of the window, so a few slots are reserved:
-   * the newest board posts go in first, the rest of the window is filled from
-   * everything else, and the result is re-sorted so the rail still reads
-   * strictly newest-first.
-   */
-  const RESERVED_BOARD_SLOTS = 3;
-  const boardItems = newestFirst(
-    items.filter((i) => i.kind === "board post"),
-    Math.min(RESERVED_BOARD_SLOTS, limit),
-  );
-  const reserved = new Set(boardItems);
-  const rest = newestFirst(
-    items.filter((i) => !reserved.has(i)),
-    Math.max(0, limit - boardItems.length),
-  );
-  return newestFirst([...boardItems, ...rest], limit);
+  return activityWindow(items, limit);
 }
 
 /* ------------------------------------------------------------------ *
