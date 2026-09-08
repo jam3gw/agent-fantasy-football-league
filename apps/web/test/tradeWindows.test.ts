@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
-import { health, initLeagueSettings, scheduledJobs, sessions, updateSettings } from "@league/engine";
+import { health, initLeagueSettings, scheduledJobs, sessions, teams, updateSettings } from "@league/engine";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
 import { makeGame, seedTeams } from "../../../packages/engine/test/helpers/factories";
 import { bookRecurringJobs, runJob } from "../lib/jobs";
@@ -115,9 +115,25 @@ describe("the commissioner's one-off trade window for every team (2026-09-08)", 
     const rows = await db.select().from(sessions);
     expect(rows.length).toBe(12);
     expect(rows.every((r) => r.kind === "trade_window" && r.idempotencyKey.endsWith(":final-2026-09-08"))).toBe(true);
-    // Without the label the retired path still books nothing.
+    // Without the label, or with an empty one, the retired path still books nothing.
     await runJob(db, clock, "sessions.book", { kind: "trade_window" });
+    await runJob(db, clock, "sessions.book", { kind: "trade_window", window: "  " });
     expect((await db.select().from(sessions)).length).toBe(12);
+  });
+
+  it("carries the commissioner's note into every session's context, and skips a paused team", async () => {
+    const clock = new FixedClock("2026-09-08T16:00:00Z");
+    const [paused] = await db.select({ id: teams.id }).from(teams).limit(1);
+    await db.update(teams).set({ paused: true }).where(eq(teams.id, paused!.id));
+    await runJob(db, clock, "sessions.book", {
+      kind: "trade_window",
+      window: "final-2026-09-08",
+      note: "This is the last window the league opens for everyone.",
+    });
+    const rows = await db.select().from(sessions);
+    expect(rows.length).toBe(11);
+    expect(rows.some((r) => r.teamId === paused!.id)).toBe(false);
+    expect(rows.every((r) => r.context.note === "This is the last window the league opens for everyone.")).toBe(true);
   });
 });
 

@@ -4644,13 +4644,19 @@ at the market is a check-in they book.
   extended.
 - `briefs/trade_window.md` rewritten: the announcement, plus a step that says
   to book a check-in now for another look this week. Regenerated.
-- Opening the window: `/admin/teams` runs one session per click, and this
-  session has no commissioner credential, so a `sessions.book` row with
-  `{kind: "trade_window", window: "<label>"}` now books one `trade_window`
-  per active team, keyed on the label (a row without a label still books
-  nothing, as since 2026-09-05). The label path ignores the under-way rule:
-  it is the commissioner's explicit act. Spec §9.1. The row for the last
-  window is inserted into production `scheduled_jobs` once this deploys.
+- Opening the window: `/admin/teams` runs one session per click, so
+  `/admin/jobs` → Book a job → `sessions.book` / `trade_window` now takes a
+  window label and an optional note and books one `trade_window` per active
+  team, keyed on the label (a row without a label still books nothing, as
+  since 2026-09-05). The label path ignores the under-way rule: it is the
+  commissioner's explicit act. The note rides `context.note` into the brief
+  ("From the commissioner: …"), so the brief itself stays true for any later
+  hand-opened window and the "no more windows" announcement is made once.
+  Spec §9.1, RUNBOOK. This session has no commissioner credential, so the
+  row for the last window (label `final-2026-09-08`, with the note) was
+  inserted into production `scheduled_jobs` by hand after the deploy —
+  the same row the form writes, minus the `job_booked` audit entry. That is
+  recorded here in its place.
 - The scratchpad scan (12 teams) found seven agents deferring trade moves to
   the "next trade session". They will read the new rule in that window.
   Three of them already hold 3 pending check-ins (Third & Grok) or 2, so a
@@ -4664,3 +4670,12 @@ at the market is a check-in they book.
   `/about` row; the stall comments in `tick.ts` and `watchdogs.test.ts`; an
   engine test that a `trade_window` booking is accepted; the brief's first
   line now matches §2 ("the league schedules no trade windows").
+- Review round 2 (fresh reviewer): the brief had hard-coded "this is the
+  last one", which every later hand-opened window would repeat — moved to
+  the note; the label path was reachable only by a SQL insert — now a form
+  field on `/admin/jobs` with an audit entry; an empty label is refused;
+  the `date` bypass nobody set is gone (only a labelled `trade_window` skips
+  the under-way rule); RUNBOOK's stall paragraph and a recovery step for a
+  finalization fixed after Tuesday 9:00 AM; tests for the note and for a
+  paused team. Not changed: `sessions.book` still trusts `payload.kind`
+  (admin-only, pre-existing).

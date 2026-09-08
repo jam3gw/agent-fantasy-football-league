@@ -944,7 +944,7 @@ Recurring job table (ET):
 | `prices.sync` | Mon 3:00 AM | refresh `model_prices` from the gateway catalog (Section 8.7); an id the catalog no longer lists keeps its last price |
 | `sessions.weekly_review` | Tue 9:00 AM | one session per active team, staggered 1 minute apart; once per ET day, and skipped once the current week's first kickoff has passed (a deferred or stalled week books nothing, Section 13.4) |
 | `sessions.post_waivers` | Wed 9:00 AM | one session per active team, staggered; same once-per-day and under-way rules |
-| `sessions.trade_window` | not booked (retired 2026-09-05; a row already queued books nothing when it fires). A row that names a `window` label is the commissioner opening one window for every active team at once (added 2026-09-08 for the last window, whose brief announces there are no more); it is keyed on the label and ignores the under-way rule | — |
+| `sessions.trade_window` | not booked (retired 2026-09-05; a row already queued books nothing when it fires). A row that names a `window` label is the commissioner opening one window for every active team at once, from `/admin/jobs` (added 2026-09-08 for the last league-wide window); it is keyed on the label, ignores the under-way rule, and an optional `note` is appended to every team's brief | — |
 | `ingest.stats` | game days (Thu–Mon), every 30 min while no game is live | Section 5.3 (the per-minute live poll runs from the tick while a game is live) |
 | `reporter.power_rankings` | Tue 10:30 AM | one `power_rankings` edition, before the recap |
 | `reporter.recap` | Tue 11:00 AM | one post: the week's recap |

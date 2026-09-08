@@ -163,9 +163,9 @@ export async function runJob(
       // row queued before the change books nothing when it fires, and no admin
       // path books a new one; /admin/teams opens a window by hand. The one
       // exception (2026-09-08) is a row that names its `window`: that is the
-      // commissioner opening a window for every team at once — used for the
-      // last window, whose brief announces that the league opens no more.
-      if (String(payload.kind) === "trade_window" && typeof payload.window !== "string") {
+      // commissioner opening a window for every team at once from /admin/jobs
+      // — used for the last window, with a note that the league opens no more.
+      if (String(payload.kind) === "trade_window" && !windowLabel(payload)) {
         console.warn("sessions.book: scheduled trade windows are retired (§2, 2026-09-05); nothing booked");
         return;
       }
@@ -339,12 +339,16 @@ async function bookSessionsForKind(
   // (§13.4 relies on that Tuesday creating nothing). So a recurring booking
   // is skipped once the current week's first kickoff has passed: the week is
   // under way, and its weekly_review and post_waivers have already run.
-  const recurring = payload.window === undefined && payload.date === undefined;
-  if (recurring && (await weekUnderWay(db, settings.season, settings.currentWeek, now))) {
+  const label = kind === "trade_window" ? windowLabel(payload) : null;
+  if (label === null && (await weekUnderWay(db, settings.season, settings.currentWeek, now))) {
     console.warn(`sessions.book: week ${settings.currentWeek} is under way (its first kickoff has passed); ${kind} not booked`);
     return;
   }
-  const suffix = String(payload.date ?? payload.window ?? etDay(now));
+  const suffix = label ?? etDay(now);
+  // The commissioner's note rides the labelled window into the brief, the way
+  // an objective rides a manual session (§8.6), so the brief itself stays
+  // true for every window and the announcement is made once.
+  const note = label !== null && typeof payload.note === "string" && payload.note.trim() ? payload.note.trim() : null;
 
   const allTeams = await db.select().from(teams);
   const active = allTeams.filter((t) => !t.paused && !t.eliminated);
@@ -359,10 +363,15 @@ async function bookSessionsForKind(
       modelId: team.modelId,
       dueAt: new Date(now.getTime() + i * 60_000),
       now,
-      context: { week: settings.currentWeek },
+      context: { week: settings.currentWeek, ...(note ? { note } : {}) },
     });
     i++;
   }
+}
+
+/** The label on a commissioner-booked `trade_window` row, or null when the row has none (or an empty one). */
+function windowLabel(payload: Record<string, unknown>): string | null {
+  return typeof payload.window === "string" && payload.window.trim() ? payload.window.trim() : null;
 }
 
 /** True once the week's first NFL game has kicked off. A week with no games recorded is not under way. */
