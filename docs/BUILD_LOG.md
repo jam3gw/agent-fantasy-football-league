@@ -35,6 +35,13 @@ was running). Two things were wrong. Branch
   reservation list moved into `activityWindow` (pure, `homeLogic.ts`) so
   the wiring itself is tested: a board reply takes no move slot, the
   reporter's failed session is not a move, the newest item is the lead.
+- Review round 3 (fresh reviewer): nothing new. It ran the two decision
+  queries against a PGlite database seeded with every session kind:
+  `like 'board%'` returns `board_reply` alone, `notLike` the other twelve,
+  and `kind` is NOT NULL so nothing is lost. Not done: a DB-backed test of
+  the split — `leagueActivity` reads `db()` rather than taking an
+  `EngineDb`, so the test needs the injection `readLastMove(db)` has;
+  the pure window is tested and the query was checked as above.
 
 ## 2026-09-08 — Front page: next-up strip, story folding, stream tabs, compact matchups
 
