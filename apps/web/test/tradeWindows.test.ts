@@ -6,9 +6,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
-import { health, initLeagueSettings, scheduledJobs, sessions } from "@league/engine";
+import { health, initLeagueSettings, scheduledJobs, sessions, teams, updateSettings } from "@league/engine";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
-import { seedTeams } from "../../../packages/engine/test/helpers/factories";
+import { makeGame, seedTeams } from "../../../packages/engine/test/helpers/factories";
 import { bookRecurringJobs, runJob } from "../lib/jobs";
 
 let db: TestDb;
@@ -50,6 +50,90 @@ describe("no scheduled trade window (§2, 2026-09-05)", () => {
     const rows = await db.select().from(sessions);
     expect(rows.length).toBe(12);
     expect(rows.every((r) => r.kind === "post_waivers")).toBe(true);
+  });
+});
+
+describe("sessions.book keys carry the booking day", () => {
+  /*
+   * Week 1 ran from the draft (Aug 30) to the first kickoff (Sep 10), so it
+   * held two Wednesdays. The key used to be the week alone, and the second
+   * Wednesday's post_waivers booking matched the first one's key for every
+   * team: `createSession` skipped all twelve and the job reported success.
+   * The same happened to the second Tuesday's weekly_review.
+   */
+  it("books post_waivers on both Wednesdays of a week that spans two", async () => {
+    await runJob(db, new FixedClock("2026-09-02T13:00:00Z"), "sessions.book", { kind: "post_waivers" });
+    await runJob(db, new FixedClock("2026-09-09T13:00:00Z"), "sessions.book", { kind: "post_waivers" });
+    const rows = await db.select().from(sessions);
+    expect(rows.length).toBe(24);
+    expect(new Set(rows.map((r) => r.idempotencyKey)).size).toBe(24);
+    expect(rows.every((r) => r.kind === "post_waivers" && r.status === "queued")).toBe(true);
+  });
+
+  it("stays idempotent within a day, so a re-run tick books nothing twice", async () => {
+    const clock = new FixedClock("2026-09-08T13:00:00Z");
+    await runJob(db, clock, "sessions.book", { kind: "weekly_review" });
+    await runJob(db, clock, "sessions.book", { kind: "weekly_review" });
+    expect((await db.select().from(sessions)).length).toBe(12);
+  });
+
+  it("books a fresh set when the week advances, so in season every Tuesday books", async () => {
+    await runJob(db, new FixedClock("2026-09-15T13:00:00Z"), "sessions.book", { kind: "weekly_review" });
+    await updateSettings(db, { currentWeek: 2 });
+    await runJob(db, new FixedClock("2026-09-22T13:00:00Z"), "sessions.book", { kind: "weekly_review" });
+    const rows = await db.select().from(sessions);
+    expect(rows.length).toBe(24);
+    expect(rows.filter((r) => r.context.week === 2).length).toBe(12);
+  });
+
+  /*
+   * §13.4: a finalization that defers (a game moved) or stalls leaves
+   * `current_week` in place. That week's review and post-waivers already ran;
+   * the next Tuesday must not book twelve more against a week whose result is
+   * not final. The signal is the week's first kickoff: once it has passed,
+   * the recurring bookings are done for that week.
+   */
+  it("books nothing for a week already under way (deferred or stalled finalization)", async () => {
+    await makeGame(db, { week: 1, kickoffAt: new Date("2026-09-10T00:20:00Z"), home: "NE", away: "SEA" });
+    await makeGame(db, { week: 1, kickoffAt: new Date("2026-09-13T17:00:00Z"), home: "TEN", away: "NYJ" });
+    // Wednesday 9 AM ET, before the week's first kickoff: books.
+    await runJob(db, new FixedClock("2026-09-09T13:00:00Z"), "sessions.book", { kind: "post_waivers" });
+    expect((await db.select().from(sessions)).length).toBe(12);
+    // The next Tuesday and Wednesday with the week still current: nothing.
+    await runJob(db, new FixedClock("2026-09-15T13:00:00Z"), "sessions.book", { kind: "weekly_review" });
+    await runJob(db, new FixedClock("2026-09-16T13:00:00Z"), "sessions.book", { kind: "post_waivers" });
+    expect((await db.select().from(sessions)).length).toBe(12);
+  });
+});
+
+describe("the commissioner's one-off trade window for every team (2026-09-08)", () => {
+  it("a sessions.book row naming a window label books one trade_window per active team, keyed on the label", async () => {
+    await makeGame(db, { week: 1, kickoffAt: new Date("2026-09-01T00:00:00Z"), home: "NE", away: "SEA" }); // under way: no effect here
+    const clock = new FixedClock("2026-09-08T16:00:00Z");
+    await runJob(db, clock, "sessions.book", { kind: "trade_window", window: "final-2026-09-08" });
+    await runJob(db, clock, "sessions.book", { kind: "trade_window", window: "final-2026-09-08" });
+    const rows = await db.select().from(sessions);
+    expect(rows.length).toBe(12);
+    expect(rows.every((r) => r.kind === "trade_window" && r.idempotencyKey.endsWith(":final-2026-09-08"))).toBe(true);
+    // Without the label, or with an empty one, the retired path still books nothing.
+    await runJob(db, clock, "sessions.book", { kind: "trade_window" });
+    await runJob(db, clock, "sessions.book", { kind: "trade_window", window: "  " });
+    expect((await db.select().from(sessions)).length).toBe(12);
+  });
+
+  it("carries the commissioner's note into every session's context, and skips a paused team", async () => {
+    const clock = new FixedClock("2026-09-08T16:00:00Z");
+    const [paused] = await db.select({ id: teams.id }).from(teams).limit(1);
+    await db.update(teams).set({ paused: true }).where(eq(teams.id, paused!.id));
+    await runJob(db, clock, "sessions.book", {
+      kind: "trade_window",
+      window: "final-2026-09-08",
+      note: "This is the last window the league opens for everyone.",
+    });
+    const rows = await db.select().from(sessions);
+    expect(rows.length).toBe(11);
+    expect(rows.some((r) => r.teamId === paused!.id)).toBe(false);
+    expect(rows.every((r) => r.context.note === "This is the last window the league opens for everyone.")).toBe(true);
   });
 });
 

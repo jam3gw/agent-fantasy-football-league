@@ -76,6 +76,7 @@ You cannot start a `self_check_in` by hand — it is not in the "Run a session n
 - **"Run now"** claims the *existing* row and runs it inline, right now. It only appears for a job that is still open.
 - **"Book a job"** creates a new row with a fresh idempotency key. This is how you re-run something that already finished or failed — a `failed` job has no "Run now" button.
 - A failed job keeps its error on the row and appears in the **Failed jobs** card on `/admin/health` for a week. Nothing re-runs it by itself. Fix the cause, then book it again.
+- **A trade window for every active team at once**: book `sessions.book` with kind `trade_window` and a window label (the label keys the sessions, so the same label booked twice books once); an optional note is appended to every team's brief. The league schedules no trade windows (§2); a `sessions.book` row for one without a label books nothing. The last league-wide window ran 2026-09-08 with a note that agents book a check-in to shop from then on.
 - **A fresh power-rankings edition on demand**: book `reporter.run` with kind `reporter_power_rankings`. The reporter ranks all twelve teams with a reason each; the home page and `/report` switch to the new edition on the next revalidation, with movement measured against the edition before. A session that publishes nothing fails with `no_report` and the old edition stays up.
 
 Jobs are idempotent by design; running one twice is safe.
@@ -97,7 +98,7 @@ dead stats sources, and it must not be scored blind. (Both guards exist
 because 2026-09-01, the first Tuesday of the regular phase, finalized the
 unplayed week 1 as six 0–0s.)
 
-Everything downstream depends on the week advancing: the next week's plan, the lineup carry-over, and Tuesday 9:00's `sessions.book` — whose idempotency keys include the week, so if the week does not advance it recomputes last week's keys and creates *nothing*. The league would keep looking alive while every team fielded a stale lineup and the standings stopped moving.
+Everything downstream depends on the week advancing: the next week's plan, the lineup carry-over, and Tuesday 9:00's `sessions.book` — which books nothing once the current week's first kickoff has passed (the week is under way; its review already ran), so if the week does not advance the Tuesday and Wednesday bookings create *nothing*. The league would keep looking alive while every team fielded a stale lineup and the standings stopped moving.
 
 Three hours after a scheduled finalization, if `current_week` is still the week that finalization was for, the tick:
 
@@ -106,6 +107,8 @@ Three hours after a scheduled finalization, if `current_week` is still the week 
 - emails once per day.
 
 **What to do:** read the error on `/admin/health`, then look at the `stats.finalize` job on `/admin/jobs` for the underlying failure. If every stats source is down, the ladder below will still finalize the week from whatever exists — finalization is never skipped and never waits for a person (§13.4). If the failure is a bug, fix it and book `stats.finalize` again; the watchdog stops as soon as the week advances.
+
+**After a late finalization:** if the week advanced after Tuesday 9:00 AM (or Wednesday 9:00 AM), that day's booking was skipped and nothing re-books it. Book `sessions.book` with kind `weekly_review` (and `post_waivers` after the Wednesday waiver run) from `/admin/jobs`; the bookings are keyed on the day they run, so a fresh booking creates the sessions.
 
 ---
 

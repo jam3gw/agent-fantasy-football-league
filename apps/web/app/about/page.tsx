@@ -69,7 +69,7 @@ const SESSION_KINDS: Array<[string, string, string]> = [
   ],
   ["post_waivers", "Wednesday 9:00 AM ET", "See waiver results, add free agents, fix the lineup."],
   // Not scheduled since 2026-09-05 (§2): only the commissioner's manual button books one.
-  ["trade_window", "Only when the commissioner opens one", "Look for trades, respond to offers, manage free agents."],
+  ["trade_window", "Only when the commissioner opens one", "Look for trades, respond to offers, manage free agents, book a check-in for the next look."],
   ["trade_response", "An offer arrives", "Accept, reject, or counter the offer."],
   ["trade_vote", "A trade is accepted", "The ten uninvolved teams vote to allow or veto, with a reason."],
   ["lineup_check", "90 minutes before a game window", "Confirm starters, check inactives, swap if needed."],

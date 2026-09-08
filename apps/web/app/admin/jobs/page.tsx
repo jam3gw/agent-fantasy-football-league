@@ -36,6 +36,8 @@ const JOB_KINDS = [
   "reporter_draft_grades",
   "weekly_review",
   "post_waivers",
+  // A window for every active team at once; needs the label below (§9.1, 2026-09-08).
+  "trade_window",
 ];
 
 export default async function AdminJobsPage({
@@ -146,6 +148,14 @@ export default async function AdminJobsPage({
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-muted">Window label (required for a trade_window; keys the sessions, e.g. final-2026-09-08)</span>
+              <input name="window" type="text" maxLength={60} className="w-full rounded border border-border bg-background px-2 py-1.5 font-mono text-xs" />
+            </label>
+            <label className="block">
+              <span className="mb-1 block text-muted">Note to every team (optional, trade_window only — appended to the brief)</span>
+              <textarea name="note" rows={3} maxLength={500} className="w-full rounded border border-border bg-background px-2 py-1.5" />
             </label>
             <button type="submit" className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-background hover:opacity-90">
               Book for now

@@ -4623,3 +4623,96 @@ Merged to `main` as `fa7e353` after three review rounds (the third found
 nothing new) and green CI. Production confirmed: `/api/healthz` ok, and the
 client chunk served on `league.jake-moses.com` carries both the event
 vocabulary and the `/admin/` drop in `beforeSend`.
+
+## 2026-09-08 — Session keys carry the booking day; the manual trade window can book a check-in
+
+Jake asked which check-in runs next. The answer came from the production
+database, and two things fell out of it.
+
+**Bug: `sessions.book` was a silent no-op on the second Tuesday and Wednesday
+of Week 1.** `bookSessionsForKind` keyed each session on
+`season:currentWeek:currentWeek`. Week 1 runs from the draft (Aug 30) to the
+first kickoff (Sep 10), so it holds two Tuesdays and two Wednesdays. The
+Sep 1 weekly review and the Sep 2 post-waivers session took the keys
+`…:2026:1:1`; this morning's weekly-review booking (09:00:31, 110 ms) hit the
+same twelve keys, `createSession` skipped every team, and the job reported
+done. Tomorrow's post-waivers booking would have done the same, one day before
+the first kickoff. In season a week holds one of each weekday, so the bug only
+bites in the preseason stretch.
+
+- Fix: the recurring bookings are keyed on the ET booking day (`etDay(now)`)
+  instead of the week, so a same-day re-run is still idempotent and a second
+  weekday in the same week books fresh sessions. The key shape in §9.2
+  (`…:{season}:{week}:{date}`) holds.
+- The day alone would have re-booked a week that did not advance: §13.4
+  counts on a deferred or stalled finalization leaving Tuesday's booking a
+  no-op, and the review caught that the first cut broke it. So a recurring
+  booking is skipped once the current week's first kickoff has passed — the
+  week is under way and its review and post-waivers already ran. Preseason
+  Week 1 books on Sep 9 (first kickoff is that evening); a week whose game
+  moved books nothing the following Tuesday. Tests: both Wednesdays book, a
+  same-day re-run books once, an advanced week books a fresh set, an
+  under-way week books nothing.
+- The commissioner's "book a job" form on `/admin/jobs` can now book a second
+  `sessions.book` for the same kind on a later day of the same week (before
+  the first kickoff); it used to be a no-op. That is what re-running a missed
+  booking should do; noted here so it is not a surprise.
+- No production data change: tomorrow's 09:00 job fires on the new code once
+  this deploys. This morning's missed weekly review is not re-booked — the
+  next one is Sep 15, after Week 1 finalizes, and the agents get Wednesday's
+  post-waivers session for this week's wire and lineup.
+
+**Trade windows.** Jake asked whether to keep a weekly window or rely on
+agents booking their own, and whether an agent would miss an offer. It would
+not: `trade.proposed` books a `trade_response` for the counterparty at once
+(37 proposals so far, 37 response sessions, none timed out), and a counter is
+a new proposal back the other way. What nothing triggers is the first look.
+Decision (Jake, 2026-09-08): no scheduled window. He opens one last manual
+`trade_window` for every team from `/admin/teams`, and that session tells the
+agents the league opens no more, that offers still wake them, and that a look
+at the market is a check-in they book.
+
+- The `trade_window` tool set gains `schedule_check_in`, `cancel_check_in`
+  and `list_check_ins`; without them the brief would tell an agent to book a
+  check-in it could not book. Spec §8.6 and §8.10 updated, `toolsets.test.ts`
+  extended.
+- `briefs/trade_window.md` rewritten: the announcement, plus a step that says
+  to book a check-in now for another look this week. Regenerated.
+- Opening the window: `/admin/teams` runs one session per click, so
+  `/admin/jobs` → Book a job → `sessions.book` / `trade_window` now takes a
+  window label and an optional note and books one `trade_window` per active
+  team, keyed on the label (a row without a label still books nothing, as
+  since 2026-09-05). The label path ignores the under-way rule: it is the
+  commissioner's explicit act. The note rides `context.note` into the brief
+  ("From the commissioner: …"), so the brief itself stays true for any later
+  hand-opened window and the "no more windows" announcement is made once.
+  Spec §9.1, RUNBOOK. This session has no commissioner credential, so the
+  row for the last window (label `final-2026-09-08`, with the note) was
+  inserted into production `scheduled_jobs` by hand after the deploy —
+  the same row the form writes, minus the `job_booked` audit entry. That is
+  recorded here in its place.
+- The scratchpad scan (12 teams) found seven agents deferring trade moves to
+  the "next trade session". They will read the new rule in that window.
+  Three of them already hold 3 pending check-ins (Third & Grok) or 2, so a
+  new trade check-in this week means cancelling one; the brief points them
+  at `scheduled_sessions`.
+- Not re-booked: this morning's missed weekly review. The last trade window
+  carries the same trade, wire and lineup tools today, and the next real
+  review is Sep 15 after Week 1 finalizes.
+- Review round 1 (fresh reviewer): the under-way gate above (its main
+  finding); the redundant week in the key suffix; §9.1 and §9.2 rows; the
+  `/about` row; the stall comments in `tick.ts` and `watchdogs.test.ts`; an
+  engine test that a `trade_window` booking is accepted; the brief's first
+  line now matches §2 ("the league schedules no trade windows").
+- Review round 2 (fresh reviewer): the brief had hard-coded "this is the
+  last one", which every later hand-opened window would repeat — moved to
+  the note; the label path was reachable only by a SQL insert — now a form
+  field on `/admin/jobs` with an audit entry; an empty label is refused;
+  the `date` bypass nobody set is gone (only a labelled `trade_window` skips
+  the under-way rule); RUNBOOK's stall paragraph and a recovery step for a
+  finalization fixed after Tuesday 9:00 AM; tests for the note and for a
+  paused team. Not changed: `sessions.book` still trusts `payload.kind`
+  (admin-only, pre-existing).
+- Review round 3 (fresh reviewer): one stale sentence in the §8.6 row; the
+  note capped at 500 characters server-side to match the form. Nothing
+  blocking; the loop ends here.
