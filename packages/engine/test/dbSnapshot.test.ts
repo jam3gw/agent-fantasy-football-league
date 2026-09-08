@@ -4,7 +4,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import { bootFresh, createTestDb, type TestDb } from "./helpers/db.ts";
+import { existsSync, statSync } from "node:fs";
+import { bootFresh, bootFromSnapshot, createTestDb, snapshotPath, type TestDb } from "./helpers/db.ts";
 
 async function describeSchema(db: TestDb) {
   const columns = await db.execute(sql`
@@ -25,17 +26,23 @@ async function describeSchema(db: TestDb) {
 describe("PGlite snapshot", () => {
   it("has the same tables, columns, constraints, indexes and migration log as a fresh migrate", async () => {
     // The shared instance came from the snapshot when one existed, and
-    // wrote it otherwise; either way the next isolated boot loads it.
+    // wrote it otherwise; either way the file is there now.
     await createTestDb();
-    const snap = await createTestDb({ isolated: true });
+    const file = snapshotPath();
+    expect(existsSync(file)).toBe(true);
+    expect(statSync(file).size).toBeGreaterThan(1_000_000);
+
+    // Load it directly, so this cannot pass by comparing fresh with fresh.
+    const snap = await bootFromSnapshot(file);
+    expect(snap).toBeDefined();
     const fresh = await bootFresh();
     try {
-      const a = await describeSchema(snap.db);
+      const a = await describeSchema(snap!.db);
       const b = await describeSchema(fresh.db);
       expect(a.columns.length).toBeGreaterThan(50);
       expect(a).toEqual(b);
     } finally {
-      await snap.close();
+      await snap!.client.close();
       await fresh.client.close();
     }
   });

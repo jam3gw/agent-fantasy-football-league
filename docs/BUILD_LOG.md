@@ -5071,6 +5071,13 @@ contradiction, no security finding. Fixed:
   migrate; `data/test/http.test.ts` checks `fetchWithRetry` reads
   `RETRY_POLICY` at call time and sleeps the doubling backoff.
 
+Second round: the snapshot test could pass by comparing fresh with fresh
+when the snapshot failed to load, so it now loads the tar itself through
+`bootFromSnapshot` and asserts the file exists and is over a megabyte;
+`http.test.ts` restores its `setTimeout` mock; a snapshot that fails to
+load is closed, not leaked; leftover `.tmp` files are pruned with old
+tars. Third round: nothing new.
+
 Recorded, not changed: ESLint's cache key is file content plus the ESLint
 version and the serialized config, so a plugin upgrade that changes a
 rule's behaviour without changing its options could reuse a stale result

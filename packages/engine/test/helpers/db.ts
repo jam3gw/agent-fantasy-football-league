@@ -36,7 +36,7 @@ function packageVersion(name: string): string {
  * (its migrator writes the bookkeeping table). A change to any of them is a
  * new snapshot; a stale one is never read again.
  */
-function snapshotPath(): string {
+export function snapshotPath(): string {
   const hash = createHash("sha256");
   hash.update(`pglite=${packageVersion("@electric-sql/pglite")}\0drizzle-orm=${packageVersion("drizzle-orm")}\0`);
   for (const file of readdirSync(MIGRATIONS, { recursive: true }).sort()) {
@@ -61,7 +61,7 @@ export async function bootFresh(): Promise<{ client: PGlite; db: TestDb }> {
 }
 
 /** Load a snapshot, or return undefined when there is none or it is unusable. */
-async function bootFromSnapshot(file: string): Promise<{ client: PGlite; db: TestDb } | undefined> {
+export async function bootFromSnapshot(file: string): Promise<{ client: PGlite; db: TestDb } | undefined> {
   let tar: Buffer;
   try {
     tar = readFileSync(file);
@@ -70,19 +70,19 @@ async function bootFromSnapshot(file: string): Promise<{ client: PGlite; db: Tes
   }
   // An empty file loads as an empty database, silently; a torn one throws.
   if (tar.length === 0) return undefined;
+  // A copy into a plain Uint8Array: the web package type-checks this file
+  // against the DOM lib, where a Node Buffer is not a Blob part.
+  const client = new PGlite({ loadDataDir: new Blob([new Uint8Array(tar)]) });
   try {
-    // A copy into a plain Uint8Array: the web package type-checks this file
-    // against the DOM lib, where a Node Buffer is not a Blob part.
-    const client = new PGlite({ loadDataDir: new Blob([new Uint8Array(tar)]) });
     await client.waitReady;
     const { rows } = await client.query<{ n: number }>(
       "select count(*)::int as n from pg_tables where schemaname = 'public'",
     );
     if (rows[0]!.n > 0) return { client, db: drizzle(client, { schema }) };
-    await client.close();
   } catch {
     // fall through to a fresh boot
   }
+  await client.close().catch(() => {});
   return undefined;
 }
 
@@ -91,9 +91,11 @@ async function writeSnapshot(client: PGlite, file: string): Promise<void> {
   try {
     const dump = await client.dumpDataDir("none");
     mkdirSync(SNAPSHOT_DIR, { recursive: true });
-    // Old snapshots are never read again; do not let them pile up in the cache.
+    // Old snapshots are never read again, and a temp file left by a killed
+    // worker is never renamed; do not let either pile up in the cache.
     for (const old of readdirSync(SNAPSHOT_DIR)) {
-      if (old.endsWith(".tar") && path.join(SNAPSHOT_DIR, old) !== file) rmSync(path.join(SNAPSHOT_DIR, old), { force: true });
+      const full = path.join(SNAPSHOT_DIR, old);
+      if (full !== file && (old.endsWith(".tar") || old.endsWith(".tmp"))) rmSync(full, { force: true });
     }
     const tmp = `${file}.${randomUUID()}.tmp`;
     writeFileSync(tmp, Buffer.from(await dump.arrayBuffer()));

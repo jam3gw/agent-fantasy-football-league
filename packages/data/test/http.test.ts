@@ -5,6 +5,7 @@ const ORIGINAL = { ...RETRY_POLICY };
 afterEach(() => {
   Object.assign(RETRY_POLICY, ORIGINAL);
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("fetchWithRetry", () => {
