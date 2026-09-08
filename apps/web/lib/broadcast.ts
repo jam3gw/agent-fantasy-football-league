@@ -9,7 +9,7 @@ import "server-only";
  * every derivation that involves a judgement call says what it assumes.
  */
 import { cache } from "react";
-import { and, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, like, notLike, sql } from "drizzle-orm";
 import {
   STARTING_SLOTS,
   boardPosts,
@@ -38,7 +38,7 @@ import {
 } from "@league/engine";
 import { db } from "./db";
 import { allTeams, safeRead as safe, settings } from "./queries";
-import { jobsGatedOn, laneOf } from "./homeLogic";
+import { activityWindow, jobsGatedOn } from "./homeLogic";
 import type { EngineDb } from "@league/engine";
 import type { Result } from "./broadcastLogic";
 import {
@@ -51,7 +51,6 @@ import {
   remainingPoints,
   newestFirst,
   plainExcerpt,
-  reserveWindow,
   splitHeadline,
   teamName,
   transactionPlayerIds,
@@ -95,26 +94,32 @@ export interface ActivityItem {
  * Thursday morning. Its older posts stay in the stream.
  *
  * Each source is limited before the merge, so a chatty week on the board
- * cannot starve the others out of the window.
+ * cannot starve the others out of the window; the decision log counts as
+ * two sources for that reason, its board kinds and the rest.
  */
 export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
   const each = Math.max(limit, 8);
-  const [decisions, posts, txns, failures, reports] = await Promise.all([
-    safe(
-      () =>
-        db()
-          .select({
-            at: decisionLogs.createdAt,
-            teamId: decisionLogs.teamId,
-            sessionId: decisionLogs.sessionId,
-            kind: decisionLogs.kind,
-            summary: decisionLogs.summary,
-          })
-          .from(decisionLogs)
-          .orderBy(desc(decisionLogs.createdAt))
-          .limit(each),
-      [],
-    ),
+  // The decision log is one table for every session kind, so a board_reply
+  // session's line and a trade_response session's line share it. Read the
+  // board kinds and the rest as two sources, each with its own cap, or an
+  // hour of board replies would push every trade decision out before the
+  // window's holds ever see one.
+  const decisionQuery = (boardKinds: boolean) =>
+    db()
+      .select({
+        at: decisionLogs.createdAt,
+        teamId: decisionLogs.teamId,
+        sessionId: decisionLogs.sessionId,
+        kind: decisionLogs.kind,
+        summary: decisionLogs.summary,
+      })
+      .from(decisionLogs)
+      .where(boardKinds ? like(decisionLogs.kind, "board%") : notLike(decisionLogs.kind, "board%"))
+      .orderBy(desc(decisionLogs.createdAt))
+      .limit(each);
+  const [moveDecisions, boardDecisions, posts, txns, failures, reports] = await Promise.all([
+    safe(() => decisionQuery(false), []),
+    safe(() => decisionQuery(true), []),
     safe(
       () =>
         db()
@@ -194,6 +199,7 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
       body: truncateFlat(body, max),
     };
   };
+  const decisions = [...moveDecisions, ...boardDecisions];
   const items: ActivityItem[] = [
     ...decisions.map((d) => ({
       at: d.at,
@@ -249,29 +255,7 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
     })),
   ];
 
-  /*
-   * SPEC 12.1 requires the home page to carry the latest board posts, and this
-   * rail is where they live now. A busy hour of transactions could otherwise
-   * push every one of them out of the window, so a few slots are reserved for
-   * the newest board posts. The mirror holds too: on a day the agents post
-   * fourteen board messages in an hour (2026-09-08, the last trade window),
-   * every move — the trades declined, the players added — fell out of the
-   * window and the stream read "Moves 0". So slots are held for the newest
-   * moves as well: anything that is not a board post and not the reporter.
-   * The rest of the window fills from everything else, newest first.
-   */
-  const RESERVED_BOARD_SLOTS = 3;
-  const RESERVED_MOVE_SLOTS = 4;
-  return reserveWindow(items, limit, [
-    // The newest item of all goes in first, whatever it is: it is the lead
-    // (page.tsx takes activity[0]), and a window small enough for the holds
-    // below to fill it must still carry the newest thing any agent did.
-    { match: () => true, slots: 1 },
-    { match: (i) => i.kind === "board post", slots: RESERVED_BOARD_SLOTS },
-    // "Moves" is what the stream's Moves tab counts, so the same rule: a
-    // "board reply" decision is talk to the tab and must not fill a move slot.
-    { match: (i) => laneOf(i.kind, i.actor) === "moves", slots: RESERVED_MOVE_SLOTS },
-  ]);
+  return activityWindow(items, limit);
 }
 
 /* ------------------------------------------------------------------ *
