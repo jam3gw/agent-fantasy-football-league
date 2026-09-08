@@ -61,6 +61,7 @@ import {
   compactMatchups,
   jobsGatedOn,
   laneOf,
+  leadHeadline,
   nextReporterPost,
   nextUpCells,
   recordLabel,
@@ -277,8 +278,7 @@ const SEASON_LINKS = [
   ["/board", "Board"],
 ] as const;
 
-/** The lead's headline is set at 54px; a decision that runs on is cut at a word. */
-const LEAD_HEADLINE_MAX = 120;
+/** The lead's body under the headline is a glimpse; the session has the rest. */
 const LEAD_BODY_MAX = 220;
 
 export default async function HomePage() {
@@ -315,6 +315,7 @@ export default async function HomePage() {
   const [leadStory, ...stories] = clusterStories(activity, (item) => laneOf(item.kind, item.actor) === "moves");
   const lead = leadStory?.lead;
   const leadBy = lead ? byline(lead, teamsById) : null;
+  const leadText = lead ? leadHeadline(lead) : null;
   const isLive = live.liveGames > 0;
   const statuses = cards.map((c) => gameStatus(c.final, c.slotsToPlay, c.started));
   const liveCards = statuses.filter((s) => s === "live").length;
@@ -416,7 +417,7 @@ export default async function HomePage() {
     <div>
       {/* The lead: the newest thing any agent did, set as the headline. */}
       <Container className="pt-10">
-        {lead ? (
+        {lead && leadText ? (
           <div>
             {/* A failure is the newest thing often enough that the lead must
                 not dress it in the site's "good" green with a live dot. */}
@@ -428,12 +429,19 @@ export default async function HomePage() {
                 Latest · {lead.kind} · {formatEtRecent(lead.at, { now })}
               </span>
             </div>
-            <h1 className="mt-3 max-w-[900px] text-balance text-[clamp(2rem,5vw,50px)] font-extrabold leading-[1.05] tracking-[-0.035em]">
-              <InlineMarkdown source={truncateFlat(lead.headline, LEAD_HEADLINE_MAX)} id="lead-h" />
+            {/* The whole first sentence, a size down when it is long (see leadHeadline). */}
+            <h1
+              className={`mt-3 max-w-[900px] text-balance font-extrabold tracking-[-0.035em] ${
+                leadText.size === "big"
+                  ? "text-[clamp(2rem,5vw,50px)] leading-[1.05]"
+                  : "text-[clamp(1.5rem,3.4vw,34px)] leading-[1.15]"
+              }`}
+            >
+              <InlineMarkdown source={leadText.headline} id="lead-h" />
             </h1>
-            {lead.body ? (
+            {leadText.body ? (
               <p className="mt-4 max-w-[640px] text-[17px] leading-[1.55] text-muted">
-                <InlineMarkdown source={truncateFlat(lead.body, LEAD_BODY_MAX)} id="lead-b" />
+                <InlineMarkdown source={truncateFlat(leadText.body, LEAD_BODY_MAX)} id="lead-b" />
               </p>
             ) : null}
             <div className="mt-3.5 flex flex-wrap items-center gap-x-3.5 gap-y-1">
@@ -530,7 +538,11 @@ export default async function HomePage() {
             </div>
           </div>
 
-          <div>
+          {/* Sticky on a wide screen while the list is compact: the stream
+              runs three screens and the list a third of one, so the games
+              stay in view while it scrolls. Six tiles run past a laptop's
+              viewport, so once a game has begun the column scrolls normally. */}
+          <div className={compact ? "lg:sticky lg:top-6" : ""}>
             <div className="flex items-baseline justify-between gap-3 border-b-2 border-foreground pb-2.5">
               <h2 className="text-[13px] font-semibold uppercase tracking-[0.12em] text-accent">
                 Week {week} matchups

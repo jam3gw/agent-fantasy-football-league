@@ -480,9 +480,9 @@ export function splitHeadline(
   text: string,
   max = 110,
   minSentence = 24,
-): { headline: string; body: string } {
+): { headline: string; body: string; cut: boolean; cutMidWord: boolean } {
   const flat = flattenMarkdown(closeLines(text));
-  if (flat.length <= max) return { headline: flat, body: "" };
+  if (flat.length <= max) return { headline: flat, body: "", cut: false, cutMidWord: false };
 
   for (const match of flat.matchAll(/[.?!…](?:["”’)]*)(?=\s)/g)) {
     const end = match.index + match[0].length;
@@ -492,13 +492,24 @@ export function splitHeadline(
     if (isAbbreviation(flat, match.index)) continue;
     // A sentence end inside `**Bold. Sentence**` is not a break to cut on.
     if (tokenSafeCut(flat, end) < end) continue;
-    return { headline: flat.slice(0, end).trim(), body: flat.slice(end).trim() };
+    return { headline: flat.slice(0, end).trim(), body: flat.slice(end).trim(), cut: false, cutMidWord: false };
   }
 
+  // `cut` says the ellipsis is ours, not the agent's, so a caller that
+  // wants the whole sentence back can tell the two apart; `cutMidWord`
+  // that the cut fell between two non-space characters — inside a word —
+  // so the halves rejoin without a space. A cut at a token's start
+  // (`tokenSafeCut` retreats to it) usually follows a space and is not.
   const safe = tokenSafeCut(flat, max);
   const space = flat.lastIndexOf(" ", safe);
   const cut = space > max * 0.5 ? space : safe;
-  return { headline: `${flat.slice(0, cut).trimEnd()}…`, body: flat.slice(cut).trim() };
+  const cutMidWord = cut > 0 && !/\s/.test(flat[cut - 1] ?? "") && !/\s/.test(flat[cut] ?? "");
+  return {
+    headline: `${flat.slice(0, cut).trimEnd()}…`,
+    body: flat.slice(cut).trim(),
+    cut: true,
+    cutMidWord,
+  };
 }
 
 /** A full stop after one of these is an abbreviation, not the end of a sentence. */

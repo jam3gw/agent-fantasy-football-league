@@ -536,7 +536,7 @@ describe("team names", () => {
 
 describe("a headline out of an agent's paragraph", () => {
   it("is the whole thing when it is short enough to set big", () => {
-    expect(splitHeadline("Moved Rice into the FLEX over Jennings.")).toEqual({
+    expect(splitHeadline("Moved Rice into the FLEX over Jennings.")).toMatchObject({
       headline: "Moved Rice into the FLEX over Jennings.",
       body: "",
     });
@@ -545,7 +545,7 @@ describe("a headline out of an agent's paragraph", () => {
   it("is the first sentence, with the rest as the body", () => {
     const text =
       "Moved Rashee Rice into the FLEX over Jauan Jennings on a 78% snap-share read. Rice's preseason snap share was 78%; Jennings is a WR3 in a run-first offense.";
-    expect(splitHeadline(text)).toEqual({
+    expect(splitHeadline(text)).toMatchObject({
       headline: "Moved Rashee Rice into the FLEX over Jauan Jennings on a 78% snap-share read.",
       body: "Rice's preseason snap share was 78%; Jennings is a WR3 in a run-first offense.",
     });
@@ -556,7 +556,7 @@ describe("a headline out of an agent's paragraph", () => {
     // sentence is the one worth 54px.
     const text =
       "Respect. I took a tight end at 1.04 and I would do it again. Ask me in December, when the whole league has seen why it was right.";
-    expect(splitHeadline(text)).toEqual({
+    expect(splitHeadline(text)).toMatchObject({
       headline: "Respect. I took a tight end at 1.04 and I would do it again.",
       body: "Ask me in December, when the whole league has seen why it was right.",
     });
@@ -583,7 +583,7 @@ describe("a headline out of an agent's paragraph", () => {
   it("keeps a closing quote with the sentence it closes", () => {
     const text =
       "Kimi to Gemini: “Your bench is thinner than my patience.” Thursday cannot come fast enough, and the two meet in week 1.";
-    expect(splitHeadline(text)).toEqual({
+    expect(splitHeadline(text)).toMatchObject({
       headline: "Kimi to Gemini: “Your bench is thinner than my patience.”",
       body: "Thursday cannot come fast enough, and the two meet in week 1.",
     });
@@ -600,7 +600,7 @@ describe("a headline out of an agent's paragraph", () => {
     // flattening alone joined these with a space and the h1 was cut mid-list.
     const text =
       "## Week 1 plan\n- Start **Gibbs** at RB1 because the matchup is soft\n- Bench Wright until the bye is over\n- Claim Allgeier";
-    expect(splitHeadline(text)).toEqual({
+    expect(splitHeadline(text)).toMatchObject({
       headline: "Week 1 plan. Start **Gibbs** at RB1 because the matchup is soft.",
       body: "Bench Wright until the bye is over. Claim Allgeier.",
     });
@@ -667,7 +667,21 @@ describe("a headline out of an agent's paragraph", () => {
   });
 
   it("returns an empty headline for text that is all fenced code, for the caller to fill", () => {
-    expect(splitHeadline("```\ncode\n```")).toEqual({ headline: "", body: "" });
+    expect(splitHeadline("```\ncode\n```")).toMatchObject({ headline: "", body: "" });
+  });
+
+  it("says whether the ellipsis is its own cut, and whether that cut fell inside a word", () => {
+    expect(splitHeadline("Moved Rice into the FLEX over Jennings.")).toMatchObject({ cut: false, cutMidWord: false });
+    expect(splitHeadline("I weighed it and then… I let it go, for the whole of the window and more besides than that.")).toMatchObject({
+      cut: false,
+    });
+    const words = Array.from({ length: 40 }, (_, i) => `word${i}`).join(" ");
+    expect(splitHeadline(`${words}.`)).toMatchObject({ cut: true, cutMidWord: false });
+    // A 120-character run of one word is cut inside it.
+    expect(splitHeadline("a".repeat(120))).toMatchObject({ cut: true, cutMidWord: true });
+    // A cut that retreats to a bold token's start follows a space: not inside a word.
+    const bold = "Declined: **Trade 41 from Five Alarm, the one with Stevenson and Purdy for Kelce and Reed at prio 12** and so on.";
+    expect(splitHeadline(bold)).toMatchObject({ cut: true, cutMidWord: false });
   });
 });
 
