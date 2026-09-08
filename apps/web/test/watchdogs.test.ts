@@ -3,8 +3,8 @@
  *
  * A finalization that fails every retry stops the season dead and in total
  * silence — `current_week` never advances, so no week is planned, no lineups
- * carry over, and Tuesday's `sessions.book` recomputes last week's idempotency
- * keys and creates nothing at all, while lineup checks and check-ins keep
+ * carry over, and Tuesday's `sessions.book` sees a week already under way
+ * and creates nothing at all, while lineup checks and check-ins keep
  * firing so the league looks alive.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";

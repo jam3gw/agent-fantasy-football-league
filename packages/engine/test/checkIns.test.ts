@@ -44,6 +44,15 @@ afterEach(async () => {
 });
 
 describe("scheduling", () => {
+  it("accepts a booking from the commissioner's manual trade_window (2026-09-08)", async () => {
+    const r = await scheduleCheckIn(db, clock, teamIds[0]!, {
+      at: in2h(),
+      reason: "look for a TE2 before Sunday",
+      bookedBySessionKind: "trade_window",
+    });
+    expect(r.ok).toBe(true);
+  });
+
   it("books a queued session the tick will start, with the reason as its brief", async () => {
     const r = await scheduleCheckIn(db, clock, teamIds[0]!, {
       at: in2h(),

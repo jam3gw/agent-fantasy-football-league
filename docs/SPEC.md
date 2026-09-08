@@ -942,9 +942,9 @@ Recurring job table (ET):
 | `stats.finalize` | Tue 4:00 AM | fetch Sleeper stats, score, finalize week, write team_week_results, audit vs nflverse, advance `current_week`, then start `weekPlanWorkflow` |
 | `book_daily_jobs` | daily 12:05 AM | re-book every recurring job for the next 48 hours (idempotent) |
 | `prices.sync` | Mon 3:00 AM | refresh `model_prices` from the gateway catalog (Section 8.7); an id the catalog no longer lists keeps its last price |
-| `sessions.weekly_review` | Tue 9:00 AM | one session per active team, staggered 1 minute apart |
-| `sessions.post_waivers` | Wed 9:00 AM | one session per active team, staggered |
-| `sessions.trade_window` | not booked (retired 2026-09-05; a row already queued books nothing when it fires) | — |
+| `sessions.weekly_review` | Tue 9:00 AM | one session per active team, staggered 1 minute apart; once per ET day, and skipped once the current week's first kickoff has passed (a deferred or stalled week books nothing, Section 13.4) |
+| `sessions.post_waivers` | Wed 9:00 AM | one session per active team, staggered; same once-per-day and under-way rules |
+| `sessions.trade_window` | not booked (retired 2026-09-05; a row already queued books nothing when it fires). A row that names a `window` label is the commissioner opening one window for every active team at once (added 2026-09-08 for the last window, whose brief announces there are no more); it is keyed on the label and ignores the under-way rule | — |
 | `ingest.stats` | game days (Thu–Mon), every 30 min while no game is live | Section 5.3 (the per-minute live poll runs from the tick while a game is live) |
 | `reporter.power_rankings` | Tue 10:30 AM | one `power_rankings` edition, before the recap |
 | `reporter.recap` | Tue 11:00 AM | one post: the week's recap |
@@ -965,7 +965,7 @@ All in `apps/web/workflows/`:
 - `weekPlanWorkflow(week)`: (1) refresh the nflverse schedule; (2) carry over lineups (Section 7.8); (3) group the week's kickoffs into windows (games whose kickoffs are within 30 minutes of each other are one window, keyed by the earliest kickoff) and book `sessions.lineup_check` at `earliest kickoff − 90 min` for each active team that has at least one rostered player in that window; (4) book the week's session jobs (Section 9.1); (5) if `week == playoff_start_week`, seed the playoffs and set `eliminated` on the six non-qualifiers; if later, create the next round from the previous round's results and set `eliminated` on the losers.
 - `reporterWorkflow(kind, week)`.
 
-Idempotency keys: `session:{team}:{kind}:{season}:{week}:{window|date|event_id}`; `job:{type}:{due_at ISO}`.
+Idempotency keys: `session:{team}:{kind}:{season}:{week}:{window|date|event_id}` — for the recurring `sessions.book` kinds the last part is the ET booking day (since 2026-09-08; it was the week, which collided when one week held two of the same weekday); `job:{type}:{due_at ISO}`.
 
 Concurrency: global maximum 6 running agent sessions; 1 per team. Lineup checks for Sunday early games book 12 sessions at 11:30 AM ET; with the cap of 6 and typical 3–6 minute sessions, all finish before 1:00 PM. The wait-for-slot step gives up at `context.deadline_at` and marks the session `skipped`.
 
