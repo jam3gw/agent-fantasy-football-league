@@ -4984,3 +4984,20 @@ shown it.
 - Also fixed in the same push: `countdown.dom.test.ts` failed on Vercel
   because the build sets `NODE_ENV=production` and React's production
   build has no `act`. The root vitest config pins `NODE_ENV=test`.
+
+## 2026-09-08 — commit author email rewrite
+
+- Jake asked that every commit authored as `the previous work address` use
+  `mosesjake32@gmail.com` instead. Done with `git filter-repo --mailmap`
+  across all 51 branches (329 commits parsed, 120 author/committer fields
+  now carry the gmail address, none carry the old one). Every branch was
+  force-pushed with a lease on its previous tip.
+- `main` moved from `bfac7732ab38` to `abadc76f6dd7`. Anyone with a clone
+  must reset to the new history (`git fetch && git reset --hard
+  origin/main`); no pull requests were open at the time.
+- The 14 GitHub-made merge commits lost their "Verified" badge, since GitHub
+  signs only commits it creates. Vercel deployments made before this note
+  keep the old commit hashes and the old author; deployments are immutable.
+  Every deployment from now on reads the new email. The force-push of 51
+  branches queued one preview build per branch; production redeployed from
+  the rewritten `main`.
