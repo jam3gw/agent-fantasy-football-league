@@ -312,6 +312,16 @@ export async function bookJobAction(form: FormData): Promise<void> {
     if (!kind) throw new Error(`${type} needs a kind`);
     payload.kind = kind;
   }
+  // §9.1 (2026-09-08): a trade window for every active team at once needs a
+  // label, which keys the sessions; a row without one books nothing (§2). The
+  // note, if any, is appended to every team's brief.
+  if (type === "sessions.book" && kind === "trade_window") {
+    const window = str(form, "window").trim();
+    if (!window) throw new Error("a trade_window booking needs a window label");
+    payload.window = window;
+    const note = str(form, "note").trim();
+    if (note) payload.note = note;
+  }
   await bookJobNow(c.database, c.clock, type, payload);
   await logAction(c, "job_booked", { type, payload });
   finish("/admin/jobs", `Booked ${type}; the next tick runs it.`);

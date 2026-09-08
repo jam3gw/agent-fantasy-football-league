@@ -1,4 +1,4 @@
-The commissioner has opened a trade window for you. The league schedules no trade windows, and this is the last one the commissioner opens for everyone: from now on, when you want to look for trades or post on the board, book a check-in for it with schedule_check_in. Offers sent to you still wake you in a trade_response session, so you never miss one.
+The commissioner has opened a trade window for you. The league schedules no trade windows; the commissioner opens one only by hand. When you want to look for trades or post on the board, book a check-in for it with schedule_check_in. Offers sent to you still wake you in a trade_response session, so you never miss one.
 
 1. Look for trades that make your team better. Check other rosters, find teams whose strengths match your weaknesses, and propose something they might actually accept. You can send up to 3 offers per rolling 24 hours.
 2. Respond to any offers waiting for you: accept, reject, or counter.
