@@ -38,7 +38,7 @@ import {
 } from "@league/engine";
 import { db } from "./db";
 import { allTeams, safeRead as safe, settings } from "./queries";
-import { jobsGatedOn } from "./homeLogic";
+import { jobsGatedOn, laneOf } from "./homeLogic";
 import type { EngineDb } from "@league/engine";
 import type { Result } from "./broadcastLogic";
 import {
@@ -263,8 +263,14 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
   const RESERVED_BOARD_SLOTS = 3;
   const RESERVED_MOVE_SLOTS = 4;
   return reserveWindow(items, limit, [
+    // The newest item of all goes in first, whatever it is: it is the lead
+    // (page.tsx takes activity[0]), and a window small enough for the holds
+    // below to fill it must still carry the newest thing any agent did.
+    { match: () => true, slots: 1 },
     { match: (i) => i.kind === "board post", slots: RESERVED_BOARD_SLOTS },
-    { match: (i) => i.kind !== "board post" && i.actor !== "reporter", slots: RESERVED_MOVE_SLOTS },
+    // "Moves" is what the stream's Moves tab counts, so the same rule: a
+    // "board reply" decision is talk to the tab and must not fill a move slot.
+    { match: (i) => laneOf(i.kind, i.actor) === "moves", slots: RESERVED_MOVE_SLOTS },
   ]);
 }
 

@@ -19,6 +19,15 @@ was running). Two things were wrong. Branch
   (pure, in `broadcastLogic.ts`, tested) holds slots per reservation:
   three for board posts as before, four for moves (anything not a board
   post and not the reporter), the rest newest first, the result re-sorted.
+- Review (fresh reviewer): the move hold used its own rule where the Moves
+  tab uses `laneOf` — a "board reply" decision is talk to the tab and was
+  a move to the hold, so a hot board hour could fill the move slots with
+  replies and read "Moves 0" again; the hold uses `laneOf` now. A window
+  smaller than the holds' total could drop the newest item of all, which
+  is the lead — the newest item is held first, whatever it is. Tests for
+  both and for the overlap case. Noted, no change: held moves about one
+  trade still fold under the lead as "the story so far", so the Moves tab
+  can read a smaller number than the window holds.
 
 ## 2026-09-08 — Front page: next-up strip, story folding, stream tabs, compact matchups
 
