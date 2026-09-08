@@ -90,6 +90,10 @@ page still carries every item the `/` row lists.
   that trade under itself and split the moves' story in two. Only a
   foldable item opens a story now, and only the first under a key. Test
   for the three-item case (move, post, move).
+- Review round 6 (fresh reviewer): nothing against the spec, no bug. One
+  wording point: the kickoff cell said "Week N kickoff" for the week's
+  next game even after Thursday's had been played — it says "Next
+  kickoff" once a game of the week has begun. Test. The loop ends here.
 
 ## 2026-09-08 — Production health sweep: unchanged, but kickoff (and spend) resumes tomorrow
 

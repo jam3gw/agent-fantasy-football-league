@@ -190,6 +190,8 @@ export interface NextUpInput {
   week: number;
   /** The next kickoff of the week, when one is ahead. */
   kickoff: Date | null;
+  /** Whether a game of the week has begun: the kickoff cell is the week's start until one has. */
+  weekBegun: boolean;
   /** The next daily waiver run, when waivers are running this phase. */
   waiverRun: Date | null;
   /** Trades in league review: how many, and when the soonest clock ends. */
@@ -211,7 +213,7 @@ export function nextUpCells(input: NextUpInput): NextUpCell[] {
     cells.push({
       at: input.kickoff,
       cell: {
-        label: `Week ${input.week} kickoff`,
+        label: input.weekBegun ? "Next kickoff" : `Week ${input.week} kickoff`,
         value: countdown(now, input.kickoff),
         at: input.kickoff.toISOString(),
         past: "now",
