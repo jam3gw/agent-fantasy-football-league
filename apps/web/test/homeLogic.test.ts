@@ -5,6 +5,8 @@ import {
   RESERVED_MOVE_SLOTS,
   activityWindow,
   clusterStories,
+  dropBoardEchoes,
+  leadHeadline,
   compactMatchups,
   countdown,
   inLane,
@@ -64,6 +66,43 @@ describe("activityWindow", () => {
     const newest = reply(16);
     const window = activityWindow([newest, ...Array.from({ length: 10 }, (_, i) => move(10 - i))], 3);
     expect(window[0]).toBe(newest);
+  });
+});
+
+describe("dropBoardEchoes", () => {
+  const at = (iso: string) => new Date(iso);
+  it("drops a board session's decision line when the same team posted within two minutes", () => {
+    const post = { kind: "board post", teamId: 4, at: at("2026-09-08T16:16:10Z") };
+    const echo = { kind: "board reply", teamId: 4, at: at("2026-09-08T16:16:40Z") };
+    const otherTeam = { kind: "board reply", teamId: 5, at: at("2026-09-08T16:16:40Z") };
+    const later = { kind: "board reply", teamId: 4, at: at("2026-09-08T16:30:00Z") };
+    const move = { kind: "trade response", teamId: 4, at: at("2026-09-08T16:16:40Z") };
+    expect(dropBoardEchoes([echo, post, otherTeam, later, move])).toEqual([post, otherTeam, later, move]);
+  });
+});
+
+describe("leadHeadline", () => {
+  it("keeps a short headline as it is", () => {
+    expect(leadHeadline({ headline: "Declined Trade 41, no counter.", body: "The math." })).toEqual({
+      headline: "Declined Trade 41, no counter.",
+      body: "The math.",
+      size: "big",
+    });
+  });
+  it("rejoins a cut first sentence and sets it a size down", () => {
+    const first = "Five Alarm declined Stevenson+Purdy for Kelce+Reed and their math held — I re-ran it: Rhamondre's bench value";
+    const rest = "is 11.76 minus the wire RB I can't reach at prio 12, so I was paying 3.6 of insurance. A deal that fails my own test.";
+    const out = leadHeadline({ headline: `${first}…`, body: rest });
+    expect(out.headline).toBe(`${first} is 11.76 minus the wire RB I can't reach at prio 12, so I was paying 3.6 of insurance.`);
+    expect(out.body).toBe("A deal that fails my own test.");
+    expect(out.size).toBe("small");
+  });
+  it("still cuts a sentence that runs past two hundred characters", () => {
+    const words = Array.from({ length: 60 }, (_, i) => `word${i}`).join(" ");
+    const out = leadHeadline({ headline: "Something long that was cut…", body: `${words} and on it goes.` });
+    expect(out.headline.endsWith("…")).toBe(true);
+    expect(out.headline.length).toBeLessThanOrEqual(201);
+    expect(out.size).toBe("small");
   });
 });
 

@@ -5,7 +5,7 @@
  * reading in full and the ladder, and what goes in the "Next up" strip.
  */
 import { nextEtWeekdayTime } from "@league/shared";
-import { reserveWindow } from "./broadcastLogic";
+import { reserveWindow, splitHeadline } from "./broadcastLogic";
 import { countdown } from "./countdown";
 
 export { countdown };
@@ -69,6 +69,55 @@ export function activityWindow<T extends { at: Date; kind: string; actor: "team"
     { match: (i) => i.kind === "board post", slots: RESERVED_BOARD_SLOTS },
     { match: (i) => laneOf(i.kind, i.actor) === "moves", slots: RESERVED_MOVE_SLOTS },
   ]);
+}
+
+/** A board session's decision line is an echo of its post when the post is this close. */
+export const BOARD_ECHO_WINDOW_MS = 2 * 60_000;
+
+/**
+ * A board session writes two things: the post itself, and a decision-log
+ * line that says it posted. On the page those are the same act twice, in
+ * the same words, from the same team, a minute apart — the lead and the
+ * first stream item on 2026-09-08 were that pair. The post is the primary
+ * source, so the decision line goes when the same team has a board post
+ * within the window; a board session that posted nothing keeps its line.
+ */
+export function dropBoardEchoes<T extends { kind: string; teamId: number | null; at: Date }>(items: readonly T[]): T[] {
+  const posts = items.filter((i) => i.kind === "board post" && i.teamId !== null);
+  return items.filter((item) => {
+    if (item.kind === "board post" || item.teamId === null || laneOf(item.kind) !== "talk") return true;
+    return !posts.some(
+      (p) => p.teamId === item.teamId && Math.abs(p.at.getTime() - item.at.getTime()) <= BOARD_ECHO_WINDOW_MS,
+    );
+  });
+}
+
+/* ------------------------------------------------------------------ *
+ * The lead's headline
+ * ------------------------------------------------------------------ */
+
+/** Past this many characters the lead's headline is set a size down, not cut. */
+export const LEAD_BIG_MAX = 120;
+/** The most the lead's headline carries before it is cut at a word after all. */
+export const LEAD_HEADLINE_MAX = 200;
+
+/**
+ * The stream cuts a first sentence that runs past 110 characters at a word
+ * with an ellipsis, and the body picks up mid-sentence. That is fine at 22px
+ * and reads badly at 50px: "Rhamondre's bench value…" over "is 11.76 minus
+ * the wire RB". The lead gets the whole first sentence instead, set a size
+ * down when it is long, and is cut only when even that runs past 200.
+ */
+export function leadHeadline(item: { headline: string; body: string }): {
+  headline: string;
+  body: string;
+  size: "big" | "small";
+} {
+  const cut = item.headline.endsWith("…");
+  if (!cut) return { headline: item.headline, body: item.body, size: item.headline.length > LEAD_BIG_MAX ? "small" : "big" };
+  const whole = `${item.headline.slice(0, -1).trimEnd()} ${item.body}`.trim();
+  const { headline, body } = splitHeadline(whole, LEAD_HEADLINE_MAX);
+  return { headline, body, size: headline.length > LEAD_BIG_MAX ? "small" : "big" };
 }
 
 /* ------------------------------------------------------------------ *
