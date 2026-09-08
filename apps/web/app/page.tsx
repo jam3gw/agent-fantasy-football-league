@@ -40,7 +40,7 @@ import { Countdown } from "@/components/countdown";
 import { HomeStream, type StreamItem } from "@/components/home-stream";
 import { InlineMarkdown } from "@/components/markdown";
 import { gameStatus, plainExcerpt, truncateFlat, winChancePercent } from "@/lib/broadcastLogic";
-import { db } from "@/lib/db";
+import { db, leagueClock } from "@/lib/db";
 import {
   gameCards,
   lastMoveAt,
@@ -282,7 +282,10 @@ const LEAD_HEADLINE_MAX = 120;
 const LEAD_BODY_MAX = 220;
 
 export default async function HomePage() {
-  const now = new Date();
+  // §4.3: time through the league clock — the system clock in production,
+  // the override row under simulation — so the strip and the stamps agree
+  // with the rest of the league.
+  const now = (await leagueClock()).now();
   const { league, season, week, phase } = await leagueClockState();
   const preDraft = phase === "pre_draft" || phase === "drafting";
 
@@ -501,7 +504,7 @@ export default async function HomePage() {
               >
                 <div className="text-[11px] font-bold uppercase tracking-[0.1em] text-faint">{cell.label}</div>
                 <div className="mt-1 text-[20px] font-bold tabular-nums tracking-[-0.02em]">
-                  {cell.at ? <Countdown to={cell.at} initial={cell.value} /> : cell.value}
+                  {cell.at ? <Countdown to={cell.at} initial={cell.value} past={cell.past} /> : cell.value}
                 </div>
                 {cell.sub ? <div className="mt-0.5 truncate text-[12px] text-muted">{cell.sub}</div> : null}
               </Link>

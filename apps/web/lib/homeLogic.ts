@@ -58,14 +58,16 @@ export function inLane(lane: Lane, filter: LaneFilter): boolean {
  * lower-case word after the number). A name that opens a sentence and is
  * followed by a lower-case verb — "Trade 43 clears review" — is lost to
  * that last rule; the item stays its own story, which is the safe side.
- * Text that names none is its own story.
+ * "Opens a sentence" means the text's start, or a sentence end, a colon, a
+ * semicolon, a dash or a line break before it: "Plan: Trade 2 bench WRs"
+ * is the imperative again. Text that names none is its own story.
  */
 export function storyKey(text: string): string | null {
   const name = (word: string): string | null => {
     const re = new RegExp(`\\b(?:${word}\\s*#?\\s*|${word.toLowerCase()}\\s*#\\s*)(\\d{1,6})\\b(?!-)`, "g");
     for (const m of text.matchAll(re)) {
       const after = text.slice(m.index + m[0].length);
-      const opensSentence = m.index === 0 || /[.!?]\s*$/.test(text.slice(0, m.index));
+      const opensSentence = m.index === 0 || /(?:[.!?:;—–-]|\n)\s*$/.test(text.slice(0, m.index));
       const hash = m[0].includes("#");
       if (opensSentence && !hash && /^\s+[a-z]/.test(after)) continue;
       return m[1]!;
@@ -170,6 +172,8 @@ export interface NextUpCell {
   value: string;
   /** The instant the value counts down to, when it is a countdown; the client keeps it ticking. */
   at: string | null;
+  /** What the ticking countdown says once the instant has passed, until the page refreshes. */
+  past: string;
   sub: string;
   href: string;
 }
@@ -203,6 +207,7 @@ export function nextUpCells(input: NextUpInput): NextUpCell[] {
         label: `Week ${input.week} kickoff`,
         value: countdown(now, input.kickoff),
         at: input.kickoff.toISOString(),
+        past: "now",
         sub: format(input.kickoff),
         href: `/matchups/${input.week}`,
       },
@@ -216,6 +221,7 @@ export function nextUpCells(input: NextUpInput): NextUpCell[] {
         label: input.review.count === 1 ? "Trade in review" : `${input.review.count} trades in review`,
         value: soonest ? (soonest > now ? countdown(now, soonest) : "clearing") : "clock unknown",
         at: soonest && soonest > now ? soonest.toISOString() : null,
+        past: "clearing",
         sub: soonest ? `first clears ${format(soonest)}` : "",
         href: "/trades",
       },
@@ -228,6 +234,7 @@ export function nextUpCells(input: NextUpInput): NextUpCell[] {
         label: "Waivers run",
         value: countdown(now, input.waiverRun),
         at: input.waiverRun.toISOString(),
+        past: "now",
         sub: format(input.waiverRun),
         href: "/waivers",
       },
@@ -240,6 +247,7 @@ export function nextUpCells(input: NextUpInput): NextUpCell[] {
         label: "Reporter files",
         value: countdown(now, input.reporter.at),
         at: input.reporter.at.toISOString(),
+        past: "now",
         sub: `${input.reporter.label}, ${format(input.reporter.at)}`,
         href: "/report",
       },
