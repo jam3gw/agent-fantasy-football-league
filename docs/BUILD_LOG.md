@@ -5007,3 +5007,44 @@ shown it.
   Every deployment from now on reads the new email. The force-push of 51
   branches queued one preview build per branch; production redeployed from
   the rewritten `main`.
+
+## 2026-09-08 — Vercel build 3 m 40 s → about 2 m: parallel checks, warm caches, faster tests
+
+Jake asked for faster Vercel builds. The last green preview build
+(`dpl_4h5a5XogfZzMyAxXfgf5rGJdNm3V`, 4 cores) spent its 220 s like this:
+install 6 s (cached), lint 19 s, typecheck 29 s, tests 114 s, briefs +
+migrate + seed 4 s, `next build` 33 s, deploy 10 s, build cache 16 s. The
+checks were serial, package by package, and the tests were 52% of the build.
+
+- `package.json`: `pnpm check` now runs every package's lint and typecheck
+  at once (`pnpm -r --parallel run "/^(lint|typecheck)$/"`), then the
+  tests. `pnpm lint` and `pnpm typecheck` are parallel too. Locally the two
+  went from 66 s serial to 37 s.
+- ESLint runs with `--cache --cache-strategy content` and `tsc` with
+  `incremental`, both writing under `node_modules/.cache`, which the Vercel
+  build cache keeps between deploys (root `node_modules` is restored: the
+  install step takes two seconds). Content, not mtime, because a fresh
+  clone gives every file a new mtime. Warm, lint + typecheck take 10 s.
+  Next's own type check in `next build` uses its separate
+  `.next/cache/.tsbuildinfo`, so the two do not thrash.
+- `packages/engine/test/helpers/db.ts`: the first boot in a run dumps the
+  migrated PGlite data directory to `node_modules/.cache/pglite/<hash>.tar`
+  (hash of `packages/engine/drizzle`; written to a temp file and renamed,
+  so parallel workers never read a partial one) and every later boot loads
+  it. Measured: boot + migrate 1.8 s, load 0.55 s, over 42 files.
+- `packages/data/src/http.ts` exports `RETRY_POLICY`; `finalizeLadder.test.ts`
+  sets `backoffMs` to 0. The file made Sleeper fail on purpose and then
+  slept through the 1 + 2 + 4 s backoff on every call: 45 s for nine tests,
+  now 3.4 s.
+- `optimal.test.ts`: the brute-force reference memoizes on (slot, used
+  players). Still exhaustive; checked equal to the old walk on all 250
+  rosters before the old one was removed. 20 s → 2.3 s.
+- Locally the suite is 111 s → 79 s wall. The Vercel numbers are in the
+  next entry once the preview and the following build have run.
+- README test count corrected (975).
+
+Not done, and why: moving the checks off the deploy path (they were put
+there today, on purpose, after Actions had no runners); dropping the web
+`tsc` because `next build` repeats it (that check runs after the tests, so
+a type error would surface two minutes later than it does now, for a saving
+of about three seconds once the checks run in parallel).

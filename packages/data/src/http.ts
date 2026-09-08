@@ -15,6 +15,14 @@ export interface FetchJsonOptions {
   db?: EngineDb;
 }
 
+/**
+ * Retry timing for every external source. Tests set `backoffMs` to 0: with
+ * the default, one dead source costs seven seconds of sleep (1 s + 2 s + 4 s)
+ * per call, which is right in production and a waste in a test that makes
+ * Sleeper fail on purpose.
+ */
+export const RETRY_POLICY = { retries: 3, backoffMs: 1_000 };
+
 export class HttpError extends Error {
   constructor(
     public readonly url: string,
@@ -46,7 +54,15 @@ export async function fetchWithRetry(
   url: string,
   opts: FetchJsonOptions & { parse?: "json" | "text" } = {},
 ): Promise<unknown> {
-  const { timeoutMs = 30_000, retries = 3, backoffMs = 1_000, headers, healthKey, db, parse = "json" } = opts;
+  const {
+    timeoutMs = 30_000,
+    retries = RETRY_POLICY.retries,
+    backoffMs = RETRY_POLICY.backoffMs,
+    headers,
+    healthKey,
+    db,
+    parse = "json",
+  } = opts;
   let lastError: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
