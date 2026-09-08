@@ -4922,3 +4922,65 @@ at the market is a check-in they book.
 - Review round 3 (fresh reviewer): one stale sentence in the §8.6 row; the
   note capped at 500 characters server-side to match the form. Nothing
   blocking; the loop ends here.
+
+## 2026-09-08 — GitHub Actions removed; checks moved into the Vercel build
+
+Jake asked to stop all GitHub Actions usage. Deploys never used Actions:
+the Vercel GitHub App builds on every push (production from `main`,
+previews from other branches). The only workflow was `ci.yml`, which ran
+lint, typecheck, tests and a database-less `next build`.
+
+- `.github/workflows/ci.yml` deleted.
+- `vercel.json` `buildCommand` is now `pnpm check && pnpm --filter
+  @league/web build`. `pnpm check` is the existing root script (lint,
+  typecheck, `vitest run`). A red check fails the deploy, which is the
+  same gate the workflow gave, now on Vercel build minutes.
+- The workflow's extra `next build` without a database is gone. The real
+  build covers it: it migrates, seeds and builds against the project's
+  `DATABASE_URL`, so a page that throws during prerender still fails the
+  deploy.
+- RUNBOOK "If `main` is failing" and a VERIFIED note updated.
+
+## 2026-09-08 — Test suite 352 s → 108 s: one PGlite per test file
+
+Jake asked whether the unit tests could run faster. Vitest already ran
+files in parallel on every core; the time was inside the tests. Forty-two
+files booted a fresh PGlite and ran the migrations in `beforeEach`.
+Measured on this box: booting PGlite is 2–3 s, the migrations on top of it
+are near zero, loading a pre-migrated data dir is 1.4 s, and truncating
+every table is 60 ms.
+
+- `packages/engine/test/helpers/db.ts`: `createTestDb()` boots one
+  instance per file (Vitest isolates files, so a module-level cache is
+  per file) and truncates every table with `restart identity cascade` on
+  each later call. `close` is a no-op. `createTestDb({ isolated: true })`
+  still gives a real second instance; `live.test.ts` uses it for its
+  "un-seeded database" case.
+- `packages/data/test/helpers/db.ts` re-exports the engine helper, as the
+  agent package already did.
+- Full suite: 961 tests, 352 s → 108 s wall on four cores. `optimal.test.ts`
+  (17 s, brute force over 250 rosters) is now the slowest file.
+
+## 2026-09-08 — Tests can no longer send email or reach the network
+
+Jake got real "[League]" alarm emails (week not finalized, gateway
+balance, storage budget) at 19:17–19:27 UTC. They came from the
+`watchdogs` and `capacity` tests running inside the Vercel build, which
+has the production `RESEND_API_KEY` and `ALERT_EMAIL_TO`. Locally the
+keys are absent and `sendEmail` returns early, so the suite had never
+shown it.
+
+- `vitest.setup.ts` (root), wired as `setupFiles` in all five project
+  configs: deletes every credential and outbound address from
+  `process.env` (database, gateway, search, Resend, alert email and
+  webhook, admin secrets, site domain, simulation flag) and replaces the
+  global `fetch` with one that throws. Tests that need the network already
+  stub `fetch`; `vi.unstubAllGlobals` restores the throwing one.
+- Verified: the full suite passes with fake production secrets in the
+  environment, and a throwaway test saw the keys gone and `fetch` throw.
+- This retires the CLAUDE.md convention "a test that hits a live API is
+  skipped in CI unless the key is present": no such test exists, and the
+  setup file now strips the keys everywhere.
+- Also fixed in the same push: `countdown.dom.test.ts` failed on Vercel
+  because the build sets `NODE_ENV=production` and React's production
+  build has no `act`. The root vitest config pins `NODE_ENV=test`.
