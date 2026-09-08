@@ -5051,7 +5051,35 @@ checks were serial, package by package, and the tests were 52% of the build.
   `next build` (31 s: 13 s compile, 12 s type check, 2 s prerender), and
   about 30 s of clone, install, deploy and cache upload that the build
   command does not control.
-- README test count corrected (975).
+- README test count corrected (978).
+
+Review round (fresh-context reviewer; diff, SPEC, §15): no spec
+contradiction, no security finding. Fixed:
+
+- The snapshot name now also hashes the PGlite and drizzle-orm versions: a
+  data directory belongs to one Postgres build, and the old name would have
+  loaded a stale one after a dependency bump.
+- A snapshot that is missing, empty (PGlite loads a zero-byte tar as an
+  empty database, silently), unloadable, or has no tables falls back to a
+  fresh migrate, which rewrites it. Before, a bad load failed every
+  database test until someone cleared the build cache.
+- The temp file name uses a random id, not the pid, so the write stays
+  atomic under a thread pool too. Old `*.tar` snapshots are removed when a
+  new one is written.
+- New tests: `engine/test/dbSnapshot.test.ts` checks a loaded snapshot has
+  the same columns, constraints, indexes and migration log as a fresh
+  migrate; `data/test/http.test.ts` checks `fetchWithRetry` reads
+  `RETRY_POLICY` at call time and sleeps the doubling backoff.
+
+Recorded, not changed: ESLint's cache key is file content plus the ESLint
+version and the serialized config, so a plugin upgrade that changes a
+rule's behaviour without changing its options could reuse a stale result
+for an unchanged file. Flat-config plugin objects carry their version in
+`meta`, which is part of that serialization, so the common case
+invalidates; the residual risk is accepted for a 20 s saving per build.
+`RETRY_POLICY` is a mutable export; nothing outside the one test writes
+it, and a setter guarded on `NODE_ENV` would be more machinery than the
+risk warrants.
 
 Not done, and why: moving the checks off the deploy path (they were put
 there today, on purpose, after Actions had no runners); dropping the web
