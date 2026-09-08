@@ -92,7 +92,7 @@ Point `DATABASE_URL` at the Neon `dev` branch, not `main`.
 ```bash
 pnpm lint          # eslint, all packages
 pnpm typecheck     # tsc --noEmit, all packages
-pnpm test          # 440 tests
+pnpm test          # 978 tests
 pnpm --filter @league/web build   # migrate + seed + next build
 ```
 

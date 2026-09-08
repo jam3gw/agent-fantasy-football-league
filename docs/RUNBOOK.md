@@ -217,6 +217,8 @@ During the draft: `/draft` shows the live room. `/admin/draft` can pause (the re
 
 A failing `main` is the top priority. There is no GitHub Actions workflow: the Vercel build is the only check. It runs `pnpm check` (lint, typecheck, tests) and then the web build, which applies migrations before `next build`. A failing check or a bad migration fails the deploy rather than reaching production. Roll back in Vercel, fix forward on a branch, and confirm `/admin/health` is green after the next deploy.
 
+The check keeps three caches under `node_modules/.cache`, which the Vercel build cache carries from one deploy to the next: ESLint results (`eslint/`, keyed on file content), `tsc` build info (`tsc/`), and a PGlite data directory with the migrations applied (`pglite/`, named after a hash of `packages/engine/drizzle`). Each is a speed-up only; delete the directory, or redeploy without the build cache, and the next run rebuilds all three.
+
 ## Who Vercel says deployed
 
 Vercel names a git deployment after the team member whose GitHub login matches the commit author. Commits by `jam3gw` must map to the `mosesjake32@gmail.com` Vercel account, and that account must have GitHub connected (Account Settings, then Authentication). A GitHub login can be connected to one Vercel account only. If "Deployed by" shows an unexpected member, or Vercel skips a deployment for a commit by `jam3gw`, check that connection first, then Settings, then Members on the team.

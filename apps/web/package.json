@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "pnpm --filter @league/agent briefs && pnpm --filter @league/engine migrate && tsx scripts/seed.mts && next build",
     "start": "next start",
-    "lint": "eslint",
+    "lint": "eslint --cache --cache-strategy content --cache-location ../../node_modules/.cache/eslint/web/",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "seed": "tsx scripts/seed.mts"

@@ -27,7 +27,8 @@
         "./*"
       ]
     },
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "tsBuildInfoFile": "../../node_modules/.cache/tsc/web.tsbuildinfo"
   },
   "include": [
     "next-env.d.ts",

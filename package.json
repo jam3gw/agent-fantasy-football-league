@@ -7,10 +7,10 @@
     "node": "24.x"
   },
   "scripts": {
-    "lint": "pnpm -r --no-bail lint",
-    "typecheck": "pnpm -r --no-bail typecheck",
+    "lint": "pnpm -r --parallel --no-bail lint",
+    "typecheck": "pnpm -r --parallel --no-bail typecheck",
     "test": "vitest run",
-    "check": "pnpm lint && pnpm typecheck && pnpm test"
+    "check": "pnpm -r --parallel --no-bail run \"/^(lint|typecheck)$/\" && pnpm test"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

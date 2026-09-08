@@ -13,6 +13,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
+import { RETRY_POLICY } from "@league/data";
 import {
   getSettings,
   health,
@@ -35,6 +36,10 @@ let clock: FixedClock;
 const SEASON = 2026;
 
 const STARTERS = ["QB", "RB1", "RB2", "WR1", "WR2", "TE", "FLEX", "K", "DST"] as const;
+
+// A dead source is the point of these tests; sleeping through its retry
+// backoff is not. Vitest isolates files, so this reaches nothing else.
+RETRY_POLICY.backoffMs = 0;
 
 beforeEach(async () => {
   ({ db, close } = await createTestDb());

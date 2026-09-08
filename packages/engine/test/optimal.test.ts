@@ -7,29 +7,37 @@ import { describe, expect, it } from "vitest";
 import { computeOptimalLineup, type OptimalCandidate } from "../src/optimal.ts";
 import { SLOT_ELIGIBILITY, STARTING_SLOTS } from "../src/roster.ts";
 
-/** Independent reference: try every assignment of players to the 9 slots. */
+/**
+ * Independent reference: try every assignment of players to the 9 slots.
+ *
+ * The walk is exhaustive; the memo only stops it re-walking a suffix of slots
+ * it has already solved for the same set of used players. The best total from
+ * slot `i` on depends on nothing but `i` and that set, so the memo changes
+ * nothing about the answer and turns a twenty-second test into a fast one.
+ */
 function bruteForce(candidates: OptimalCandidate[]): number {
   const slots = [...STARTING_SLOTS];
-  let best = 0;
   const used = new Set<string>();
-  const walk = (i: number, total: number): void => {
-    if (i === slots.length) {
-      if (total > best) best = total;
-      return;
-    }
+  const memo = new Map<string, number>();
+  const best = (i: number): number => {
+    if (i === slots.length) return 0;
+    const key = `${i}|${[...used].sort().join(",")}`;
+    const seen = memo.get(key);
+    if (seen !== undefined) return seen;
     const slot = slots[i]!;
+    let top = best(i + 1); // leave empty
     for (const c of candidates) {
       if (used.has(c.playerId)) continue;
       const positions = c.fantasyPositions ?? [];
       if (!SLOT_ELIGIBILITY[slot].some((p) => positions.includes(p))) continue;
       used.add(c.playerId);
-      walk(i + 1, total + c.pts);
+      top = Math.max(top, c.pts + best(i + 1));
       used.delete(c.playerId);
     }
-    walk(i + 1, total); // leave empty
+    memo.set(key, top);
+    return top;
   };
-  walk(0, 0);
-  return Math.round(best * 100) / 100;
+  return Math.round(Math.max(0, best(0)) * 100) / 100;
 }
 
 function mulberry32(a: number): () => number {
