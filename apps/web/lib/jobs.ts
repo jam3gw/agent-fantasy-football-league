@@ -5,7 +5,7 @@ import "server-only";
  * Booking is idempotent through `scheduled_jobs.idempotency_key`, so a missed
  * tick never loses a schedule and `book_daily_jobs` can re-book freely.
  */
-import { eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import { etDay, jobKey, nextEtTime, nextEtWeekdayTime, sessionKey, zonedTimeToUtc } from "@league/shared";
 import type { EngineDb } from "@league/engine";
@@ -14,6 +14,7 @@ import {
   createSession,
   getSettings,
   health,
+  nflGames,
   runWaivers,
   scheduledJobs,
   teams,
@@ -160,8 +161,11 @@ export async function runJob(
       // §2 (2026-09-05): scheduled trade windows are retired. Agents look for
       // trades in a check-in they book themselves (§8.10). A `sessions.book`
       // row queued before the change books nothing when it fires, and no admin
-      // path books a new one; /admin/teams opens a window by hand.
-      if (String(payload.kind) === "trade_window") {
+      // path books a new one; /admin/teams opens a window by hand. The one
+      // exception (2026-09-08) is a row that names its `window`: that is the
+      // commissioner opening a window for every team at once — used for the
+      // last window, whose brief announces that the league opens no more.
+      if (String(payload.kind) === "trade_window" && typeof payload.window !== "string") {
         console.warn("sessions.book: scheduled trade windows are retired (§2, 2026-09-05); nothing booked");
         return;
       }
@@ -320,17 +324,30 @@ async function bookSessionsForKind(
   const settings = await getSettings(db);
   if (!inSeason(settings)) return; // §4.3 job gating
 
+  const now = clock.now();
+  // The recurring bookings (a row with no `window` or `date` of its own) are
+  // keyed on the ET booking day rather than the week alone. Before 2026-09-08
+  // the key was the week, and a league week that spans two of the same
+  // weekday — Week 1 ran from the draft on Aug 30 to the first kickoff on
+  // Sep 9 — made the second Tuesday's weekly_review and the second Wednesday's
+  // post_waivers silent no-ops: `createSession` saw the first booking's key
+  // and skipped every team. The day keeps a same-day re-run idempotent.
+  //
+  // The day alone would also re-book a week that did not advance: a deferred
+  // or stalled finalization leaves `current_week` where it was, and the next
+  // Tuesday would book twelve reviews of a week whose result is not final
+  // (§13.4 relies on that Tuesday creating nothing). So a recurring booking
+  // is skipped once the current week's first kickoff has passed: the week is
+  // under way, and its weekly_review and post_waivers have already run.
+  const recurring = payload.window === undefined && payload.date === undefined;
+  if (recurring && (await weekUnderWay(db, settings.season, settings.currentWeek, now))) {
+    console.warn(`sessions.book: week ${settings.currentWeek} is under way (its first kickoff has passed); ${kind} not booked`);
+    return;
+  }
+  const suffix = String(payload.date ?? payload.window ?? etDay(now));
+
   const allTeams = await db.select().from(teams);
   const active = allTeams.filter((t) => !t.paused && !t.eliminated);
-  const now = clock.now();
-  // The key carries the booking day as well as the week. Before 2026-09-08 it
-  // was the week alone, and a league week that spans two of the same weekday
-  // (Week 1 ran from the draft on Aug 30 to the first kickoff on Sep 10)
-  // made the second Tuesday's weekly_review and the second Wednesday's
-  // post_waivers silent no-ops: `createSession` saw the first booking's key
-  // and skipped every team. In season one week has one of each weekday, so
-  // the day changes nothing there; it only stops the preseason collision.
-  const suffix = `${String(payload.date ?? payload.window ?? settings.currentWeek)}:${etDay(now)}`;
 
   let i = 0;
   for (const team of active) {
@@ -346,6 +363,17 @@ async function bookSessionsForKind(
     });
     i++;
   }
+}
+
+/** True once the week's first NFL game has kicked off. A week with no games recorded is not under way. */
+async function weekUnderWay(db: EngineDb, season: number, week: number, now: Date): Promise<boolean> {
+  const first = await db
+    .select({ kickoffAt: nflGames.kickoffAt })
+    .from(nflGames)
+    .where(and(eq(nflGames.season, season), eq(nflGames.week, week)))
+    .orderBy(asc(nflGames.kickoffAt))
+    .limit(1);
+  return first[0] !== undefined && first[0].kickoffAt.getTime() <= now.getTime();
 }
 
 async function bookReporterSession(
