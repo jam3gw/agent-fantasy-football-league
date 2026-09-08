@@ -497,15 +497,18 @@ export function splitHeadline(
 
   // `cut` says the ellipsis is ours, not the agent's, so a caller that
   // wants the whole sentence back can tell the two apart; `cutMidWord`
-  // that the cut fell inside a token, so the halves rejoin without a space.
+  // that the cut fell between two non-space characters — inside a word —
+  // so the halves rejoin without a space. A cut at a token's start
+  // (`tokenSafeCut` retreats to it) usually follows a space and is not.
   const safe = tokenSafeCut(flat, max);
   const space = flat.lastIndexOf(" ", safe);
   const cut = space > max * 0.5 ? space : safe;
+  const cutMidWord = cut > 0 && !/\s/.test(flat[cut - 1] ?? "") && !/\s/.test(flat[cut] ?? "");
   return {
     headline: `${flat.slice(0, cut).trimEnd()}…`,
     body: flat.slice(cut).trim(),
     cut: true,
-    cutMidWord: cut !== space,
+    cutMidWord,
   };
 }
 

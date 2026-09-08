@@ -34,6 +34,14 @@ Jake looked at the live page after #17 and asked for three more fixes.
   the board, not the transcript — board posts carry no session id; the
   echo survives when the session's decision line lands more than two
   minutes after the post, or when the post fell out of the query batch.
+- Review round 2 (fresh reviewer): `cutMidWord` was true whenever the cut
+  retreated to an inline token's start, which follows a space, so a lead
+  fused "Declined:**Trade 41" — it is true only between two non-space
+  characters now. The rejoined lead took every sentence under 200
+  characters, not the first — the splitter's cap is held just under the
+  text's length so it looks for the sentence end; a text whose only end is
+  its last character is the headline whole. Tests fed from the real
+  splitter for both, the size thresholds, and an echo older than its post.
 
 ### Questions for Jake
 
