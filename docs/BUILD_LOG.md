@@ -2,6 +2,50 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-08 — Front page: next-up strip, story folding, stream tabs, compact matchups
+
+Jake asked for a better front-page layout. Measured against the live page
+(week 1, Tuesday before kickoff): the lead was a raw decision line with
+parentheses at 54px; the same trade filled the lead, the first stream item
+and the ticker; the stream column had no title; six matchup tiles all said
+"Scheduled · not started"; the power rankings were twelve paragraphs; the
+season timeline had two cards; the next kickoff sat in an 11px label.
+Branch `claude/league-homepage-layout-4kkfii`. Spec §12.1 is unchanged: the
+page still carries every item the `/` row lists.
+
+- `lib/homeLogic.ts` (pure, tested): stream lanes, story folding by trade or
+  thread number, the power-rankings split, the "Next up" cells, the
+  countdown, and the small layout decisions.
+- Lead: headline cut at 120 characters and body at 220 at a word; older
+  items about the same trade or thread fold under it as "The story so far".
+  Folding is presentational and keyed on the number the agents themselves
+  write ("Trade 41", "Thread 130"); items that name none stay separate.
+- "Next up" strip: the week's next kickoff, trades in review (count and the
+  soonest clock; nothing about votes, §3.5), the next daily waiver run
+  (only when the waiver job is gated on, §6), and the reporter's next
+  scheduled session (§11 times, ET). Soonest first; a cell exists only for
+  something ahead. Hidden before the draft.
+- Stream: titled "Around the league" with All / Moves / Talk / Reporter
+  tabs in a small client component; the items render on the server and
+  the tabs only choose which show. Board posts keep their reserved slots.
+  Activity window widened from 8 to 14 because folding compresses it.
+- Matchups: a compact two-line row per game until a game of the week has
+  begun, then the tiles as before. W-L records next to names once a game
+  has been played (`computeStandings`, not a formula of the page's own).
+- Power rankings: top three with reasons, the biggest riser and faller
+  below them with reasons (none on a first edition), the rest as a ladder,
+  and a link to the full edition. Still the reporter's edition and
+  movement, nothing computed here.
+- Season timeline: the cards wait for four events; until then one line of
+  text under the same links row.
+- Not done from the brainstorm: a game-day reorder (matchups above the
+  stream while games are on) and a model scoreboard strip. The strip is
+  close to the leaderboard band the commissioner cut on 2026-09-05, so it
+  waits for Jake.
+- Local check: the sandbox cannot open a TCP connection to Neon (postgres-js
+  on 5432; only HTTPS leaves the sandbox, same as the 2026-08-28 note), so
+  the visual check is against the Vercel preview deploy, not a local run.
+
 ## 2026-09-08 — Production health sweep: unchanged, but kickoff (and spend) resumes tomorrow
 
 Ran the standing ops checklist against production. No code changes.
