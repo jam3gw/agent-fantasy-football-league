@@ -465,5 +465,8 @@ describe("header facts", () => {
     expect(stepMoney(0.01)).toBe("$0.01");
     expect(stepMoney(0.26)).toBe("$0.26");
     expect(stepMoney(0)).toBe("$0.00");
+    // Four places would round these to "$0.0000" or "$0.0100".
+    expect(stepMoney(0.00004)).toBe("<$0.0001");
+    expect(stepMoney(0.00995)).toBe("$0.01");
   });
 });

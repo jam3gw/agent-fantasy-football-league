@@ -33,8 +33,9 @@ step can never read `gateway` on `/spend` today.
 One display finding, fixed the same day: `money()` rounds to the cent, so
 every one of the twelve steps on `/sessions/2598` read "$0.00" beside a
 banner saying "Cost accrues per step, shown inline". Step costs on the
-transcript and the live thinking card now show four places under a cent
-(`stepMoney`); totals keep two.
+transcript now show four places under a cent, or "<$0.0001" below that
+(`stepMoney`); totals, including the live thinking card's running total,
+keep two.
 
 ## 2026-09-05 — AI Gateway catalog check for the GLM-5.3 promo entry (§8.1)
 
