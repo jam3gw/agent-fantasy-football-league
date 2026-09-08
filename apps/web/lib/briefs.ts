@@ -19,6 +19,10 @@ export async function readBrief(kind: SessionKind, context: Record<string, unkno
   if (kind === "manual" && typeof context.objective === "string") {
     return `${text}\n\nObjective: ${context.objective}`;
   }
+  // A window the commissioner opened for every team can carry a note (§9.1).
+  if (kind === "trade_window" && typeof context.note === "string") {
+    return `${text}\n\nFrom the commissioner: ${context.note}`;
+  }
   // §8.10: the agent's own reason is the brief for the check-in it booked.
   if (kind === "self_check_in" && typeof context.reason === "string") {
     return `${text}\n\nYour reason: ${context.reason}`;

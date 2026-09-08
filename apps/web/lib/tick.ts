@@ -401,8 +401,8 @@ async function stage(database: EngineDb, clock: Clock, key: string, run: () => P
  * failure shows up as a `failed` job — but nothing was *watching* for it, and
  * the consequences are entirely silent: `current_week` stays put, so the next
  * week is never planned, lineups are never carried over, and Tuesday's
- * `sessions.book` computes the same idempotency keys as last week and creates
- * nothing at all. The league keeps looking alive while every team fields the
+ * `sessions.book` sees a week already under way and creates nothing at all
+ * (`bookSessionsForKind` in jobs.ts). The league keeps looking alive while every team fields the
  * lineup it had and the standings stop moving.
  *
  * The check: a `stats.finalize` booked for the week the league is *still* in,

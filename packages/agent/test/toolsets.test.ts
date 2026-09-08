@@ -160,7 +160,10 @@ describe("§8.10 — check-in tools", () => {
   });
 
   it("only the kinds with room to think ahead may schedule one", () => {
-    for (const kind of ["weekly_review", "post_waivers", "lineup_check", "injury_response", "onboarding"] as const) {
+    // The commissioner's manual trade_window joined the list on 2026-09-08:
+    // its brief tells the agent to book a check-in for its next look at the
+    // market, which needs the tool in the same session.
+    for (const kind of ["weekly_review", "post_waivers", "lineup_check", "injury_response", "onboarding", "trade_window"] as const) {
       expect(toolsForKind(kind).map((t) => t.name), kind).toContain("schedule_check_in");
     }
     // A draft pick has 180 seconds and one job; smoke is a smoke test; the
