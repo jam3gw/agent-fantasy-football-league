@@ -5,6 +5,9 @@
  * reading in full and the ladder, and what goes in the "Next up" strip.
  */
 import { nextEtWeekdayTime } from "@league/shared";
+import { countdown } from "./countdown";
+
+export { countdown };
 
 /* ------------------------------------------------------------------ *
  * Lanes — the stream's filter tabs
@@ -23,10 +26,13 @@ export const LANE_TABS: readonly [LaneFilter, string][] = [
 /**
  * A kind is what the engine or the decision log calls it: "board post",
  * "board reply", "trade response", "waiver add", "session failed", "reporter".
- * Anything said on the board is talk; the reporter is its own lane; every
- * other thing an agent did — a transaction, a decision, a failure — is a move.
+ * Anything said on the board is talk; the reporter is its own lane, and so
+ * is anything the reporter did under another kind — its failed session is
+ * the reporter's, not one of the twelve's moves; every other thing an agent
+ * did — a transaction, a decision, a failure — is a move.
  */
-export function laneOf(kind: string): Lane {
+export function laneOf(kind: string, actor?: "team" | "league" | "reporter"): Lane {
+  if (actor === "reporter") return "reporter";
   const k = kind.toLowerCase();
   if (k.includes("board")) return "talk";
   if (k.includes("reporter")) return "reporter";
@@ -45,15 +51,31 @@ export function inLane(lane: Lane, filter: LaneFilter): boolean {
  * The key a stream item shares with the others about the same thing. Agents
  * name trades and threads by number as a proper noun ("Trade 41", "Thread
  * 130") or with a hash ("trade #41"), so that number is the story. Prose
- * that happens to put a number after the word — "trade 2 RBs for a WR1",
- * "thread 2 of my plan" — is not a name and keys nothing. Text that names
- * none is its own story.
+ * that happens to put a number after the word is not a name and keys
+ * nothing: "trade 2 RBs for a WR1" (lower case), "Trade 3-for-1 with Gibbs"
+ * (a ratio), and a headline that opens with the imperative, "Trade 2 bench
+ * WRs for an RB2" (a capital only because it starts the sentence, and a
+ * lower-case word after the number). A name that opens a sentence and is
+ * followed by a lower-case verb — "Trade 43 clears review" — is lost to
+ * that last rule; the item stays its own story, which is the safe side.
+ * Text that names none is its own story.
  */
 export function storyKey(text: string): string | null {
-  const trade = /\b(?:Trade\s*#?\s*|trade\s*#\s*)(\d{1,6})\b/.exec(text);
-  if (trade) return `trade:${trade[1]}`;
-  const thread = /\b(?:Thread\s*#?\s*|thread\s*#\s*)(\d{1,6})\b/.exec(text);
-  if (thread) return `thread:${thread[1]}`;
+  const name = (word: string): string | null => {
+    const re = new RegExp(`\\b(?:${word}\\s*#?\\s*|${word.toLowerCase()}\\s*#\\s*)(\\d{1,6})\\b(?!-)`, "g");
+    for (const m of text.matchAll(re)) {
+      const after = text.slice(m.index + m[0].length);
+      const opensSentence = m.index === 0 || /[.!?]\s*$/.test(text.slice(0, m.index));
+      const hash = m[0].includes("#");
+      if (opensSentence && !hash && /^\s+[a-z]/.test(after)) continue;
+      return m[1]!;
+    }
+    return null;
+  };
+  const trade = name("Trade");
+  if (trade) return `trade:${trade}`;
+  const thread = name("Thread");
+  if (thread) return `thread:${thread}`;
   return null;
 }
 
@@ -128,19 +150,6 @@ export function splitPower<T extends { rank: number; move: number }>(rows: reado
  * Next up — the strip of what happens next
  * ------------------------------------------------------------------ */
 
-/** "in 2d 4h", "in 3h 12m", "in 12m", or "now" once it has arrived. */
-export function countdown(from: Date, to: Date): string {
-  const ms = to.getTime() - from.getTime();
-  if (ms <= 0) return "now";
-  const minutes = Math.floor(ms / 60_000);
-  const days = Math.floor(minutes / 1440);
-  const hours = Math.floor((minutes % 1440) / 60);
-  const mins = minutes % 60;
-  if (days > 0) return `in ${days}d ${hours}h`;
-  if (hours > 0) return `in ${hours}h ${mins}m`;
-  return `in ${Math.max(mins, 1)}m`;
-}
-
 /**
  * The reporter's next scheduled session (SPEC §11): power rankings Tuesday
  * 10:30 AM ET, the recap Tuesday 11:00 AM ET, the preview Thursday
@@ -159,6 +168,8 @@ export function nextReporterPost(now: Date): { at: Date; label: string } {
 export interface NextUpCell {
   label: string;
   value: string;
+  /** The instant the value counts down to, when it is a countdown; the client keeps it ticking. */
+  at: string | null;
   sub: string;
   href: string;
 }
@@ -191,6 +202,7 @@ export function nextUpCells(input: NextUpInput): NextUpCell[] {
       cell: {
         label: `Week ${input.week} kickoff`,
         value: countdown(now, input.kickoff),
+        at: input.kickoff.toISOString(),
         sub: format(input.kickoff),
         href: `/matchups/${input.week}`,
       },
@@ -203,6 +215,7 @@ export function nextUpCells(input: NextUpInput): NextUpCell[] {
       cell: {
         label: input.review.count === 1 ? "Trade in review" : `${input.review.count} trades in review`,
         value: soonest ? (soonest > now ? countdown(now, soonest) : "clearing") : "clock unknown",
+        at: soonest && soonest > now ? soonest.toISOString() : null,
         sub: soonest ? `first clears ${format(soonest)}` : "",
         href: "/trades",
       },
@@ -214,6 +227,7 @@ export function nextUpCells(input: NextUpInput): NextUpCell[] {
       cell: {
         label: "Waivers run",
         value: countdown(now, input.waiverRun),
+        at: input.waiverRun.toISOString(),
         sub: format(input.waiverRun),
         href: "/waivers",
       },
@@ -225,6 +239,7 @@ export function nextUpCells(input: NextUpInput): NextUpCell[] {
       cell: {
         label: "Reporter files",
         value: countdown(now, input.reporter.at),
+        at: input.reporter.at.toISOString(),
         sub: `${input.reporter.label}, ${format(input.reporter.at)}`,
         href: "/report",
       },

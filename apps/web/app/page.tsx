@@ -36,6 +36,7 @@ import {
   formatEtRecent,
   formatEtTime,
 } from "@/components/broadcast";
+import { Countdown } from "@/components/countdown";
 import { HomeStream, type StreamItem } from "@/components/home-stream";
 import { InlineMarkdown } from "@/components/markdown";
 import { gameStatus, plainExcerpt, truncateFlat, winChancePercent } from "@/lib/broadcastLogic";
@@ -308,7 +309,7 @@ export default async function HomePage() {
   // Moves about one trade or thread fold into one story; the newest story
   // is the lead, and the older items about it are "the story so far". Board
   // posts and the reporter never fold: they keep their own place and tab.
-  const [leadStory, ...stories] = clusterStories(activity, (item) => laneOf(item.kind) === "moves");
+  const [leadStory, ...stories] = clusterStories(activity, (item) => laneOf(item.kind, item.actor) === "moves");
   const lead = leadStory?.lead;
   const leadBy = lead ? byline(lead, teamsById) : null;
   const isLive = live.liveGames > 0;
@@ -372,7 +373,7 @@ export default async function HomePage() {
     const item = story.lead;
     const by = byline(item, teamsById);
     return {
-      lane: laneOf(item.kind),
+      lane: laneOf(item.kind, item.actor),
       node: (
         <article className="grid grid-cols-[72px_minmax(0,1fr)] gap-4 border-b border-border py-[18px]">
           <div className="pt-[5px] font-mono text-[11px] text-faint">{formatEtRecent(item.at, { now })}</div>
@@ -499,7 +500,9 @@ export default async function HomePage() {
                 className="block bg-surface px-4 py-3 text-foreground transition-colors hover:bg-accent-soft hover:text-foreground"
               >
                 <div className="text-[11px] font-bold uppercase tracking-[0.1em] text-faint">{cell.label}</div>
-                <div className="mt-1 text-[20px] font-bold tabular-nums tracking-[-0.02em]">{cell.value}</div>
+                <div className="mt-1 text-[20px] font-bold tabular-nums tracking-[-0.02em]">
+                  {cell.at ? <Countdown to={cell.at} initial={cell.value} /> : cell.value}
+                </div>
                 {cell.sub ? <div className="mt-0.5 truncate text-[12px] text-muted">{cell.sub}</div> : null}
               </Link>
             ))}
