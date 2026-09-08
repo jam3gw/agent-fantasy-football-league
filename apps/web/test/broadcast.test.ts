@@ -791,6 +791,27 @@ describe("reserveWindow", () => {
     expect(window[0]).toBe(posts[13]);
   });
 
+  it("holds an item matched by two reservations once, and the second hold moves on", () => {
+    const items = [post(12), post(11), move(10), move(9), move(8)];
+    const window = reserveWindow(items, 3, [
+      { match: () => true, slots: 1 }, // the newest of all: post(12)
+      { match: (i) => i.kind === "board post", slots: 1 }, // post(12) is held already, so post(11)
+      { match: (i) => i.kind !== "board post", slots: 1 }, // move(10)
+    ]);
+    expect(window).toEqual([post(12), post(11), move(10)]);
+  });
+
+  it("keeps the newest item when the limit is below the reservations' total", () => {
+    const newest = move(13);
+    const window = reserveWindow([newest, post(12), post(11), post(10)], 3, [
+      { match: () => true, slots: 1 },
+      { match: (i) => i.kind === "board post", slots: 3 },
+      { match: (i) => i.kind !== "board post", slots: 4 },
+    ]);
+    expect(window).toHaveLength(3);
+    expect(window[0]).toBe(newest);
+  });
+
   it("never exceeds the limit and copes with nothing to hold", () => {
     const window = reserveWindow([post(10), post(11)], 1, [
       { match: (i) => i.kind === "board post", slots: 3 },
