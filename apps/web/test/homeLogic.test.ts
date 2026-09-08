@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
+import { splitHeadline } from "@/lib/broadcastLogic";
 import {
   LANE_TABS,
   RESERVED_BOARD_SLOTS,
   RESERVED_MOVE_SLOTS,
   activityWindow,
   clusterStories,
+  dropBoardEchoes,
+  leadHeadline,
   compactMatchups,
   countdown,
   inLane,
@@ -64,6 +67,97 @@ describe("activityWindow", () => {
     const newest = reply(16);
     const window = activityWindow([newest, ...Array.from({ length: 10 }, (_, i) => move(10 - i))], 3);
     expect(window[0]).toBe(newest);
+  });
+});
+
+describe("dropBoardEchoes", () => {
+  const at = (iso: string) => new Date(iso);
+  it("drops a board session's decision line when the same team posted within two minutes", () => {
+    const post = { kind: "board post", teamId: 4, at: at("2026-09-08T16:16:10Z") };
+    const echo = { kind: "board reply", teamId: 4, at: at("2026-09-08T16:16:40Z") };
+    const otherTeam = { kind: "board reply", teamId: 5, at: at("2026-09-08T16:16:40Z") };
+    const later = { kind: "board reply", teamId: 4, at: at("2026-09-08T16:30:00Z") };
+    const move = { kind: "trade response", teamId: 4, at: at("2026-09-08T16:16:40Z") };
+    expect(dropBoardEchoes([echo, post, otherTeam, later, move])).toEqual([post, otherTeam, later, move]);
+  });
+  it("keeps a board line with no post, a league line, and one at the edge of the window", () => {
+    const post = { kind: "board post", teamId: 4, at: at("2026-09-08T16:16:00Z") };
+    const before = { kind: "board reply", teamId: 4, at: at("2026-09-08T16:14:00Z") }; // exactly two minutes before
+    const tooEarly = { kind: "board reply", teamId: 4, at: at("2026-09-08T16:13:59Z") };
+    const league = { kind: "board reply", teamId: null, at: at("2026-09-08T16:16:00Z") };
+    expect(dropBoardEchoes([post, before, tooEarly, league])).toEqual([post, tooEarly, league]);
+    expect(dropBoardEchoes([{ kind: "board reply", teamId: 9, at: at("2026-09-08T16:16:00Z") }])).toHaveLength(1);
+  });
+  it("drops a decision line that landed before its post", () => {
+    const echo = { kind: "board reply", teamId: 4, at: at("2026-09-08T16:15:00Z") };
+    const post = { kind: "board post", teamId: 4, at: at("2026-09-08T16:16:30Z") };
+    expect(dropBoardEchoes([post, echo])).toEqual([post]);
+  });
+});
+
+describe("leadHeadline", () => {
+  const uncut = { cut: false, cutMidWord: false };
+  const cut = { cut: true, cutMidWord: false };
+  it("keeps a short headline as it is", () => {
+    expect(leadHeadline({ headline: "Declined Trade 41, no counter.", body: "The math.", ...uncut })).toEqual({
+      headline: "Declined Trade 41, no counter.",
+      body: "The math.",
+      size: "big",
+    });
+  });
+  it("sets an uncut headline past 120 characters a size down", () => {
+    const long = `${"Declined the offer because the projections say so and the roster math agrees ".repeat(2).trim()}.`;
+    expect(long.length).toBeGreaterThan(120);
+    expect(leadHeadline({ headline: long, body: "", ...uncut }).size).toBe("small");
+  });
+  it("leaves an agent's own trailing ellipsis alone", () => {
+    const out = leadHeadline({ headline: "I weighed the Kelce offer and then…", body: "I let it go. The math never got there.", ...uncut });
+    expect(out.headline).toBe("I weighed the Kelce offer and then…");
+    expect(out.body).toBe("I let it go. The math never got there.");
+  });
+  it("rejoins a cut first sentence and sets it a size down", () => {
+    const first = "Five Alarm declined Stevenson+Purdy for Kelce+Reed and their math held — I re-ran it: Rhamondre's bench value";
+    const rest = "is 11.76 minus the wire RB I can't reach at prio 12, so I was paying 3.6 of insurance. A deal that fails my own test.";
+    const out = leadHeadline({ headline: `${first}…`, body: rest, ...cut });
+    expect(out.headline).toBe(`${first} is 11.76 minus the wire RB I can't reach at prio 12, so I was paying 3.6 of insurance.`);
+    expect(out.body).toBe("A deal that fails my own test.");
+    expect(out.size).toBe("small");
+  });
+  it("takes the first sentence of the rejoined text, not all of it", () => {
+    const text = "Traded for Amon-Ra St. Brown because the WR room needed a real one for the stretch run and the price was a bench RB. Body sentence here.";
+    const stream = splitHeadline(text);
+    expect(stream.cut).toBe(true);
+    const out = leadHeadline({ ...stream });
+    expect(out.headline).toBe("Traded for Amon-Ra St. Brown because the WR room needed a real one for the stretch run and the price was a bench RB.");
+    expect(out.body).toBe("Body sentence here.");
+  });
+  it("rejoins at a bold token's start with the space it had", () => {
+    const text = "Declined: **Trade 41 from Five Alarm, the one with Stevenson and Purdy for Kelce and Reed at prio 12** and I said so.";
+    const stream = splitHeadline(text);
+    expect(stream).toMatchObject({ cut: true, cutMidWord: false });
+    const out = leadHeadline({ ...stream });
+    expect(out.headline).toBe(text);
+  });
+  it("sets the size by the thresholds exactly", () => {
+    const at120 = `${"x".repeat(119)}.`;
+    expect(leadHeadline({ headline: at120, body: "", ...uncut }).size).toBe("big");
+    expect(leadHeadline({ headline: `${at120}y`, body: "", ...uncut }).size).toBe("small");
+  });
+  it("rejoins a cut inside a word without a space", () => {
+    const out = leadHeadline({ headline: "See https://example.com/a-very-long-path-that-goes-on-and…", body: "on-and-on/end for the note.", cut: true, cutMidWord: true });
+    expect(out.headline).toBe("See https://example.com/a-very-long-path-that-goes-on-andon-and-on/end for the note.");
+  });
+  it("keeps the body's own cut when the whole fits", () => {
+    const out = leadHeadline({ headline: "A first sentence that the stream cut at a word for…", body: "no good reason but length…", ...cut });
+    expect(out.headline).toBe("A first sentence that the stream cut at a word for no good reason but length…");
+    expect(out.body).toBe("");
+  });
+  it("still cuts a sentence that runs past two hundred characters", () => {
+    const words = Array.from({ length: 60 }, (_, i) => `word${i}`).join(" ");
+    const out = leadHeadline({ headline: "Something long that was cut…", body: `${words} and on it goes.`, ...cut });
+    expect(out.headline.endsWith("…")).toBe(true);
+    expect(out.headline.length).toBeLessThanOrEqual(201);
+    expect(out.size).toBe("small");
   });
 });
 

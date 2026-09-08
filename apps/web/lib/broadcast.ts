@@ -38,7 +38,7 @@ import {
 } from "@league/engine";
 import { db } from "./db";
 import { allTeams, safeRead as safe, settings } from "./queries";
-import { activityWindow, jobsGatedOn } from "./homeLogic";
+import { activityWindow, dropBoardEchoes, jobsGatedOn } from "./homeLogic";
 import type { EngineDb } from "@league/engine";
 import type { Result } from "./broadcastLogic";
 import {
@@ -76,6 +76,9 @@ export interface ActivityItem {
   /** The line the front page sets big, and the rest of what was said. */
   headline: string;
   body: string;
+  /** Whether the headline's ellipsis is the splitter's cut (see splitHeadline), and whether it fell inside a word. */
+  cut: boolean;
+  cutMidWord: boolean;
   /** Where the item leads: the session that produced it when known, else the page it lives on. */
   href: string;
   cta: string;
@@ -193,10 +196,12 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
   // still say something. The headline is the first sentence of whatever is
   // left and the body is the rest, so the front page can set one big.
   const story = (text: string, max = 300) => {
-    const { headline, body } = splitHeadline(text);
+    const { headline, body, cut, cutMidWord } = splitHeadline(text);
     return {
       headline: headline || "(nothing outside a code block)",
       body: truncateFlat(body, max),
+      cut,
+      cutMidWord,
     };
   };
   const decisions = [...moveDecisions, ...boardDecisions];
@@ -238,6 +243,8 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
       kind: "session failed",
       headline: `A ${f.kind.replace(/_/g, " ")} session ${f.status === "timed_out" ? "timed out" : "failed"}`,
       body: "Nothing this agent planned in it was applied.",
+      cut: false,
+      cutMidWord: false,
       href: `/sessions/${f.id}`,
       cta: "Open the session",
       bad: true,
@@ -249,13 +256,16 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
       kind: "reporter",
       headline: r.title,
       body: plainExcerpt(r.bodyMd, 45),
+      cut: false,
+      cutMidWord: false,
       href: "/report",
       cta: "Read the full report",
       bad: false,
     })),
   ];
 
-  return activityWindow(items, limit);
+  // A board session's decision line and its post are one act; the post stays.
+  return activityWindow(dropBoardEchoes(items), limit);
 }
 
 /* ------------------------------------------------------------------ *

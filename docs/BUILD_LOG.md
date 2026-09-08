@@ -2,6 +2,56 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-08 — Front page: board echoes dropped, whole first sentence in the lead, sticky matchups
+
+Jake looked at the live page after #17 and asked for three more fixes.
+
+- The lead and the first stream item were the same act twice: a board
+  session writes a post and a decision-log line that says it posted, from
+  the same team a minute apart, in the same words. `dropBoardEchoes`
+  (pure, `homeLogic.ts`) drops a board-kind decision line when the same
+  team has a board post within two minutes; a board session that posted
+  nothing keeps its line. Applied in `leagueActivity` before the window.
+- The lead's headline was the stream's 110-character cut, so a long first
+  sentence read "Rhamondre's bench value…" over a body that began "is
+  11.76 minus". `leadHeadline` rejoins the cut sentence and gives the lead
+  the whole of it, set a size down past 120 characters, cut at a word only
+  past 200 (the same abbreviation-aware splitter, wider).
+- The matchup column is sticky on a wide screen: the stream runs three
+  screens and the list a third of one.
+- Tests for both helpers. Not done: capping the stream at ten items with a
+  "more" link — Jake asked for these three.
+- Review round 1 (fresh reviewer): the lead's rejoin read a trailing "…"
+  as the splitter's cut, so an agent's own "and then…" was fused with the
+  next sentence — `splitHeadline` returns `cut` and `cutMidWord` now, the
+  item carries them, and the lead rejoins only on `cut`, without a space
+  when the cut fell inside a word. The sticky column ran past a laptop's
+  viewport with six tiles — sticky only while the list is compact. The
+  `leadText!` assertions became a guard. Tests for the agent's ellipsis,
+  the mid-word join, a body cut at 300, an uncut 120+ headline, and the
+  echo filter's edges (no post, a league line, the two-minute boundary).
+  Noted, no change: a board act's stream item is the post, whose link is
+  the board, not the transcript — board posts carry no session id; the
+  echo survives when the session's decision line lands more than two
+  minutes after the post, or when the post fell out of the query batch.
+- Review round 2 (fresh reviewer): `cutMidWord` was true whenever the cut
+  retreated to an inline token's start, which follows a space, so a lead
+  fused "Declined:**Trade 41" — it is true only between two non-space
+  characters now. The rejoined lead took every sentence under 200
+  characters, not the first — the splitter's cap is held just under the
+  text's length so it looks for the sentence end; a text whose only end is
+  its last character is the headline whole. Tests fed from the real
+  splitter for both, the size thresholds, and an echo older than its post.
+
+### Questions for Jake
+
+- GitHub Actions has assigned no runner to any run since 18:27 UTC today:
+  `main` at `706be55` waited five minutes and failed with no steps, and
+  every run after it fails in two seconds the same way. This session
+  cannot re-run jobs (403). It looks like the Actions minutes or spending
+  limit on the private repo — please check Settings → Billing → Actions.
+  Until then the merge gate is the local run: lint, typecheck, all tests.
+
 ## 2026-09-08 — Front page: two defects seen on the live page after the layout pass
 
 Looked at the deployed page an hour after the merge (the last trade window
