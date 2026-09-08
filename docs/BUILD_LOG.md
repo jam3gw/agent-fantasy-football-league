@@ -5042,8 +5042,15 @@ checks were serial, package by package, and the tests were 52% of the build.
 - Locally the suite is 111 s → 79 s wall.
 - First Vercel build on the branch (`dpl_2eibnT4mpqrBDfwGNpTt6zREe25B`,
   caches cold): lint + typecheck 33 s (was 48 s), tests 84 s (was 114 s),
-  `next build` 32 s, 172 s from build start to ready (was 220 s). The
-  warm numbers follow below once the next push has built.
+  `next build` 32 s, 172 s from build start to ready (was 220 s).
+- Second build (`dpl_AbvGMhM6jkJuJG6cSQVK7n2HBaMm`, caches warm from the
+  first): lint + typecheck 11 s, tests 82 s, `next build` 31 s, 146 s from
+  build start to deployed. That is the steady state: 220 s → 146 s, and
+  `node_modules/.cache` does survive between Vercel builds.
+- What is left: the tests (82 s, mostly PGlite-backed files at 1–4 s each),
+  `next build` (31 s: 13 s compile, 12 s type check, 2 s prerender), and
+  about 30 s of clone, install, deploy and cache upload that the build
+  command does not control.
 - README test count corrected (975).
 
 Not done, and why: moving the checks off the deploy path (they were put
