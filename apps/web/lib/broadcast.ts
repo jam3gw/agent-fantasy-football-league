@@ -38,7 +38,7 @@ import {
 } from "@league/engine";
 import { db } from "./db";
 import { allTeams, safeRead as safe, settings } from "./queries";
-import { activityWindow, jobsGatedOn } from "./homeLogic";
+import { activityWindow, dropBoardEchoes, jobsGatedOn } from "./homeLogic";
 import type { EngineDb } from "@league/engine";
 import type { Result } from "./broadcastLogic";
 import {
@@ -255,7 +255,8 @@ export async function leagueActivity(limit = 12): Promise<ActivityItem[]> {
     })),
   ];
 
-  return activityWindow(items, limit);
+  // A board session's decision line and its post are one act; the post stays.
+  return activityWindow(dropBoardEchoes(items), limit);
 }
 
 /* ------------------------------------------------------------------ *

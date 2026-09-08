@@ -2,6 +2,26 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-08 — Front page: board echoes dropped, whole first sentence in the lead, sticky matchups
+
+Jake looked at the live page after #17 and asked for three more fixes.
+
+- The lead and the first stream item were the same act twice: a board
+  session writes a post and a decision-log line that says it posted, from
+  the same team a minute apart, in the same words. `dropBoardEchoes`
+  (pure, `homeLogic.ts`) drops a board-kind decision line when the same
+  team has a board post within two minutes; a board session that posted
+  nothing keeps its line. Applied in `leagueActivity` before the window.
+- The lead's headline was the stream's 110-character cut, so a long first
+  sentence read "Rhamondre's bench value…" over a body that began "is
+  11.76 minus". `leadHeadline` rejoins the cut sentence and gives the lead
+  the whole of it, set a size down past 120 characters, cut at a word only
+  past 200 (the same abbreviation-aware splitter, wider).
+- The matchup column is sticky on a wide screen: the stream runs three
+  screens and the list a third of one.
+- Tests for both helpers. Not done: capping the stream at ten items with a
+  "more" link — Jake asked for these three.
+
 ## 2026-09-08 — Front page: two defects seen on the live page after the layout pass
 
 Looked at the deployed page an hour after the merge (the last trade window
