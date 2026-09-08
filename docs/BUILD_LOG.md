@@ -5039,8 +5039,11 @@ checks were serial, package by package, and the tests were 52% of the build.
 - `optimal.test.ts`: the brute-force reference memoizes on (slot, used
   players). Still exhaustive; checked equal to the old walk on all 250
   rosters before the old one was removed. 20 s → 2.3 s.
-- Locally the suite is 111 s → 79 s wall. The Vercel numbers are in the
-  next entry once the preview and the following build have run.
+- Locally the suite is 111 s → 79 s wall.
+- First Vercel build on the branch (`dpl_2eibnT4mpqrBDfwGNpTt6zREe25B`,
+  caches cold): lint + typecheck 33 s (was 48 s), tests 84 s (was 114 s),
+  `next build` 32 s, 172 s from build start to ready (was 220 s). The
+  warm numbers follow below once the next push has built.
 - README test count corrected (975).
 
 Not done, and why: moving the checks off the deploy path (they were put
