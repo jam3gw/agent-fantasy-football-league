@@ -4679,3 +4679,6 @@ at the market is a check-in they book.
   finalization fixed after Tuesday 9:00 AM; tests for the note and for a
   paused team. Not changed: `sessions.book` still trusts `payload.kind`
   (admin-only, pre-existing).
+- Review round 3 (fresh reviewer): one stale sentence in the §8.6 row; the
+  note capped at 500 characters server-side to match the form. Nothing
+  blocking; the loop ends here.

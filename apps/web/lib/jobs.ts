@@ -348,7 +348,8 @@ async function bookSessionsForKind(
   // The commissioner's note rides the labelled window into the brief, the way
   // an objective rides a manual session (§8.6), so the brief itself stays
   // true for every window and the announcement is made once.
-  const note = label !== null && typeof payload.note === "string" && payload.note.trim() ? payload.note.trim() : null;
+  // Capped like the form field on /admin/jobs, so a hand-written row cannot pad every brief.
+  const note = label !== null && typeof payload.note === "string" && payload.note.trim() ? payload.note.trim().slice(0, 500) : null;
 
   const allTeams = await db.select().from(teams);
   const active = allTeams.filter((t) => !t.paused && !t.eliminated);
