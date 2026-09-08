@@ -2,6 +2,40 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-08 — Production health sweep: unchanged, but kickoff (and spend) resumes tomorrow
+
+Ran the standing ops checklist against production. No code changes.
+
+- `/api/healthz` — `200`, `lastTickAt` under a second old.
+- `health` table — `cron.tick`/`sessions.sweep`/`tick.capacity` all fresh.
+  The same 2026-08-29 `tick.*` errors (fixed `league_settings` query) sit
+  under otherwise-current keys, not current faults. `nflverse.player_stats`
+  still 404s, unchanged since 2026-09-01; `sleeper.stats` remains healthy
+  and primary.
+- `scheduled_jobs` — 759 done, 140 due and none overdue, the same 6
+  `failed` rows from 2026-08-29/30 — not reproduced since, no new failures.
+- `sessions` — 0 `running`, 0 queued past `due_at` by 15+ minutes, 0 new
+  failed/timed_out since the last sweep (the same 8 `timed_out` rows on
+  record). Still quiet since Sept 5 (no spend); the 119 queued rows (105
+  `lineup_check` + 14 `self_check_in`) are booked for week 1 and correctly
+  not due yet — the first of them (Thursday night kickoff) comes due
+  tomorrow, Sept 9 ~22:00 UTC.
+- `gateway.credits` — balance still **$78.93**, unchanged for the third
+  day running because no sessions have run since Sept 5. Kickoff is now
+  tomorrow: once lineup checks and self check-ins start firing Sept 9,
+  spend resumes and could run through $78.93 fast. Already flagged
+  directly to Jake on 2026-09-06 and reconfirmed unchanged on 2026-09-07;
+  flagging once more since this is the last sweep before spend resumes —
+  he still needs to top up the Vercel AI Gateway balance (and check
+  auto-top-up) before tomorrow evening, or every team's session fails at
+  $0.
+- Vercel — latest production deploy `READY`
+  (`dpl_HhLLxfbnM3yfR2BuDbJbyZRVMju7`), zero runtime errors in the last
+  24h.
+
+Nothing to fix in code; the one open item is Jake funding the AI Gateway
+balance before Sept 9 evening.
+
 ## 2026-09-07 — Production health sweep: unchanged from yesterday, no new alarm
 
 Ran the standing ops checklist against production. No code changes.
