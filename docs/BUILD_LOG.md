@@ -4872,3 +4872,21 @@ at the market is a check-in they book.
 - Review round 3 (fresh reviewer): one stale sentence in the §8.6 row; the
   note capped at 500 characters server-side to match the form. Nothing
   blocking; the loop ends here.
+
+## 2026-09-08 — GitHub Actions removed; checks moved into the Vercel build
+
+Jake asked to stop all GitHub Actions usage. Deploys never used Actions:
+the Vercel GitHub App builds on every push (production from `main`,
+previews from other branches). The only workflow was `ci.yml`, which ran
+lint, typecheck, tests and a database-less `next build`.
+
+- `.github/workflows/ci.yml` deleted.
+- `vercel.json` `buildCommand` is now `pnpm check && pnpm --filter
+  @league/web build`. `pnpm check` is the existing root script (lint,
+  typecheck, `vitest run`). A red check fails the deploy, which is the
+  same gate the workflow gave, now on Vercel build minutes.
+- The workflow's extra `next build` without a database is gone. The real
+  build covers it: it migrates, seeds and builds against the project's
+  `DATABASE_URL`, so a page that throws during prerender still fails the
+  deploy.
+- RUNBOOK "If `main` is failing" and a VERIFIED note updated.

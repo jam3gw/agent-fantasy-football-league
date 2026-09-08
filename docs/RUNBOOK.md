@@ -215,7 +215,7 @@ During the draft: `/draft` shows the live room. `/admin/draft` can pause (the re
 
 ## If `main` is failing
 
-A failing `main` is the top priority. The build applies migrations before `next build`, so a bad migration fails the deploy rather than corrupting production. Roll back in Vercel, fix forward on a branch, and confirm `/admin/health` is green after the next deploy.
+A failing `main` is the top priority. There is no GitHub Actions workflow: the Vercel build is the only check. It runs `pnpm check` (lint, typecheck, tests) and then the web build, which applies migrations before `next build`. A failing check or a bad migration fails the deploy rather than reaching production. Roll back in Vercel, fix forward on a branch, and confirm `/admin/health` is green after the next deploy.
 
 ## Known limits
 
