@@ -642,6 +642,21 @@ export function toDate(value: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * "$0.0016", "$0.26" — the cost of one model step. A cent is too coarse for a
+ * step: on the cheapest slot every step of session 2598 (2026-09-08) cost
+ * between $0.0002 and $0.0031 and the whole transcript read "$0.00" twelve
+ * times over. Anything under a cent shows four places, anything too small
+ * for even those reads "<$0.0001", and a real $0 stays "$0.00". Totals keep
+ * `money()`; this is for the per-step figure only.
+ */
+export function stepMoney(n: number): string {
+  if (n > 0 && n < 0.0001) return "<$0.0001";
+  const fine = Math.round(n * 1e4) / 1e4;
+  if (fine > 0 && fine < 0.01) return `$${fine.toFixed(4)}`;
+  return `$${n.toFixed(2)}`;
+}
+
 /** "188k", "1.9k", "940" — token counts at a glance, exact value in the title. */
 export function compactTokens(n: number): string {
   if (n < 1000) return String(n);

@@ -2,6 +2,41 @@
 
 Each entry: date, the request made, what came back. Items marked **verify** in SPEC.md land here.
 
+## 2026-09-08 — Gateway cost field and the ledger, checked on session 2598 (§8.7 verify)
+
+Jake asked whether cost tracking works for `/sessions/2598` (Five Alarm
+Spark, `meta/muse-spark-1.2-contributor`, week 1 trade window, succeeded,
+12 model steps, 15 tool calls). Checked production (Neon `main`) end to end:
+
+| Check | Result |
+|---|---|
+| `spend_ledger` rows for the session | 12, one per model step, `step_no` 1–12, all `source = gateway` |
+| `assistant` events in `session_events` | 12, each carrying the same `usage` and `cost_usd` as its ledger row |
+| `sessions.cost_usd` vs `sum(spend_ledger.cost_usd)` | $0.013368 = $0.013368 |
+| `sessions` token columns vs ledger sums | 371,741 in / 25,829 out / 22,903 reasoning on both sides |
+| Gateway cost vs `model_prices` recompute (0.10 in, 0.20 out, 0.002 cache read, reasoning at the output rate) | equal to the cent-of-a-cent on all 12 steps |
+| `spend_rollups` for team 11 (day 2026-09-08, week W1, season 2026) | $0.013368 / $2.925117 / $3.897208, each equal to the ledger |
+| `spend_rollups` for the league | equal to the ledger once the one running session (2599) had written its step; a rollup lags the ledger only for the seconds between one step's `recordSpend` and its `updateRollups` |
+| `/sessions/2598` | "Cost $0.01", 398k tokens, 23k reasoning |
+| `/spend/team-11` | session 2598 listed, 2026-09-08 day row $0.01, season (list) = season (paid) = $3.90 |
+
+So the **verify** on the gateway cost field (§8.7) is resolved for this
+model: `providerMetadata.gateway.cost` is present and `computeStepCost`
+prefers it, and it agrees with the catalog price table exactly. The same
+check across every ledger row since 2026-09-05 shows `gateway` for Alibaba,
+DeepSeek, Meta, Mistral and Z.ai steps and `price_table` for every Anthropic
+step (Fable 5, Sonnet 5): the gateway reports no cost (or 0) on those, and
+the fallback the spec prescribes is what the ledger records. Not a fault —
+the fallback is priced from the same catalog — but it is why an Anthropic
+step can never read `gateway` on `/spend` today.
+
+One display finding, fixed the same day: `money()` rounds to the cent, so
+every one of the twelve steps on `/sessions/2598` read "$0.00" beside a
+banner saying "Cost accrues per step, shown inline". Step costs on the
+transcript now show four places under a cent, or "<$0.0001" below that
+(`stepMoney`); totals, including the live thinking card's running total,
+keep two.
+
 ## 2026-09-05 — AI Gateway catalog check for the GLM-5.3 promo entry (§8.1)
 
 Request: `GET https://ai-gateway.vercel.sh/v1/models` (no auth). Slot 12 moves
@@ -341,7 +376,7 @@ Notes:
 - Spec candidate `xai/grok-4.6` does not exist; xAI models are listed under the `spacexai/` prefix. `spacexai/grok-4.6` is live.
 - BYOK routing was removed on 2026-08-28 (§8.9): every call bills the AI Gateway, so `billed_to` always reads `gateway` and there is nothing per-provider left to verify.
 - Sonnet 5 catalog price (2/10) is lower than Appendix F's estimate (3/15); GLM-5.3 (1.40/4.40) differs from F's GLM-5.2 figure. Appendix F is an estimate; the catalog is authoritative for `model_prices`.
-- Some models have tiered long-context pricing (OpenAI >272k, Gemini/Grok >200k) and DeepSeek has peak/off-peak windows; `model_prices` stores the base tier, and the gateway-reported cost (when present, §8.7 verify pending) is preferred over the price table.
+- Some models have tiered long-context pricing (OpenAI >272k, Gemini/Grok >200k) and DeepSeek has peak/off-peak windows; `model_prices` stores the base tier, and the gateway-reported cost (when present; §8.7 verify resolved 2026-09-08 above) is preferred over the price table.
 - Raw catalog extract for the 12 models: `fixtures/gateway-models-2026-08-28.json`.
 
 ## 2026-08-28 — Endpoint reachability

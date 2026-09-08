@@ -18,6 +18,7 @@ import {
   outcomeOf,
   playerIndex,
   reasoningOf,
+  stepMoney,
   stepTitle,
   stepToolLabel,
 } from "../lib/sessionTranscript";
@@ -454,5 +455,18 @@ describe("header facts", () => {
     expect(compactTokens(940)).toBe("940");
     expect(compactTokens(1_860)).toBe("1.9k");
     expect(compactTokens(187_324)).toBe("187k");
+  });
+
+  it("keeps a sub-cent step cost visible instead of rounding it to $0.00", () => {
+    // Session 2598 (2026-09-08): twelve steps between $0.0002 and $0.0031.
+    expect(stepMoney(0.001616)).toBe("$0.0016");
+    expect(stepMoney(0.000163)).toBe("$0.0002");
+    expect(stepMoney(0.0099)).toBe("$0.0099");
+    expect(stepMoney(0.01)).toBe("$0.01");
+    expect(stepMoney(0.26)).toBe("$0.26");
+    expect(stepMoney(0)).toBe("$0.00");
+    // Four places would round these to "$0.0000" or "$0.0100".
+    expect(stepMoney(0.00004)).toBe("<$0.0001");
+    expect(stepMoney(0.00995)).toBe("$0.01");
   });
 });
