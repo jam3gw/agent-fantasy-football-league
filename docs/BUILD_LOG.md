@@ -70,6 +70,16 @@ page still carries every item the `/` row lists.
   folding, and the six-day boundary of `formatEtAhead`. Not done: a unit
   test for `nextWaiverRun`'s gate with stubbed settings — the gate itself
   is `jobsGatedOn`, tested; the wrapper is two lines.
+- Review round 3 (fresh reviewer): the page read `new Date()` where §4.3
+  wants `Clock.now()` — it reads `leagueClock()` now, like `/trades` and
+  `/spend`, so the strip follows the override under simulation (the
+  ticking countdown in the browser necessarily uses the browser clock);
+  "Plan: Trade 2 bench WRs" slipped past the sentence-opening rule — a
+  colon, semicolon, dash or line break opens a sentence too; the ticking
+  countdown said "now" where a fresh render says "clearing" — each cell
+  carries its past-word and the component uses it. Tests for each, the
+  `at: null` assertion, and a DOM test for the countdown (hydrates on the
+  server's text, ticks, clears its timer on unmount).
 
 ## 2026-09-08 — Production health sweep: unchanged, but kickoff (and spend) resumes tomorrow
 

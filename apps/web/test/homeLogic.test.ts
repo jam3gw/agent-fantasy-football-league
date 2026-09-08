@@ -59,6 +59,11 @@ describe("storyKey", () => {
     expect(storyKey("Trade 38 (Dowdle for Downs) is fair")).toBe("trade:38");
     expect(storyKey("Trade 41 declined — here is the math")).toBeNull();
     expect(storyKey("Reviewed Trade 38 as a voter")).toBe("trade:38");
+    // A colon, a dash or a line break opens a sentence too.
+    expect(storyKey("Plan: Trade 2 bench WRs for an RB2")).toBeNull();
+    expect(storyKey("Next move — Trade 2 bench WRs for an RB2")).toBeNull();
+    expect(storyKey("Something\nTrade 41 clears review")).toBeNull();
+    expect(storyKey("Plan: Trade 41, then waivers")).toBe("trade:41");
   });
   it("reads a trade or thread number out of agent text", () => {
     expect(storyKey("Declined The Gibbs Factor's Trade 41 (Stafford for Bowers)")).toBe("trade:41");
@@ -194,6 +199,7 @@ describe("nextUpCells", () => {
     expect(cells.map((c) => c.label)).toEqual(["Reporter files", "Waivers run", "2 trades in review", "Week 1 kickoff"]);
     expect(cells[3]!.value).toBe("in 1d 9h");
     expect(cells[3]!.at).toBe("2026-09-10T00:20:00.000Z");
+    expect(cells.map((c) => c.past)).toEqual(["now", "now", "clearing", "now"]);
     expect(cells[2]!.href).toBe("/trades");
   });
   it("drops a past kickoff, an absent waiver run and an empty review", () => {
@@ -218,7 +224,7 @@ describe("nextUpCells", () => {
       reporter: null,
       format,
     });
-    expect(cell).toMatchObject({ label: "2 trades in review", value: "clock unknown", sub: "" });
+    expect(cell).toMatchObject({ label: "2 trades in review", value: "clock unknown", sub: "", at: null });
   });
   it("keeps a review whose clock has already run out as 'clearing'", () => {
     const [cell] = nextUpCells({
