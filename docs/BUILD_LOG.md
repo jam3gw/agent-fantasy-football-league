@@ -2,6 +2,76 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-09 — Operational sweep: team 12's promo model left the AI Gateway catalog
+
+Scheduled health-check routine against production (`/api/healthz`, the Neon
+`health`/`scheduled_jobs`/`sessions` tables, Vercel runtime errors and
+deployment state). No code defect found; one active operational condition
+and one pre-existing one, both need the commissioner rather than a merge.
+
+- **Team 12 ("The Fourth Dimension") cannot run sessions.** `teams.model_id`
+  is still `zai/glm-5.3-promo-50` (the 50%-off promo entry, §8.1's model
+  registry comment already flagged this exact risk on 2026-09-05). The AI
+  Gateway started returning `GatewayModelNotFoundError: Model
+  'zai/glm-5.3-promo-50' not found` at 13:06:32 UTC today — first seen in
+  Vercel's runtime error log, confirmed in `sessions` (id 2821 at 13:06,
+  id 2832 at 13:18, both `post_waivers`, both the same error) and in
+  `scheduled_jobs`. The retry sweep will keep re-running and re-failing it;
+  team 12 will miss waiver claims, trade responses and lineup changes until
+  it's fixed. `/admin/health`'s three-in-a-row outage banner had not yet
+  fired at check time (2 failures logged, needs 3), so the commissioner
+  likely does not know yet.
+  - Not fixed here: the documented remedy is the "swap" action on
+    `/admin/teams`, which re-checks the id against the live gateway catalog,
+    updates `teams.model_id`/`model_label`/`provider`, and moves that
+    team's queued sessions to the new id inside one action — an
+    authenticated admin write, not a code change, and a raw SQL UPDATE
+    would skip the catalog check and the session requeue (and bypass the
+    engine-transaction rule in CLAUDE.md). The previous two model swaps
+    (slot 2 off Opus 5, slot 11 onto Meta's Contributor tier) are both
+    recorded as commissioner calls, and swapping back to `zai/glm-5.3`
+    roughly doubles that seat's cost ($0.70/$2.20 → $1.40/$4.40), so this
+    is also a spend decision, not just a config fix. Flagged to Jake now
+    rather than waiting for the outage banner.
+- **AI Gateway balance under the alarm line.** `health.gateway.credits`
+  has recorded `last_error` (not `last_success`) on every hourly check
+  since 2026-09-01; the latest read (12:55 UTC today) is $74.50, under the
+  $100 line. Per the runbook this alarms once/day and never stops a
+  session, but at $0 every team fails at once, and the two conditions
+  compound (team 12 already can't run; a gateway outage would take the
+  other eleven with it). Needs a top-up in the Vercel AI Gateway team tab;
+  no code fix applies.
+- **Recorded, not urgent:** `health.nflverse.player_stats` has had no
+  successful fetch since 2026-09-01 — both known release URLs
+  (`stats_player_week_2026.csv`, `player_stats_2026.csv`) still 404
+  directly (checked outside the app). This is nflverse not having
+  published a 2026 `player_stats` release under either known name yet, not
+  a bug in `fetchNflverseWeeklyStats` (it already tries both names).
+  Per §13.4 this never blocks finalization — the ladder finalizes from
+  whatever stats sources exist — so it only reduces the audit coverage in
+  §5.6 until nflverse publishes. No action taken; re-check if it's still
+  down once the season is further along.
+- Everything else was healthy: `/api/healthz` fresh (`lastTickAt` 40s old
+  at check time), the tick's own health keys (`tick.games`,
+  `tick.live_scores`, `tick.retries`, `tick.trades`,
+  `tick.stall_watchdog`) all last-succeeded within the last tick after a
+  one-time SQL error on 2026-08-29 that has not recurred, `sessions.sweep`
+  4 minutes old, no session queued past its `due_at` by more than a few
+  seconds, one `running` session (team 10, ~6 minutes, well under the
+  800s timeout seen historically), and the six `failed` `scheduled_jobs`
+  rows are all 9+ days old and already explained (retired FantasyPros
+  ingest jobs booked before its 2026-08-29 removal, and one
+  `digest.weekly` failure on 2026-08-30 that has succeeded on every run
+  since). Latest production deploy (`dpl_AbrXnDdr9Prkx3FkqwEmWoJghGK3`,
+  commit `c0c04f0`) is `READY` and matches `main`'s head.
+
+### Questions for Jake
+
+- Team 12's model swap and the AI Gateway top-up are both waiting on you —
+  see above. Swap `zai/glm-5.3-promo-50` back to `zai/glm-5.3` on
+  `/admin/teams` (or point it at a different current promo if one exists)
+  and top up the AI Gateway balance when you get a chance.
+
 ## 2026-09-08 — Front page: board echoes dropped, whole first sentence in the lead, sticky matchups
 
 Jake looked at the live page after #17 and asked for three more fixes.
