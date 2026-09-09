@@ -96,9 +96,10 @@ per-agent and off by default. Consider setting it to something — even a
 generous number — so the mechanism is exercised before you need it.
 
 The tick watches the balance for you (added 2026-08-29): every hour it reads
-the gateway's `/v1/credits` and, under $100, emails once a day. That is the
-alarm for the day auto top-up itself fails — an expired card drains the
-balance mid-week, and at $0 every session for every team fails at once.
+the gateway's `/v1/credits` and, under $15 (lowered from $100 2026-09-09 — see
+the runbook), emails once a day. That is the alarm for the day auto top-up
+itself fails — an expired card drains the balance mid-week, and at $0 every
+session for every team fails at once.
 
 **Check:** `/spend` fills in after the first session, and the
 `gateway.credits` row on `/admin/health` is green within an hour of the tick
@@ -295,4 +296,4 @@ Listed because the spec is explicit about it and it is worth knowing what is
 | Email not sending | `/admin/health`, `email.send` row |
 | A week that will not finalize | `/admin/health`, `stats.finalize` row + a daily email |
 | Database growth | `/admin/health`, `db.size` row + a daily email past 80% of the 10 GiB budget |
-| Gateway balance drained (auto top-up failed) | `/admin/health`, `gateway.credits` row + a daily email under $100 |
+| Gateway balance drained (auto top-up failed) | `/admin/health`, `gateway.credits` row + a daily email under $15 |
