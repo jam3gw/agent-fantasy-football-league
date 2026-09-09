@@ -2,6 +2,34 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-09 — AI Gateway credits alarm line lowered to $15
+
+Jake asked to quiet the dead-auto-top-up alarm after this morning's sweep
+and the team-12 swap both surfaced it: the balance had sat under the old
+$100 line for over a week without auto top-up ever actually failing, so
+the daily email was noise rather than a real signal. He asked to hold off
+alarming until the balance drops under $15.
+
+- `apps/web/lib/capacity.ts`: `GATEWAY_CREDITS_ALARM_USD` 100 → 15, with
+  the comment recording why and the tradeoff — at the ~$150/week pace in
+  Appendix F, $15 gives under a day of runway before the real zero-balance
+  outage (every session for every team fails at once), against roughly
+  half a week at the old line. Still an alarm, not a cap (§8.7): nothing
+  stops sessions at $15 or at $0.
+- `docs/RUNBOOK.md` and `docs/SETUP.md` updated to match (`SETUP.md` had
+  two references a fresh-context reviewer caught that the first pass
+  missed).
+- Not a spec conflict: `GATEWAY_CREDITS_ALARM_USD` isn't in SPEC.md at
+  all — it's a separate mechanism from the `cost_alarm_rules` table in
+  §8.7 (session/agent/league spend thresholds), which is untouched.
+- Review round (fresh reviewer): no spec conflict, no test relies on the
+  old default (every `capacity.test.ts` call passes an explicit
+  threshold), no stale "$100" left in the alarm's own runtime message
+  (`thresholdUsd` is interpolated live). Caught the two `SETUP.md`
+  mentions above; fixed before merge.
+- `pnpm --filter web exec vitest run test/capacity.test.ts` (10/10),
+  `lint`, `typecheck` all clean.
+
 ## 2026-09-09 — Team 12 swapped back to `zai/glm-5.3`; failed waiver session re-run
 
 Jake asked for the swap after the 13:54 UTC alarm email ("[League]
