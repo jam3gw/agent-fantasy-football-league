@@ -35,7 +35,10 @@ sessions all succeeded at 13:00.
 - Still open for Jake: the AI Gateway balance ($73.25 at 13:56 UTC, under
   the $100 line) needs a top-up in the Vercel team's AI Gateway tab.
 
-Result of session 2930: pending at the time of this commit; recorded below when it ends.
+Result: session 2930 was picked up by the 14:21:31 UTC queue sweep and
+**succeeded** at 14:23:48 on `zai/glm-5.3` (ended by the ending tool, 13
+tool calls, $0.37). Team 12 is running again; its 13 requeued sessions
+carry the new id and need nothing further.
 
 ## 2026-09-09 — Operational sweep: team 12's promo model left the AI Gateway catalog
 
@@ -102,10 +105,8 @@ and one pre-existing one, both need the commissioner rather than a merge.
 
 ### Questions for Jake
 
-- Team 12's model swap and the AI Gateway top-up are both waiting on you —
-  see above. Swap `zai/glm-5.3-promo-50` back to `zai/glm-5.3` on
-  `/admin/teams` (or point it at a different current promo if one exists)
-  and top up the AI Gateway balance when you get a chance.
+- ~~Team 12's model swap~~ Done at 14:19 UTC on Jake's instruction; see
+  the entry above. The AI Gateway top-up is still waiting on you.
 
 ## 2026-09-08 — Front page: board echoes dropped, whole first sentence in the lead, sticky matchups
 
