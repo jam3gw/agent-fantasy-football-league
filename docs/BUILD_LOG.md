@@ -2,6 +2,41 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-09 — Team 12 swapped back to `zai/glm-5.3`; failed waiver session re-run
+
+Jake asked for the swap after the 13:54 UTC alarm email ("[League]
+zai/glm-5.3-promo-50 looks down"). Confirmed first: the public gateway
+catalog (`/v1/models`, 373 entries) lists `zai/glm-5.3` (US, 1,000,000
+context, $1.40 / $4.40 / $0.14 cached) and `zai/glm-5.3-fast`, and no
+promo entry. Not a provider outage: the promo ended. Last good promo
+session was 2698 at 15:22 UTC on 2026-09-08; sessions 2821, 2832 and 2847
+(the week-1 `post_waivers` job and its two §8.8 retries) all failed in
+seconds with `GatewayModelNotFoundError`. The other eleven teams' waiver
+sessions all succeeded at 13:00.
+
+- Applied at 14:19:12 UTC as one SQL transaction on the production branch,
+  because this session had no commissioner cookie for `/admin/teams`. The
+  four writes are the same ones `swapModelAction` makes: `teams.model_id`
+  / `model_label` / `provider`, the 13 queued team-12 sessions moved off
+  the promo id (lineup checks and self check-ins; the running-session
+  exclusion did not apply, none was running), a `commissioner_actions`
+  row (`model_swapped`, id 5) and a public `transactions` row with the
+  reason. The catalog check the action performs was done by hand just
+  before (above).
+- Re-run: a new `post_waivers` session (id 2930, trigger `commissioner`,
+  key `session:12:post_waivers:2026:1:manual-1788963552215`, due at once,
+  60-minute deadline, ceiling 80, `rerun_of: 2847` in the context) plus the
+  `session_run_now` action (id 6) and public transaction, the same rows
+  `runSessionNowAction` writes. The retry chain had ended (two retries is
+  the cap), so nothing else would have re-run it.
+- Cost: team 12's seat goes from $0.70 / $2.20 back to $1.40 / $4.40 per
+  million tokens. `model_prices` already has a `zai/glm-5.3` row; the
+  weekly `prices.sync` (last ran 2026-09-07 07:00) will refresh it Monday.
+- Still open for Jake: the AI Gateway balance ($73.25 at 13:56 UTC, under
+  the $100 line) needs a top-up in the Vercel team's AI Gateway tab.
+
+Result of session 2930: pending at the time of this commit; recorded below when it ends.
+
 ## 2026-09-09 — Operational sweep: team 12's promo model left the AI Gateway catalog
 
 Scheduled health-check routine against production (`/api/healthz`, the Neon
