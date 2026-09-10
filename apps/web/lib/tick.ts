@@ -851,7 +851,7 @@ async function notifyOutages(database: EngineDb, clock: Clock): Promise<number> 
       `outage:${outage.modelId}`,
       `[League] ${outage.modelId} looks down`,
       `<p><strong>${outage.consecutiveFailures}</strong> sessions in a row have failed for <code>${outage.modelId}</code>` +
-        ` (${(names.get(outage.modelId) ?? []).join(", ") || "no team"}).</p>` +
+        ` (${(names.get(outage.modelId) ?? []).join(", ") || "the reporter"}).</p>` +
         `<p>Check the provider, then swap the model on /admin/teams if it stays down. Nothing is paused automatically.</p>`,
       `${outage.consecutiveFailures} sessions in a row failed for ${outage.modelId}`,
     );
