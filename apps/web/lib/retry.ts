@@ -12,7 +12,7 @@ import { and, desc, eq, gte, inArray, isNotNull, ne } from "drizzle-orm";
 import type { Clock } from "@league/shared";
 import { retryKey } from "@league/shared";
 import type { EngineDb } from "@league/engine";
-import { createSession, getSettings, scheduledJobs, sessionEvents, sessions, teams } from "@league/engine";
+import { createSession, getSettings, reporterModelId, scheduledJobs, sessionEvents, sessions, teams } from "@league/engine";
 
 /** §8.8: two more attempts, spread over thirty minutes. */
 export const MAX_SESSION_RETRIES = 2;
@@ -119,26 +119,47 @@ export interface ModelOutage {
  * model. Returns the models currently in that state so the health page can
  * show a banner and the tick can email the commissioner once.
  *
- * Only a model some seat runs *now* can be in outage. A seat's failures stay
- * on the old id after a swap — the swap is the commissioner's response to
- * them — and for the rest of the 24-hour window nothing succeeds on that id,
- * so the streak never breaks. The daily email key rolled over at midnight and
- * the commissioner got "zai/glm-5.3-promo-50 looks down (no team)" the
- * morning after the seat had already moved off it. Reporter sessions carry no
- * team; their model is kept on the reporter's own id, so they are judged by
- * the streak alone.
+ * Only a model some seat runs *now* — a team's, or the reporter's — can be in
+ * outage. A seat's failures stay on the old id after a swap — the swap is the
+ * commissioner's response to them — and for the rest of the 24-hour window
+ * nothing succeeds on that id, so the streak never breaks. The daily email
+ * key rolled over at midnight and the commissioner got "zai/glm-5.3-promo-50
+ * looks down (no team)" the morning after the seat had already moved off it.
+ * A seat swapped back onto an id inside the window picks its old streak up
+ * again: the seat runs it, so the streak is about a model it uses.
+ *
+ * `/admin/health`'s outage banner reads this too, so the banner and the
+ * email go with the swap together.
  */
 export async function detectModelOutages(db: EngineDb, clock: Clock): Promise<ModelOutage[]> {
-  const since = new Date(clock.now().getTime() - 24 * 3600_000);
+  const since = new Date(clock.now().getTime() - OUTAGE_WINDOW_MS);
   const recent = await db
     .select()
     .from(sessions)
     .where(and(gte(sessions.createdAt, since), ne(sessions.status, "queued")))
     .orderBy(desc(sessions.createdAt));
   const inUse = new Set((await db.select({ modelId: teams.modelId }).from(teams)).map((t) => t.modelId));
+  inUse.add(reporterModelId(await getSettings(db)));
+  return outagesFrom(recent, inUse);
+}
 
+/** §8.8's window: a streak is counted over the last day of sessions. */
+export const OUTAGE_WINDOW_MS = 24 * 3600_000;
+
+/**
+ * The outage rule on rows already in hand: `recent` is the window's sessions
+ * newest first (queued rows are ignored; they never reached a provider), and
+ * `inUse` the model ids some seat runs now. `/admin/health` feeds this from
+ * the rows it already loads for its streak table, so the banner needs no
+ * query of its own and cannot take the page down.
+ */
+export function outagesFrom(
+  recent: Array<{ modelId: string; status: string; teamId: number | null }>,
+  inUse: ReadonlySet<string>,
+): ModelOutage[] {
   const byModel = new Map<string, typeof recent>();
   for (const s of recent) {
+    if (s.status === "queued") continue;
     const list = byModel.get(s.modelId) ?? [];
     list.push(s);
     byModel.set(s.modelId, list);
@@ -146,7 +167,7 @@ export async function detectModelOutages(db: EngineDb, clock: Clock): Promise<Mo
 
   const outages: ModelOutage[] = [];
   for (const [modelId, list] of byModel) {
-    if (!inUse.has(modelId) && list.every((s) => s.teamId !== null)) continue;
+    if (!inUse.has(modelId)) continue;
     let streak = 0;
     for (const s of list) {
       // `skipped` sessions never reached the provider, so they break nothing.
@@ -155,9 +176,7 @@ export async function detectModelOutages(db: EngineDb, clock: Clock): Promise<Mo
       else break;
     }
     if (streak >= 3) {
-      const teamIds = [
-        ...new Set(list.filter((s) => s.teamId !== null).map((s) => s.teamId as number)),
-      ];
+      const teamIds = [...new Set(list.filter((s) => s.teamId !== null).map((s) => s.teamId as number))];
       outages.push({ modelId, consecutiveFailures: streak, teamIds });
     }
   }
