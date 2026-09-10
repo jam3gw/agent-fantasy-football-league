@@ -74,14 +74,19 @@ ET day, so the day change let the same outage send again.
   collaboration / team configuration). The merge of #23 the day before was
   blocked the same way, while #25 between them deployed. All three merge
   commits have the same author (`jam3gw`, `jake@pedestal.ai`) and committer
-  (GitHub web-flow), so the difference is not the identity. Production
-  stayed on #25's deployment (`8e8f8cc`), without this fix, until the
-  deploy below. See the runbook's Vercel note.
+  (GitHub web-flow), so the difference is not the identity. The merge of
+  #27 (this note) was blocked the same way. Production stays on #25's
+  deployment (`8e8f8cc`), without this fix, until a deploy goes through.
+  The direct-deploy tool available to this session takes the whole file
+  tree inline, so it was not used. No harm in the meantime: the day's
+  email key is already spent, and the three promo failures leave the
+  24-hour window at 13:19 UTC today, so no third email can send even on
+  the old code. See the runbook's Vercel note.
 
 ### Questions for Jake
 
-- Two of the last three merges to `main` were `BLOCKED` by Vercel with the
-  team-configuration error and never built. Open one of them in the Vercel
+- Three of the last four merges to `main` (#23, #26, #27) were `BLOCKED`
+  by Vercel with the team-configuration error and never built. Open one of them in the Vercel
   dashboard (the #26 one is `dpl_2Y7i75RmYoCpbm7vEjuKDFHo2cvG`): the page
   names the member or connection it wants. Until that is fixed, a merge
   may not reach production on its own; the runbook says how to check.
