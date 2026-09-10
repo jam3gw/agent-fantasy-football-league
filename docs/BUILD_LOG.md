@@ -69,6 +69,22 @@ ET day, so the day change let the same outage send again.
   runs that model, so the streak is about a model in use.
 - Without the fix the alarm would have stopped by itself at 13:53 UTC when
   the failures aged out.
+- **Production deploy of the merge (#26) was `BLOCKED` by Vercel** before any
+  build ran (`dpl_2Y7i75RmYoCpbm7vEjuKDFHo2cvG`, error link: project
+  collaboration / team configuration). The merge of #23 the day before was
+  blocked the same way, while #25 between them deployed. All three merge
+  commits have the same author (`jam3gw`, `jake@pedestal.ai`) and committer
+  (GitHub web-flow), so the difference is not the identity. Production
+  stayed on #25's deployment (`8e8f8cc`), without this fix, until the
+  deploy below. See the runbook's Vercel note.
+
+### Questions for Jake
+
+- Two of the last three merges to `main` were `BLOCKED` by Vercel with the
+  team-configuration error and never built. Open one of them in the Vercel
+  dashboard (the #26 one is `dpl_2Y7i75RmYoCpbm7vEjuKDFHo2cvG`): the page
+  names the member or connection it wants. Until that is fixed, a merge
+  may not reach production on its own; the runbook says how to check.
 
 ## 2026-09-09 — Team 12 swapped back to `zai/glm-5.3`; failed waiver session re-run
 
