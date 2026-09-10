@@ -118,6 +118,15 @@ export interface ModelOutage {
  * Provider outage detection (§8.8): three sessions in a row failing for one
  * model. Returns the models currently in that state so the health page can
  * show a banner and the tick can email the commissioner once.
+ *
+ * Only a model some seat runs *now* can be in outage. A seat's failures stay
+ * on the old id after a swap — the swap is the commissioner's response to
+ * them — and for the rest of the 24-hour window nothing succeeds on that id,
+ * so the streak never breaks. The daily email key rolled over at midnight and
+ * the commissioner got "zai/glm-5.3-promo-50 looks down (no team)" the
+ * morning after the seat had already moved off it. Reporter sessions carry no
+ * team; their model is kept on the reporter's own id, so they are judged by
+ * the streak alone.
  */
 export async function detectModelOutages(db: EngineDb, clock: Clock): Promise<ModelOutage[]> {
   const since = new Date(clock.now().getTime() - 24 * 3600_000);
@@ -126,6 +135,7 @@ export async function detectModelOutages(db: EngineDb, clock: Clock): Promise<Mo
     .from(sessions)
     .where(and(gte(sessions.createdAt, since), ne(sessions.status, "queued")))
     .orderBy(desc(sessions.createdAt));
+  const inUse = new Set((await db.select({ modelId: teams.modelId }).from(teams)).map((t) => t.modelId));
 
   const byModel = new Map<string, typeof recent>();
   for (const s of recent) {
@@ -136,6 +146,7 @@ export async function detectModelOutages(db: EngineDb, clock: Clock): Promise<Mo
 
   const outages: ModelOutage[] = [];
   for (const [modelId, list] of byModel) {
+    if (!inUse.has(modelId) && list.every((s) => s.teamId !== null)) continue;
     let streak = 0;
     for (const s of list) {
       // `skipped` sessions never reached the provider, so they break nothing.

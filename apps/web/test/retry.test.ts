@@ -137,9 +137,37 @@ describe("provider outage detection (§8.8)", () => {
   });
 
   it("keeps models separate", async () => {
+    await db
+      .insert(teams)
+      .values({ slug: "t2", name: "T2", modelId: "other/model", modelLabel: "O", provider: "test", tiebreakRand: 0.4 });
     for (let i = 0; i < 3; i++) await failedSession({ key: `x${i}`, modelId: "other/model" });
     await failedSession({ key: "y0" });
     const outages = await detectModelOutages(db, clock);
     expect(outages.map((o) => o.modelId)).toEqual(["other/model"]);
+  });
+
+  it("does not flag a model id no seat runs any more (a swapped-away seat)", async () => {
+    // Three failures on the promo id, then the commissioner swaps the seat.
+    for (let i = 0; i < 3; i++) await failedSession({ key: `p${i}`, modelId: "zai/glm-5.3-promo-50" });
+    await db.update(teams).set({ modelId: "zai/glm-5.3" }).where(eq(teams.id, teamId));
+    expect(await detectModelOutages(db, clock)).toEqual([]);
+  });
+
+  it("still judges the reporter, which has no seat, by its streak", async () => {
+    for (let i = 0; i < 3; i++) {
+      await db.insert(sessions).values({
+        teamId: null,
+        kind: "reporter_power_rankings" as never,
+        trigger: "test",
+        idempotencyKey: `r${i}`,
+        modelId: "reporter/model",
+        status: "failed",
+        endedAt: clock.now(),
+        createdAt: clock.now(),
+        context: {},
+      });
+    }
+    const outages = await detectModelOutages(db, clock);
+    expect(outages.map((o) => o.modelId)).toEqual(["reporter/model"]);
   });
 });

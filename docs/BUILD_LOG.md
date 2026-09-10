@@ -30,6 +30,26 @@ alarming until the balance drops under $15.
 - `pnpm --filter web exec vitest run test/capacity.test.ts` (10/10),
   `lint`, `typecheck` all clean.
 
+## 2026-09-10 — Outage alarm no longer fires for a model id no seat runs
+
+Jake got a second "[League] zai/glm-5.3-promo-50 looks down" email at 04:00
+UTC (midnight ET) saying "(no team)", nineteen hours after the seat had
+moved off that id. Team 12 was fine: every session since the swap ran on
+`zai/glm-5.3`, and 2930 succeeded. The email was the detector's: it groups
+every non-queued session of the last 24 hours by model id, the three promo
+failures (2821, 2832, 2847) were still inside that window with nothing
+after them on that id to break the streak, and `notifyOnce`'s key is per
+ET day, so the day change let the same outage send again.
+
+- `detectModelOutages` now skips a model id no team runs, unless the
+  group has a session with no team (the reporter, whose model is not a
+  seat). Tests: a swapped-away seat's failures do not flag; the reporter
+  is still judged by its streak; "keeps models separate" now gives the
+  second model a seat.
+- Without the fix the alarm would have stopped by itself at 13:53 UTC when
+  the failures aged out. With it, `/admin/health`'s outage banner goes
+  with the swap too.
+
 ## 2026-09-09 — Team 12 swapped back to `zai/glm-5.3`; failed waiver session re-run
 
 Jake asked for the swap after the 13:54 UTC alarm email ("[League]
