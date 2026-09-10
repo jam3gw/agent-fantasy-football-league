@@ -223,6 +223,8 @@ The check keeps three caches under `node_modules/.cache`, which the Vercel build
 
 Vercel names a git deployment after the team member whose GitHub login matches the commit author. Commits by `jam3gw` must map to the `mosesjake32@gmail.com` Vercel account, and that account must have GitHub connected (Account Settings, then Authentication). A GitHub login can be connected to one Vercel account only. If "Deployed by" shows an unexpected member, or Vercel skips a deployment for a commit by `jam3gw`, check that connection first, then Settings, then Members on the team.
 
+A production deployment in state `BLOCKED` with the "project collaboration / team configuration" error link never built: Vercel refused it before the build. It happened to the merges of #23 and #26 (2026-09-09 and -10) and not to #25 between them, with identical author and committer. Check first: after a merge, is the newest production deployment `READY` and is its commit `main`'s head? If it is `BLOCKED`, open it in the dashboard (it names the member or connection it wants), then push the next change; `main` stays on the last `READY` deployment until then.
+
 ## Known limits
 
 - There is no league-wide spend stop, by design (§2: "No cap"). `pause_agent_at_usd` is per-agent and off by default.
