@@ -2,6 +2,23 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-10 — Resolved: production deploys unblocked, main and production back in sync
+
+The re-link fixed it. Merge #30 (the "push the next change" test from the
+entry right below) went `INITIALIZING` → `BUILDING` → `READY`
+(`dpl_GZiuf5uRZoSvPDGPTrL8YcoRJSUr`, 1789047488023 → 1789047644484, about
+2m36s) with no `BLOCKED` state or `errorLink` anywhere in the deploy — the
+first clean production deploy since #25 on 2026-09-09. Confirmed live, not
+just from the Vercel API: `https://league.jake-moses.com/api/healthz` →
+`200 {"ok":true,"lastTickAt":"2026-09-10T13:41:33.149Z"}`, and the
+deployment's alias list now includes `league.jake-moses.com` again as
+expected.
+
+`main` and production are back in sync: #26 (the outage-alarm fix that
+skips a model id no seat runs), #27, #28, #29 and #30 are all live now.
+The three-sweep-old "Questions for Jake" about the recurring `BLOCKED`
+deploy is resolved — no longer open.
+
 ## 2026-09-10 — Testing the Vercel team-configuration fix: pushing a commit to see if a deploy goes through
 
 Jake said he re-linked the connection Vercel's `BLOCKED` error was naming
@@ -70,15 +87,11 @@ finding, so nothing was merged this sweep.
 
 ### Questions for Jake
 
-- Still open, now a 4th time: `main`'s production deploy keeps landing in
-  Vercel's `BLOCKED` state with a "project collaboration / team
-  configuration" error (`dpl_CpuFR5NEQKrV6A9P8jQrJp7MYAir` for #28).
-  Opening that deployment in the Vercel dashboard names the member or
-  connection it wants (see the runbook's "Who Vercel says deployed"). Until
-  it's resolved, `main` keeps drifting from what's actually live —
-  currently 3 merges, including a real bug fix (#26). Pushing another
-  commit is not expected to help on its own; this needs the dashboard
-  fixed first, then a push to trigger a fresh deploy attempt.
+- ~~`main`'s production deploy keeps landing in Vercel's `BLOCKED` state
+  with a "project collaboration / team configuration" error~~ **Resolved
+  2026-09-10 13:41 UTC** — see the two entries above this one. Jake
+  re-linked the connection; merge #30 deployed clean, and production is
+  caught up with `main` again.
 
 ## 2026-09-09 — AI Gateway credits alarm line lowered to $15
 
