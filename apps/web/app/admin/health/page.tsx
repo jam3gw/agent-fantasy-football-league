@@ -7,6 +7,7 @@ import {
   health,
   lineupEntries,
   nflGames,
+  reporterModelId,
   scheduledJobs,
   scoringDiscrepancies,
   sessions,
@@ -17,6 +18,7 @@ import { Badge, Banner, Card, Cell, Empty, PageTitle, Row, Table, money } from "
 import { db, leagueClock } from "../../../lib/db";
 import { TICK_STALE_MS } from "../../../lib/healthz";
 import { weekScoringSource } from "../../../lib/finalize";
+import { OUTAGE_WINDOW_MS, outagesFrom } from "../../../lib/retry";
 import { MAX_CONCURRENT_SESSIONS } from "../../../lib/runSession";
 import { acknowledgeAlarmAction, sendDigestNowAction } from "../../../lib/adminActions";
 
@@ -154,7 +156,18 @@ export default async function AdminHealthPage({
     .filter((e) => e.empty > 0);
 
   const streaks = failureStreaks(recentSessions);
-  const brokenModels = streaks.filter((s) => s.streak >= 3);
+  // The banner uses the tick's own rule, so it says what the email says: a
+  // model a seat runs now, three failures in a row inside a day. It is fed
+  // the rows already loaded for the table (the newest 400, which is the head
+  // of every model's history unless a model has not run in that many), so
+  // it costs no query and cannot fail the page. The table is the plain
+  // history, retired ids included.
+  const inUseModels = new Set(allTeams.map((t) => t.modelId));
+  if (settings) inUseModels.add(reporterModelId(settings));
+  const brokenModels = outagesFrom(
+    recentSessions.filter((s) => now.getTime() - s.createdAt.getTime() <= OUTAGE_WINDOW_MS),
+    inUseModels,
+  );
   const scoringSource = settings ? await weekScoringSource(database, Math.max(1, week - 1)).catch(() => null) : null;
 
   return (
@@ -188,7 +201,7 @@ export default async function AdminHealthPage({
 
       {brokenModels.length > 0 ? (
         <Banner tone="danger">
-          Provider outage suspected (§8.8): {brokenModels.map((s) => `${s.modelId} — ${s.streak} consecutive failures`).join("; ")}.
+          Provider outage suspected (§8.8): {brokenModels.map((s) => `${s.modelId} — ${s.consecutiveFailures} consecutive failures`).join("; ")}.
         </Banner>
       ) : null}
       {liveStale ? (

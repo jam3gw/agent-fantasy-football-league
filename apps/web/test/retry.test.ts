@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
-import { initLeagueSettings, sessions, teams } from "@league/engine";
-import { MAX_SESSION_RETRIES, detectModelOutages, requeueFailedSessions } from "../lib/retry";
+import { getSettings, initLeagueSettings, reporterModelId, sessions, teams, updateSettings } from "@league/engine";
+import { MAX_SESSION_RETRIES, detectModelOutages, outagesFrom, requeueFailedSessions } from "../lib/retry";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -137,9 +137,83 @@ describe("provider outage detection (§8.8)", () => {
   });
 
   it("keeps models separate", async () => {
+    await db
+      .insert(teams)
+      .values({ slug: "t2", name: "T2", modelId: "other/model", modelLabel: "O", provider: "test", tiebreakRand: 0.4 });
     for (let i = 0; i < 3; i++) await failedSession({ key: `x${i}`, modelId: "other/model" });
     await failedSession({ key: "y0" });
     const outages = await detectModelOutages(db, clock);
     expect(outages.map((o) => o.modelId)).toEqual(["other/model"]);
+  });
+
+  it("does not flag a model id no seat runs any more (a swapped-away seat)", async () => {
+    // Three failures on the promo id, then the commissioner swaps the seat.
+    for (let i = 0; i < 3; i++) await failedSession({ key: `p${i}`, modelId: "zai/glm-5.3-promo-50" });
+    await db.update(teams).set({ modelId: "zai/glm-5.3" }).where(eq(teams.id, teamId));
+    expect(await detectModelOutages(db, clock)).toEqual([]);
+  });
+
+  async function failedReporterSession(key: string, modelId: string) {
+    await db.insert(sessions).values({
+      teamId: null,
+      kind: "reporter_power_rankings" as never,
+      trigger: "test",
+      idempotencyKey: key,
+      modelId,
+      status: "failed",
+      endedAt: clock.now(),
+      createdAt: clock.now(),
+      context: {},
+    });
+  }
+
+  it("still judges the reporter, which has no team, by its streak", async () => {
+    const reporter = reporterModelId(await getSettings(db));
+    for (let i = 0; i < 3; i++) await failedReporterSession(`r${i}`, reporter);
+    const outages = await detectModelOutages(db, clock);
+    expect(outages.map((o) => o.modelId)).toEqual([reporter]);
+    expect(outages[0]!.teamIds).toEqual([]);
+  });
+
+  it("does not flag the reporter's old model after the reporter is moved", async () => {
+    const reporter = reporterModelId(await getSettings(db));
+    for (let i = 0; i < 3; i++) await failedReporterSession(`r${i}`, reporter);
+    await updateSettings(db, { extra: { reporterModelId: "reporter/other" } });
+    expect(await detectModelOutages(db, clock)).toEqual([]);
+  });
+
+  it("a shared model stays flagged while any seat still runs it", async () => {
+    await db
+      .insert(teams)
+      .values({ slug: "t3", name: "T3", modelId: "test/model", modelLabel: "M", provider: "test", tiebreakRand: 0.3 });
+    for (let i = 0; i < 3; i++) await failedSession({ key: `sh${i}` });
+    await db.update(teams).set({ modelId: "other/model" }).where(eq(teams.id, teamId));
+    expect((await detectModelOutages(db, clock)).map((o) => o.modelId)).toEqual(["test/model"]);
+  });
+});
+
+describe("outagesFrom (the rule on rows in hand, as /admin/health uses it)", () => {
+  const row = (modelId: string, status: string, teamId: number | null = 1) => ({ modelId, status, teamId });
+
+  it("flags only a model some seat runs, so the banner matches the email", () => {
+    const rows = [
+      row("zai/glm-5.3-promo-50", "failed"),
+      row("zai/glm-5.3-promo-50", "failed"),
+      row("zai/glm-5.3-promo-50", "failed"),
+      row("test/model", "failed"),
+      row("test/model", "failed"),
+      row("test/model", "failed"),
+    ];
+    const out = outagesFrom(rows, new Set(["zai/glm-5.3", "test/model"]));
+    expect(out).toEqual([{ modelId: "test/model", consecutiveFailures: 3, teamIds: [1] }]);
+  });
+
+  it("ignores queued rows and lets skipped rows through, like the detector", () => {
+    const rows = [row("m", "queued"), row("m", "failed"), row("m", "skipped"), row("m", "timed_out"), row("m", "failed", null)];
+    expect(outagesFrom(rows, new Set(["m"]))).toEqual([{ modelId: "m", consecutiveFailures: 3, teamIds: [1] }]);
+  });
+
+  it("returns nothing when no seat runs anything in the rows", () => {
+    expect(outagesFrom([row("m", "failed"), row("m", "failed"), row("m", "failed")], new Set())).toEqual([]);
   });
 });
