@@ -2,6 +2,20 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-10 — Testing the Vercel team-configuration fix: pushing a commit to see if a deploy goes through
+
+Jake said he re-linked the connection Vercel's `BLOCKED` error was naming
+(see the last two entries: 5 of the last 7 merges, #23/#26/#27/#28/#29,
+all landed `BLOCKED` with the "project collaboration / team configuration"
+error before this). This commit is the "push the next change" step the
+runbook calls for to find out whether that fix took — not a code change,
+so there's nothing to test beyond whether the resulting deploy reaches
+`READY`.
+
+Health re-checked immediately before this push: `cron.tick` succeeded
+13:34:31 UTC (4s old at check time), `sessions.sweep` 13:30:31 UTC. No new
+condition since the entry above.
+
 ## 2026-09-10 — Operational sweep: merge #28's production deploy blocked too (4th in a row); everything else green
 
 Scheduled health-check routine against production (`/api/healthz` via the
