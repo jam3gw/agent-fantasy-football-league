@@ -41,14 +41,34 @@ failures (2821, 2832, 2847) were still inside that window with nothing
 after them on that id to break the streak, and `notifyOnce`'s key is per
 ET day, so the day change let the same outage send again.
 
-- `detectModelOutages` now skips a model id no team runs, unless the
-  group has a session with no team (the reporter, whose model is not a
-  seat). Tests: a swapped-away seat's failures do not flag; the reporter
-  is still judged by its streak; "keeps models separate" now gives the
-  second model a seat.
+- `detectModelOutages` now skips a model id no seat runs: the seats are
+  every `teams.model_id` plus the reporter's model from settings. Tests: a
+  swapped-away seat's failures do not flag; the reporter is still judged by
+  its streak; the reporter's old model stops flagging once the reporter is
+  moved; a model shared by two seats stays flagged while one still runs it;
+  "keeps models separate" now gives the second model a seat.
+- Review round 1 found that `/admin/health` had its own streak function
+  (last 400 sessions, no 24-hour cutoff, no seat check), so the banner
+  would have kept showing the retired id while the email stopped. The
+  banner now reads `detectModelOutages`; the "Model failure streaks" table
+  keeps the plain history, retired ids included. The email's "(no team)"
+  fallback now says "the reporter", the only case it can still be.
+- Review round 2: the banner call added three serial queries to the health
+  page and could throw where the page used to render (`getSettings` on an
+  empty database). The rule is now a pure `outagesFrom(rows, inUse)`; the
+  tick's `detectModelOutages` queries and calls it, and the health page
+  feeds it the 400 newest sessions it already loads, cut to the 24-hour
+  window, with `allTeams` and the settings it already has. No new query,
+  nothing to catch. The banner sees at most 400 sessions where the email
+  sees the whole day; a model with no run in the newest 400 is missing
+  from the banner, which is the table's existing limit too. Paused teams'
+  models stay in the in-use set: a paused seat runs nothing, so its streak
+  cannot grow.
+- A seat swapped back onto an id inside the window picks its old streak up
+  again and could email once more after midnight. Left as is: the seat
+  runs that model, so the streak is about a model in use.
 - Without the fix the alarm would have stopped by itself at 13:53 UTC when
-  the failures aged out. With it, `/admin/health`'s outage banner goes
-  with the swap too.
+  the failures aged out.
 
 ## 2026-09-09 — Team 12 swapped back to `zai/glm-5.3`; failed waiver session re-run
 
