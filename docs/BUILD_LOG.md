@@ -2,6 +2,70 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-10 — Operational sweep: merge #28's production deploy blocked too (4th in a row); everything else green
+
+Scheduled health-check routine against production (`/api/healthz` via the
+`health` table since the session has no `SITE_DOMAIN`, `scheduled_jobs`,
+`sessions`, Vercel runtime errors and deployment state). One recurring
+operational condition, unchanged in kind from 2026-09-10's outage-alarm
+entry above; everything else is healthy. No code fix applies to the one
+finding, so nothing was merged this sweep.
+
+- **Production deploy of the merge (#28) was `BLOCKED` by Vercel again**
+  (`dpl_CpuFR5NEQKrV6A9P8jQrJp7MYAir`, same `project collaboration / team
+  configuration` error link as #23, #26 and #27). That's 4 of the last 6
+  merges to `main`. Production is still serving `8e8f8cc` (#25, merged
+  2026-09-09 10:47 ET) and is now **three merges behind**: `git log
+  --first-parent 8e8f8cc..origin/main` is `bf285c4` (#26, the real fix —
+  `detectModelOutages` skipping a retired model id, `outagesFrom` as a
+  pure function), `541bc11` (#27, docs-only) and `46847d3` (#28,
+  docs-only). **The #26 outage-alarm fix itself is not live in
+  production.** Concretely: production is still running the *old*
+  `detectModelOutages` that groups by the last 24h of sessions with no
+  per-model seat check, so a team swapped off a failing model id (as team
+  12 was, off `zai/glm-5.3-promo-50`, on 2026-09-09) can still trigger a
+  stale "(no team)" outage banner/email until those old failures age past
+  24 hours on their own — exactly the bug #26 fixed, still live in prod.
+  No new harm from this seen in the health table this sweep (no
+  `notify:outage:*` row younger than the fix's merge attempt), but the
+  exposure stands until a deploy gets through.
+  - Not fixed here: three prior sweeps (#23, #26, #27) already root-caused
+    this as a Vercel team/collaboration setting, not a code or config
+    issue in the repo — pushing more commits does not change the
+    `errorLink`'s content (`https://vercel.com/docs/deployments/troubleshoot-project-collaboration#team-configuration`).
+    Still an open, unanswered "Question for Jake" from the #26 entry;
+    escalating again below since it's now the 4th occurrence and the gap
+    to production is widening rather than resolving on its own.
+- Everything else checked is healthy: `cron.tick` 41s old, `sessions.sweep`
+  1m41s old, `db.size`/`gateway.credits`/`sleeper.*`/`rankings`/`players.applied`
+  all current within their expected cadences, `email.send` last succeeded
+  04:00 UTC today with no error. `tick.games`/`tick.live_scores`/`tick.retries`/
+  `tick.stall_watchdog`/`tick.trades` all carry a stale `last_error` from
+  2026-08-29 that has not recurred since (matches the 2026-09-09 sweep's
+  note); `last_success_at` on all five is seconds old. No `scheduled_jobs`
+  failures in the last 48h. No session queued past `due_at` by more than 15
+  minutes. No session `running` or job `claimed`/`running` at check time, so
+  nothing to sample for a stall. `sessions` `failed`/`timed_out` in the last
+  48h are the five already-explained team-12 promo-model failures and two
+  Sept 8 timeouts, nothing new. Vercel runtime errors: 3 groups, all last
+  seen 2026-09-09 or earlier and already explained (the same promo-model
+  404, and a benign non-fatal AI-SDK reasoning-part warning for Meta's
+  model) — no new error group this sweep. `nflverse.player_stats` still has
+  no 2026 release (no success since 2026-09-01); recorded non-blocking per
+  §13.4, unchanged from the 2026-09-09 sweep.
+
+### Questions for Jake
+
+- Still open, now a 4th time: `main`'s production deploy keeps landing in
+  Vercel's `BLOCKED` state with a "project collaboration / team
+  configuration" error (`dpl_CpuFR5NEQKrV6A9P8jQrJp7MYAir` for #28).
+  Opening that deployment in the Vercel dashboard names the member or
+  connection it wants (see the runbook's "Who Vercel says deployed"). Until
+  it's resolved, `main` keeps drifting from what's actually live —
+  currently 3 merges, including a real bug fix (#26). Pushing another
+  commit is not expected to help on its own; this needs the dashboard
+  fixed first, then a push to trigger a fresh deploy attempt.
+
 ## 2026-09-09 — AI Gateway credits alarm line lowered to $15
 
 Jake asked to quiet the dead-auto-top-up alarm after this morning's sweep
