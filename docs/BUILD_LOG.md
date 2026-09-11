@@ -2,6 +2,20 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-11 — Confirmed: `BLOCKED`-deploy issue fixed, production caught up
+
+PR #34's merge (`dpl_5nd9DjBVQjuWW8M3wt6Zn7bqtzWk`, commit `6130903`) went
+`READY` in production — no `BLOCKED` state, aliased to `league.jake-moses.com`,
+`/api/healthz` fresh (`200 {"ok":true}`). Production is caught up with
+`main` again, including #32 and #33.
+
+One difference from the prior attempts: this merge commit's GitHub author
+email is `mosesjake32@gmail.com`, not `the previous work address` like every earlier
+merge (blocked or not) in this saga. Whatever Jake changed likely touched
+that identity mapping rather than being a one-time re-link — worth keeping
+in mind if the block recurs again: check which email authored the merge
+first.
+
 ## 2026-09-11 — Testing Jake's fix for the reopened `BLOCKED`-deploy issue
 
 Jake said the Vercel team-configuration issue "should be fixed now." Pushing
@@ -31,13 +45,12 @@ went `READY` fine — only the production-targeted deploy of the merge to
 
 ### Questions for Jake
 
-- The `BLOCKED`-deploy issue reopened: merge #32 blocked the same way #23,
+- ~~The `BLOCKED`-deploy issue reopened: merge #32 blocked the same way #23,
   #26, #27, #28 and #29 did, two merges after the 2026-09-10 re-link that
-  was thought to have resolved it for good. Something about that Vercel
-  team-configuration connection keeps regressing. Worth checking whether
-  the re-link needs to be redone, or whether it's dropping on its own after
-  a couple of deploys — that pattern (holds for ~2 merges, then blocks
-  again) might be a clue.
+  was thought to have resolved it for good.~~ **Fixed 2026-09-11** — see the
+  entry above this one. This time the fix changed the merge commit's author
+  email (`mosesjake32@gmail.com` instead of `the previous work address`), which may
+  explain why it's more durable than the 2026-09-10 re-link.
 
 ## 2026-09-11 — Operational sweep: all green, no action taken
 
