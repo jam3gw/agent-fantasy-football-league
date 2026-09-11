@@ -2,6 +2,37 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-11 — The Vercel `BLOCKED`-deploy issue is back: merge #32's production deploy blocked
+
+The 2026-09-10 re-link was not a permanent fix. This sweep's own docs-only
+build-log entry (PR #32, merge commit `7e0f52a`) landed `BLOCKED` in
+production (`dpl_C9eCSnYS7rPDHm34hEB4yXNp2khB`), same `errorLink` as every
+prior occurrence: `https://vercel.com/docs/deployments/troubleshoot-project-collaboration#team-configuration`.
+The PR's own preview deploy (`dpl_AFht8rky9Pgha2a8nMhzQpJYgjDw`) built and
+went `READY` fine — only the production-targeted deploy of the merge to
+`main` is blocked, matching the pattern from #23/#26/#27/#28/#29.
+
+- No harm: production is still serving `066f0f0` (#31, the last `READY`
+  production deploy), `/api/healthz` is `200 {"ok":true}` with a current
+  `lastTickAt`, and the only change in the blocked commit is this file
+  (docs-only) — nothing functional is stuck behind it.
+- Not re-investigating the root cause here: the 2026-09-10 entry already
+  traced this to a Vercel team/collaboration setting outside the repo, and
+  Jake's re-link that day only held for two merges (#30, #31) before
+  recurring on the third (#32). Pushing more commits doesn't change the
+  `errorLink`'s content, so no further "test the fix" commit was made this
+  sweep.
+
+### Questions for Jake
+
+- The `BLOCKED`-deploy issue reopened: merge #32 blocked the same way #23,
+  #26, #27, #28 and #29 did, two merges after the 2026-09-10 re-link that
+  was thought to have resolved it for good. Something about that Vercel
+  team-configuration connection keeps regressing. Worth checking whether
+  the re-link needs to be redone, or whether it's dropping on its own after
+  a couple of deploys — that pattern (holds for ~2 merges, then blocks
+  again) might be a clue.
+
 ## 2026-09-11 — Operational sweep: all green, no action taken
 
 Scheduled health-check routine against production. Nothing new; no code
