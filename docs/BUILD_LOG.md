@@ -2,6 +2,12 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-11 — Testing Jake's fix for the reopened `BLOCKED`-deploy issue
+
+Jake said the Vercel team-configuration issue "should be fixed now." Pushing
+this commit is the test — the same "push the next change" step used to
+verify the 2026-09-10 re-link. No code change.
+
 ## 2026-09-11 — The Vercel `BLOCKED`-deploy issue is back: merge #32's production deploy blocked
 
 The 2026-09-10 re-link was not a permanent fix. This sweep's own docs-only
