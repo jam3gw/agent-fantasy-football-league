@@ -2,7 +2,41 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
-## 2026-09-10 — Resolved: production deploys unblocked, main and production back in sync
+## 2026-09-11 — Operational sweep: all green, no action taken
+
+Scheduled health-check routine against production. Nothing new; no code
+change made.
+
+- `/api/healthz` → `200 {"ok":true,"lastTickAt":"2026-09-11T13:14:31Z"}`,
+  seconds old at check time.
+- `health` table: `cron.tick` and `sessions.sweep` both seconds/minutes old.
+  `tick.games`/`tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades`
+  still carry the stale 2026-08-29 `last_error` noted in every prior sweep,
+  with current `last_success_at` — not reproduced since. `nflverse.player_stats`
+  still 404s (`player_stats_2026.csv` unpublished since 2026-09-01),
+  unchanged and non-blocking per §13.4. No new `last_error` on any key.
+- `scheduled_jobs`: no `failed` rows and nothing `due`/`claimed` past 15
+  minutes since 2026-08-31 (the retired `ingest.fp_*` rows and the
+  `digest.weekly` `toFixed` bug, both already recorded and not reproduced —
+  `digest.weekly` has run clean on 2026-09-01 and 2026-09-08 since).
+- `sessions`: none `queued` past `due_at` by 15+ minutes, none `failed` or
+  `timed_out` in the last 24h, none `running` (nothing to sample for a
+  stall).
+- `current_week` is still 1 (`updated_at` 2026-09-01), matching the
+  schedule, not a stall: week 1's 16 games run 2026-09-10 through
+  2026-09-15, so no kickoff is yet 4.5h past and `stats.finalize` correctly
+  has not run again since deferring cleanly at 2026-09-08.
+- Vercel: latest production deployment (`dpl_FwtkeN7VynTw9GhYNRJs6v2HdU8w`,
+  commit `066f0f0`, merge of #31) is `READY`; `origin/main` is exactly that
+  commit, zero commits ahead — production and `main` are in sync, confirming
+  the 2026-09-10 resolution held. Runtime errors: the same two benign,
+  non-fatal AI SDK warnings already explained in prior sweeps (a
+  reasoning-part skip and a log-warnings notice for Meta's model), last
+  seen 2026-09-10, no new group.
+
+### Questions for Jake
+
+None open.
 
 The re-link fixed it. Merge #30 (the "push the next change" test from the
 entry right below) went `INITIALIZING` → `BUILDING` → `READY`
