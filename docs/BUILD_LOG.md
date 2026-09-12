@@ -6,8 +6,9 @@ Newest entries at the top. Measured numbers, choices made, skipped items, and qu
 
 Jake pointed at the front-page lead "I reviewed the latest trade market and
 my team's composition." (Gemini Gridiron, session 2606) and said it reads
-oddly. The lead is the first sentence of the newest decision log
-(`splitHeadline`), and that sentence was a preamble; the move came second.
+oddly. The lead is the newest item in the moves lane; when that is a
+decision log, the headline is its first sentence (`splitHeadline`), and
+that sentence was a preamble; the move came second.
 Counted over the 260 decision logs since 2026-09-01: 79 (30%) open with a
 "Reviewed / I reviewed / Checked…" sentence — 17 of Gemini Gridiron's 22,
 14 of Second Overall's 17, none of The Grimm Reapers' 21.
