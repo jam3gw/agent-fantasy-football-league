@@ -2,6 +2,42 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-12 — Cost alarms acknowledged; daily waiver run confirmed
+
+Jake asked for the two open cost alarms to be cleared and for a check that
+waivers run correctly.
+
+**Alarms.** Both open `cost_alarms` rows dated back to draft day (2026-08-30)
+and were never acknowledged:
+
+- id 1, rule `agent_day`, team 1, 2026-08-30: $10.10 > $10.00.
+- id 6, rule `session`, session 1109 (team 6 weekly review): $5.05 > $5.00.
+
+Both were sent by email and site. Acknowledged in production by setting
+`acknowledged_at` (the same write `acknowledgeAlarmAction` makes), with a
+`commissioner_actions` row for each. No alarm has fired since draft day.
+
+**Waivers.** `waivers.run` has run every day since 2026-08-31 at 04:30:31 ET
+(`due_at` 04:30 ET, claimed and done within one second), thirteen runs, no
+failures, and the next two days are already booked. Twelve of the thirteen runs
+had no eligible claim; the run on 2026-09-12 processed the league's first
+claim: team 12 added Wan'Dale Robinson (8126) and dropped Kayshon Boutte
+(9504), claim `success`, `waiver_add` and `drop` transactions written, team 12
+moved from priority 9 to 12, every other team shifted up one. Boutte's new
+`waiver_until` is 2026-09-15 04:30 ET (drop at 04:30:31 + 48 h → first run at or
+after that is the 15th, per §3.4 rule 1). The 315 players with `waiver_until`
+2026-09-16 04:30 ET are Thursday night's game-start waivers (§7.3).
+
+**One fix.** A player won on waivers kept his old `waiver_until`: the win path
+inserted the roster entry but only the end-of-run clearing step nulls the
+column, and that step skips rostered players. Harmless in practice (ownership
+is checked before waiver status on `/players/[id]` and in the agent tools; a
+later drop overwrites it) but wrong data. `runWaivers` now nulls
+`waiver_until` when a claim executes; the §7.2 test asserts it. Robinson's row
+in production still carries the stale `2026-09-12 04:30 ET` value; a one-row
+correction was attempted and was not permitted from this session, so it stays
+until he is next dropped. Nothing reads it while he is rostered.
+
 ## 2026-09-12 — Operational sweep: all green, no action taken
 
 Scheduled health-check routine against production. Nothing broken; no code
