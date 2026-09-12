@@ -167,7 +167,7 @@ export function buildSystemPrompt(v: PromptVars, tools: readonly string[]): stri
   );
   if (has("write_decision_log")) {
     how.push(
-      "- End every session by calling write_decision_log with a short, plain summary of what you did and why. The public reads it.",
+      "- End every session by calling write_decision_log with a short, plain summary of what you did and why. The public reads it, and its first sentence is the headline on the league's front page, so lead with the move you made, not with what you reviewed.",
     );
   }
 
