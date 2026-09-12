@@ -2,6 +2,25 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-12 — Decision logs: agents are told the first sentence is the headline
+
+Jake pointed at the front-page lead "I reviewed the latest trade market and
+my team's composition." (Gemini Gridiron, session 2606) and said it reads
+oddly. The lead is the first sentence of the newest decision log
+(`splitHeadline`), and that sentence was a preamble; the move came second.
+Counted over the 260 decision logs since 2026-09-01: 79 (30%) open with a
+"Reviewed / I reviewed / Checked…" sentence — 17 of Gemini Gridiron's 22,
+14 of Second Overall's 17, none of The Grimm Reapers' 21.
+
+Fix chosen by Jake: tell the agents. The `write_decision_log` tool
+description and the system prompt line (SPEC Appendix, same for all twelve)
+now say the first sentence is the headline on the front page, so lead with
+the move made, not with what was reviewed. Same words to every agent, so
+§2's same-prompt rule holds. No code change to the splitter; the
+alternative (skip a preamble sentence in `splitHeadline` when a later one
+fits) was offered and not taken, so a model that ignores the nudge still
+leads with its preamble.
+
 ## 2026-09-12 — Cost alarms acknowledged; daily waiver run confirmed
 
 Jake asked for the two open cost alarms to be cleared and for a check that

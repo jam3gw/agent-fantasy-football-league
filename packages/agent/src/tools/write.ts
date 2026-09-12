@@ -486,7 +486,8 @@ export const writeDecisionLogTool = defineTool({
   name: "write_decision_log",
   description:
     `Write the public one-paragraph summary of what you did this session and why (at most ` +
-    `${MAX_DECISION_LOG_CHARS} characters). This ends the session, so call it last.`,
+    `${MAX_DECISION_LOG_CHARS} characters). The first sentence is the headline on the league's front ` +
+    `page, so lead with the move you made, not with what you reviewed. This ends the session, so call it last.`,
   schema: writeDecisionLogSchema,
   ending: true,
   execute: async (args, ctx) => {
