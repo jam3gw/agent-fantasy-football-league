@@ -2,6 +2,61 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-12 — Operational sweep: all green, no action taken
+
+Scheduled health-check routine against production. Nothing broken; no code
+change made.
+
+- `/api/healthz` → `200 {"ok":true,"lastTickAt":"2026-09-12T13:06:31.471Z"}`,
+  20 s old at check time.
+- `health` table: `cron.tick`, `sessions.sweep`, `tick.capacity`, `db.size`
+  and `gateway.credits` all seconds/minutes old. `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades`
+  still carry the same stale 2026-08-29 `last_error` noted in every prior
+  sweep, with a current `last_success_at` — not reproduced since.
+  `nflverse.player_stats` still 404s (`player_stats_2026.csv` unpublished
+  since 2026-09-01), unchanged and non-blocking per §13.4. No new
+  `last_error` on any other key.
+- `scheduled_jobs`: 6 `failed` rows, all from 2026-08-29/30 (the retired
+  `ingest.fp_*` rows and the `digest.weekly` `toFixed` bug), already
+  recorded in prior sweeps and not reproduced. Nothing `due`/`claimed`
+  past 15 minutes.
+- `sessions`: none `queued` past `due_at` by 15+ minutes, none `running`
+  (nothing to sample for a stall). One `failed` session since the last
+  sweep — id 3133, team 12 (`zai/glm-5.3`), `board_reply`, 2026-09-11
+  18:27–18:31 UTC, `error: "[object Object]"`. The runtime-error log shows
+  why: the AI SDK threw a bare `{ name: 'AI_InvalidResponseDataError' }`
+  object rather than an `Error` instance, so this file's (and about a
+  dozen other call sites') established `String(err)` convention rendered
+  it unreadably. One occurrence, not three in a row (no banner threshold
+  hit), team 12's next queued `board_reply` skipped normally afterward,
+  nothing recurred in the 42 sessions since. Not treated as a bug to fix:
+  `String(err)` is a deliberate, consistent convention across the
+  codebase (`session.ts`, `tick.ts`, `job.ts`, `gateway.ts`,
+  `adminActions.ts`, `capacity.ts`, `alarms.ts`, `finalize.ts`), and
+  changing the stringification in one call site for one external SDK's
+  one-off malformed-rejection quirk would be exactly the kind of
+  unrequested refactor CLAUDE.md rules out. Flagged here in case it
+  recurs for `meta/muse-spark-1.2-contributor` or `zai/glm-5.3` again —
+  three in a row would already raise its own banner.
+- `current_week` is still 1 (`updated_at` 2026-09-01), matching the
+  schedule: week 1's games run 2026-09-10 through 09-15, so no kickoff is
+  yet 4.5h past and `stats.finalize` correctly has not run again since
+  deferring cleanly at 2026-09-08.
+- Vercel: latest production deployment (`dpl_6PtRb8PUH44RNG9Tt4tpE4hzPPWv`,
+  commit `d780e7f`, merge of #35) is `READY`; `origin/main` is exactly
+  that commit — production and `main` are in sync, and the `BLOCKED`-
+  deploy issue from the last three sweeps has not recurred across #35.
+  Runtime errors: the two benign, non-fatal AI SDK warnings already
+  explained in prior sweeps (a reasoning-part skip and a log-warnings
+  notice for Meta's model, both on `/.well-known/workflow/v1/step`), plus
+  the one `AI_InvalidResponseDataError` tied to session 3133 above. No
+  other new group.
+
+### Questions for Jake
+
+None open.
+
 ## 2026-09-11 — Confirmed: `BLOCKED`-deploy issue fixed, production caught up
 
 PR #34's merge (`dpl_5nd9DjBVQjuWW8M3wt6Zn7bqtzWk`, commit `6130903`) went
