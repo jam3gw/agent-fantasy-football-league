@@ -528,6 +528,7 @@ describe("runWaivers (§7.2)", () => {
     // winner rostered on the bench via 'waiver' with a transaction
     const entry = (await db.select().from(rosterEntries).where(eq(rosterEntries.playerId, x)))[0]!;
     expect(entry).toMatchObject({ teamId: ids[1]!, acquiredVia: "waiver" });
+    expect(await waiverUntilOf(x)).toBeNull(); // rostered, so no longer on waivers
     expect(await db.select().from(lineupEntries).where(eq(lineupEntries.playerId, x))).toHaveLength(0);
     expect(await db.select().from(transactions).where(eq(transactions.type, "waiver_add"))).toHaveLength(1);
 

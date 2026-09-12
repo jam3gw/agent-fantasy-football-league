@@ -441,6 +441,13 @@ export async function runWaivers(
           await tx
             .insert(rosterEntries)
             .values({ teamId, playerId: claim.addPlayerId, acquiredVia: "waiver", acquiredAt: runAt });
+          // A rostered player is not on waivers. The clearing step below skips
+          // rostered players, so without this the winner would keep a stale
+          // `waiver_until` for as long as he stays on the roster.
+          await tx
+            .update(players)
+            .set({ waiverUntil: null, updatedAt: runAt })
+            .where(eq(players.playerId, claim.addPlayerId));
           await recordTransaction(tx, {
             type: "waiver_add",
             week,
