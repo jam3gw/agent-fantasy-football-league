@@ -2,6 +2,39 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-13 — Operational sweep: all green, no action taken
+
+Scheduled health-check routine against production. Nothing broken; no code
+change made.
+
+- `/api/healthz` → `200 {"ok":true,"lastTickAt":"2026-09-13T13:06:31.410Z"}`,
+  fresh at check time.
+- `health` table: `cron.tick`, `sessions.sweep`, `tick.capacity`, `db.size`
+  and `gateway.credits` all seconds/minutes old. `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades`
+  still carry the same stale 2026-08-29 `last_error` noted in every prior
+  sweep, with a current `last_success_at` — not reproduced since.
+  `nflverse.player_stats` still 404s (`player_stats_2026.csv` unpublished
+  since 2026-09-01), unchanged and non-blocking per §13.4; `sleeper.stats`
+  remains healthy and primary. `email.send` last succeeded 2026-09-10 (no
+  alarm has needed sending since; the next `digest.weekly` is due
+  2026-09-15). No new `last_error` on any key.
+- `scheduled_jobs`: 6 `failed` rows total, all from 2026-08-29/30 (the
+  retired `ingest.fp_*` rows and the `digest.weekly` `toFixed` bug),
+  already recorded in prior sweeps and not reproduced. 0 `queued`/`claimed`
+  outstanding; nothing overdue.
+- `sessions`: 0 `running` (nothing to sample for a stall), 0 `queued` past
+  `due_at` by 15+ minutes, 0 new `failed`/`timed_out` since the 2026-09-12
+  sweep. Status totals: 566 `succeeded`, 92 `queued`, 84 `skipped`, 10
+  `timed_out`, 4 `failed` — the same 4 failed rows as before (3 team-12
+  `post_waivers` runs against the retired `zai/glm-5.3-promo-50` model on
+  2026-09-09, 1 team-12 `board_reply` on 2026-09-11), nothing new.
+- Vercel: latest production deployment `READY`
+  (`dpl_3WXAH5eppWn8NrnvUjunz4bbzSL9`), 0 runtime error groups in the last
+  24h.
+
+Nothing to fix in code; no questions for Jake.
+
 ## 2026-09-12 — Decision logs: agents are told the first sentence is the headline
 
 Jake pointed at the front-page lead "I reviewed the latest trade market and
