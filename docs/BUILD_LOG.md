@@ -2,6 +2,33 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-14 — Correction: the missed deploy was a one-off, not a return of the saga
+
+Downgrading the previous entry's urgency. PR #41 (the build-log entry
+recording the missed deploy) merged at 13:44:47Z, and this time Vercel's
+webhook fired immediately and normally: `dpl_7ebb4GaU2urWUVn6WStisaHXfjtp`,
+`target: "production"`, `READY` in 45s, aliased to `league.jake-moses.com`.
+`cron.tick` at 13:46:31Z confirms the new build is live and running. Both
+this session's fixes (#40's `prices.sync` change and this entry) are in
+production.
+
+So the GitHub → Vercel link itself is fine; whatever swallowed the
+deployment for PR #40's specific merge was transient (a dropped webhook
+delivery, most likely) rather than the recurring account-level
+misconfiguration from the earlier BLOCKED-deploy saga (which always
+produced a visible `BLOCKED` row and needed a re-link to clear). Nothing
+for Jake to do here — the question in the previous entry can be treated as
+answered by this recovery, not as still open. Still worth a glance next
+time this repo's history is reviewed, in case it recurs and turns out to be
+the same family after all.
+
+One side effect to expect, not a bug: `/admin/health`'s `prices.sync` row
+will keep showing the pre-fix error text (`zai/glm-5.3-promo-50`) until
+`prices.sync` next runs (Monday 3:00 AM ET / 2026-09-21) — the job only
+runs weekly, so today's deploy doesn't retroactively re-run it. The code
+fix is confirmed live; the stale health row is just old output waiting on
+its next scheduled write.
+
 ## 2026-09-14 — The BLOCKED-deploy saga again, new shape: PR #40 merged but no production deploy fired
 
 **Questions for Jake:** please check the Vercel project's GitHub integration
