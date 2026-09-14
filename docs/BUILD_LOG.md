@@ -2,6 +2,47 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-14 — The BLOCKED-deploy saga again, new shape: PR #40 merged but no production deploy fired
+
+**Questions for Jake:** please check the Vercel project's GitHub integration
+(Settings → Git) the way you did for the earlier BLOCKED-deploy incidents.
+This is the same family of issue but a new failure mode.
+
+PR #40 (the `prices.sync` fix, previous entry) merged to `main` at
+2026-09-14T13:34:10Z as squash commit `3c4c2eb5`. Ten-plus minutes later, no
+Vercel deployment for that commit had appeared at all — not `READY`, not
+`BLOCKED`, nothing — unlike every prior incident in this saga, which always
+produced a `BLOCKED` deployment row. `list_deployments` still showed the PR's
+own preview build as the newest entry; production was still serving
+`43f8fc4b` (the 2026-09-13 sweep commit).
+
+Ruled out a code problem: `create_git_project` (this session has direct
+Vercel MCP access) reused the linked project and manually kicked a build from
+`main` at that exact commit — `dpl_CyjAA4xajyzdM1uhy2v3Bjv6rrZ2`, `READY` in
+46s, same commit SHA, same clean build. So the code is fine and buildable;
+the GitHub → Vercel webhook simply never fired a deployment for this push,
+silently, with no `BLOCKED` state to even notice. `get_git_deployment_context`
+shows the project still correctly linked to `jam3gw/agent-fantasy-football-league`.
+
+**Not done, deliberately:** the manual build's `target` came back `null` (it
+aliased only to the git-main preview subdomain, not `league.jake-moses.com`)
+— there is no MCP-exposed way to promote an existing deployment to
+Production, and hand-deploying raw files with `target: production` would
+detach the live site from git history, which this repo's whole deploy model
+depends on. So production still runs the pre-fix build. **No user-facing
+harm**: `/api/healthz` is green, the `prices.sync` alert this fix addresses
+is cosmetic (points at an already-abandoned model id), and nothing else
+changed in this push.
+
+This needs Jake specifically because past occurrences of this exact class of
+problem (see the `claude/practical-archimedes-i28x9z` branch entries around
+merges #27, #30, #32, #33) were only fixed by a re-link done from the Vercel
+dashboard, which no session in this repo has credentials for. Until it's
+fixed, treat every merge to `main` as unverified-live until `/api/healthz`
+or the Vercel deployment list actually shows the new commit as `target:
+"production"` and `READY` — don't assume the merge alone means production
+moved.
+
 ## 2026-09-14 — Operational sweep: a stale `prices.sync` alert, root-caused and fixed
 
 Scheduled health-check routine against production.
