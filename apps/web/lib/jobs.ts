@@ -113,8 +113,17 @@ export async function runJob(
       // whose id has left the catalog (a promo that ended, a retired model)
       // is a `prices.sync` error row on /admin/health, not a log line: the
       // swap on /admin/teams is the fix and someone has to see the need.
+      // `LEAGUE_MODELS`/`DEFAULT_REPORTER_MODEL_ID` are static, in-repo
+      // defaults; a swap made on /admin/teams or /admin/settings changes
+      // `teams.model_id` or `settings.extra.reporterModelId` without
+      // touching them, so the live seats have to be passed in explicitly or
+      // a seat already swapped off a dead id keeps reporting itself as still
+      // needing the swap.
       const { syncModelPrices } = await import("@league/agent");
-      const result = await syncModelPrices(db, clock);
+      const liveSeats = await db.select({ modelId: teams.modelId }).from(teams);
+      const result = await syncModelPrices(db, clock, {
+        modelIds: [...liveSeats.map((t) => t.modelId), reporterModelId(settings)],
+      });
       if (!result.ok) throw new Error(`prices.sync: ${result.error}`);
       const now = clock.now();
       const set =

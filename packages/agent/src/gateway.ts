@@ -143,6 +143,18 @@ export interface PriceSyncResult {
  * is not stored; `computeStepCost` derives it from the input rate. A sync
  * changes what later steps are billed at; ledger rows already written keep
  * the price they were written with, so `/spend` history does not move.
+ *
+ * `missingInUse` drives the `/admin/health` alert, so it has to mean "a seat
+ * is running on this id right now" — `LEAGUE_MODELS` and `REPORTER_MODEL` are
+ * in-repo defaults, not that: a swap on /admin/teams changes `teams.model_id`,
+ * and a swap on /admin/settings changes the reporter's model
+ * (`reporterModelId`, §11), neither touching the code. A caller that wants a
+ * live answer must pass every current seat as `opts.modelIds` — trusted
+ * completely when given, so a swapped-off default never keeps alerting.
+ * A caller that omits it, or passes an empty list, gets the static defaults
+ * as a fallback answer, right only for a seat that has never been swapped at
+ * runtime; the production job passes the live `teams.model_id` values plus
+ * the live reporter model instead.
  */
 export async function syncModelPrices(
   db: EngineDb,
@@ -187,7 +199,10 @@ export async function syncModelPrices(
       .onConflictDoUpdate({ target: modelPrices.modelId, set: { ...row, ...window } });
     updated.push(id);
   }
-  const inUse = new Set([...LEAGUE_MODELS.map((m) => m.modelId), REPORTER_MODEL.modelId, ...(opts.modelIds ?? [])]);
+  const inUse =
+    opts.modelIds && opts.modelIds.length > 0
+      ? new Set(opts.modelIds)
+      : new Set([...LEAGUE_MODELS.map((m) => m.modelId), REPORTER_MODEL.modelId]);
   return { ok: true, updated, missing, missingInUse: missing.filter((id) => inUse.has(id)) };
 }
 
