@@ -166,6 +166,34 @@ describe("prices.sync job (§8.7)", () => {
       else process.env.AI_GATEWAY_API_KEY = savedKey;
     }
   });
+
+  it("alerts on the live seat's model id, not the static LEAGUE_MODELS default it was swapped away from", async () => {
+    // seedTeams gives team 12 "zai/glm-5.3" — already swapped off the
+    // LEAGUE_MODELS default "zai/glm-5.3-promo-50", the same shape as the
+    // real 2026-09-09 swap. A catalog missing both must alert on the id the
+    // seat actually runs, never the retired default it left behind.
+    const clock = new FixedClock("2026-09-14T07:00:00Z");
+    const saved = globalThis.fetch;
+    const savedKey = process.env.AI_GATEWAY_API_KEY;
+    process.env.AI_GATEWAY_API_KEY = "test-key";
+    try {
+      globalThis.fetch = (async () =>
+        new Response(
+          JSON.stringify({
+            data: [{ id: "anthropic/claude-fable-5", context_window: 1000000, pricing: { input: "0.00001", output: "0.00005" } }],
+          }),
+          { status: 200 },
+        )) as unknown as typeof fetch;
+      await runJob(db, clock, "prices.sync", {});
+      const row = (await db.select().from(health).where(eq(health.key, "prices.sync")))[0]!;
+      expect(row.lastError).toContain("zai/glm-5.3");
+      expect(row.lastError).not.toContain("zai/glm-5.3-promo-50");
+    } finally {
+      globalThis.fetch = saved;
+      if (savedKey === undefined) delete process.env.AI_GATEWAY_API_KEY;
+      else process.env.AI_GATEWAY_API_KEY = savedKey;
+    }
+  });
 });
 
 describe("reporter bookings (§11)", () => {

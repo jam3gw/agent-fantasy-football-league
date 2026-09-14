@@ -115,6 +115,59 @@ describe("syncModelPrices (§8.7 weekly refresh)", () => {
     expect(again.inputUsdPerM).toBe(2);
   });
 
+  it("reports missingInUse from the passed-in live seats, not the static LEAGUE_MODELS default, once a seat has swapped", async () => {
+    const engineDb = db as unknown as EngineDb;
+    await db.insert(modelPrices).values({
+      modelId: "zai/glm-5.3-promo-50",
+      inputUsdPerM: 0.7,
+      outputUsdPerM: 2.2,
+      contextWindow: 1048576,
+      source: "catalog_seed",
+    });
+    // The catalog no longer carries the promo id (it ended) and also lacks
+    // the swapped-to id, so both are "missing" — but only the one a seat
+    // actually runs (zai/glm-5.3, passed as the live seat) should alert.
+    const noPromo = [{ id: "anthropic/claude-fable-5", context_window: 1000000, pricing: { input: "0.00001", output: "0.00005" } }];
+    const result = await syncModelPrices(engineDb, clock, {
+      apiKey: "k",
+      fetchImpl: catalog(noPromo),
+      modelIds: ["zai/glm-5.3"],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.missing).toContain("zai/glm-5.3-promo-50"); // still refreshed-for, still reported
+    expect(result.missing).toContain("zai/glm-5.3"); // the swapped-to id, also absent from this catalog
+    expect(result.missingInUse).not.toContain("zai/glm-5.3-promo-50"); // no seat runs it any more
+    expect(result.missingInUse).toContain("zai/glm-5.3"); // the seat that actually runs it
+
+    const promoRow = (await db.select().from(modelPrices).where(eq(modelPrices.modelId, "zai/glm-5.3-promo-50")))[0]!;
+    expect(promoRow.inputUsdPerM).toBe(0.7); // left untouched, per §8.7
+
+    // The static REPORTER_MODEL default ("anthropic/claude-sonnet-5") is
+    // also absent from this catalog but nobody passed it as a live seat, so
+    // it must not ride along for free — the same swap-blindness this test
+    // exists to catch, just for the reporter's model instead of a team's.
+    expect(result.missingInUse).not.toContain("anthropic/claude-sonnet-5");
+  });
+
+  it("alerts on a live reporter model swapped away from the static REPORTER_MODEL default, and not on the default itself", async () => {
+    const engineDb = db as unknown as EngineDb;
+    // The reporter's model is independently overridable at runtime
+    // (settings.extra.reporterModelId, §11) via /admin/settings, the same
+    // shape as a team's swap on /admin/teams.
+    const swappedReporter = "openai/gpt-5.6-sol";
+    const noDefault = [{ id: "anthropic/claude-fable-5", context_window: 1000000, pricing: { input: "0.00001", output: "0.00005" } }];
+    const result = await syncModelPrices(engineDb, clock, {
+      apiKey: "k",
+      fetchImpl: catalog(noDefault),
+      modelIds: [swappedReporter],
+    });
+    expect(result.ok).toBe(true);
+    expect(result.missing).toContain("anthropic/claude-sonnet-5"); // the default, still refreshed-for
+    expect(result.missing).toContain(swappedReporter);
+    expect(result.missingInUse).not.toContain("anthropic/claude-sonnet-5"); // nothing runs the default any more
+    expect(result.missingInUse).toContain(swappedReporter); // the reporter's actual live model
+  });
+
   it("changes nothing when the catalog cannot be read", async () => {
     const engineDb = db as unknown as EngineDb;
     await db.insert(modelPrices).values({ modelId: "mistral/mistral-large-3", inputUsdPerM: 2, outputUsdPerM: 6, source: "catalog_seed" });

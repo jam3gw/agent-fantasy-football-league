@@ -2,6 +2,64 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-14 — Operational sweep: a stale `prices.sync` alert, root-caused and fixed
+
+Scheduled health-check routine against production.
+
+- `/api/healthz` → `200 {"ok":true,"lastTickAt":"2026-09-14T13:12:31.541Z"}`, seconds old at check time.
+- `health` table: same accepted-and-unreproduced items as every prior sweep
+  (the 2026-08-29 `tick.*` `last_error` stamps with current `last_success_at`;
+  `nflverse.player_stats` 404, non-blocking per §13.4). One new-looking entry
+  that turned out to be a real bug, below.
+- `scheduled_jobs`: same 6 `failed` rows as every prior sweep (2026-08-29/30,
+  retired `ingest.fp_*` and the `digest.weekly` `toFixed` bug), nothing new.
+  0 `due`/`claimed` overdue.
+- `sessions`: 0 `running` (nothing to sample for a stall), 0 `queued` past its
+  `context.due_at` by 15+ minutes, 0 new `failed`/`timed_out` since the
+  2026-09-13 sweep.
+- Vercel: latest production deployment `READY` (`dpl_6R3bCxXKGE3L4WwabVgJfCbgG4aX`).
+  Runtime errors in the last 24h are the same AI SDK reasoning-part warnings
+  already checked and left alone on 2026-08-30 (log noise, `meta/muse-spark-1.2-contributor`).
+
+**Bug found and fixed: `prices.sync` alerted on a model no seat has run in
+five days.** `/admin/health` read: "not in the gateway catalog any more:
+zai/glm-5.3-promo-50 — swap the seat on /admin/teams" — but team 12 swapped
+off that exact id to `zai/glm-5.3` on 2026-09-09 (confirmed live: `teams.model_id`
+is `zai/glm-5.3`, and `model_prices.zai/glm-5.3` was refreshed this morning
+while the promo row was last touched 2026-09-07).
+
+Root cause in `syncModelPrices` (`packages/agent/src/gateway.ts`): the
+`missingInUse` alert — meant to mean "a seat is running this id right now" —
+was computed from the static, in-repo `LEAGUE_MODELS`/`REPORTER_MODEL`
+defaults, unconditionally unioned in regardless of what the caller passed.
+A swap on `/admin/teams` or `/admin/settings` (the reporter's model,
+`reporterModelId`, is swappable the same way) changes the database, never
+the code, so the alert could never clear itself after a live swap — and,
+the flip side of the same bug, could never correctly alert on a genuinely
+broken id that happened to match a static default while the real seat had
+moved elsewhere.
+
+Fixed: when the caller passes a non-empty `opts.modelIds`, `inUse` is now
+exactly that set (no static union); `apps/web/lib/jobs.ts`'s `prices.sync`
+job case now builds it from live `teams.model_id` rows plus
+`reporterModelId(settings)`. A caller with no live data (existing tests)
+still falls back to the static defaults, unchanged. The `wanted` set (which
+rows get refreshed/written) is untouched — it was never the buggy part,
+and over-refreshing a retired promo's price row is harmless.
+
+Two review rounds (fresh-context reviewers; diff, SPEC §8.7): first round
+confirmed the team-seat fix and flagged the exact same bug shape still open
+for the reporter's independently-swappable model; fixed in the same PR.
+Second round: nothing new. Four new tests pin both halves (team swap,
+reporter swap, and that the swapped-off/never-run default does not ride
+along for free); full suite green (988 tests, lint, typecheck).
+
+Not done: no live paid agent session was run against the preview for this
+change — it is a pure computation inside one job with full unit coverage,
+not user- or session-facing, so the SPEC's "M3 and later" real-session
+check is treated as not applicable to an operational-sweep hotfix this
+narrow.
+
 ## 2026-09-13 — Operational sweep: all green, no action taken
 
 Scheduled health-check routine against production. Nothing broken; no code
