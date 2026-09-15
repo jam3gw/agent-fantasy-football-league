@@ -2,6 +2,44 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-15 — Operational sweep: all green, no action taken
+
+Scheduled health-check routine against production. Nothing broken; no code
+change made.
+
+- `/api/healthz` → `200 {"ok":true,"lastTickAt":"2026-09-15T13:07:31.545Z"}`,
+  well under a minute old at check time.
+- `health` table: `cron.tick`, `sessions.sweep`, `sleeper.*`, `players.applied`,
+  `db.size`, `gateway.credits` and `tick.capacity` all seconds/minutes old.
+  `tick.games`/`tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/
+  `tick.trades` still carry the same stale 2026-08-29 `last_error` noted in
+  every prior sweep, with a current `last_success_at` — not reproduced since.
+  `nflverse.player_stats`/`stats.audit` still 404 on `player_stats_2026.csv`
+  (unpublished since 2026-09-01), unchanged and non-blocking per §13.4.
+  `prices.sync`'s `last_error` ("`zai/glm-5.3-promo-50` not in the gateway
+  catalog") is the 07:00:34Z run from 2026-09-14 — before that day's fix
+  (#40) deployed at 13:xx — not a new failure: checked `teams.model_id`
+  directly, no team currently carries the retired slug (team 12 is
+  `zai/glm-5.3`), and the job itself completed `done`. The next `prices.sync`
+  run (weekly, due 2026-09-21) will be the first real test of the fix.
+  Watch item: confirm on the next sweep after 2026-09-21 that this row's
+  `last_error` clears; if it recurs, that's a live bug, not a stale string.
+- `scheduled_jobs`: same 6 `failed` rows as every prior sweep (2026-08-29/30,
+  retired `ingest.fp_*` and the `digest.weekly` `toFixed` bug), nothing new.
+  139 `due`, all future (earliest 14:05Z today, latest 2026-09-22); 0
+  overdue.
+- `sessions`: 2 `running` (team 8/9 `weekly_review`, both started 3m30s
+  before the check — normal, not stalled), 0 `queued` past its
+  `context.due_at` by 15+ minutes (62 queued, every one future-dated), 0 new
+  `failed`/`timed_out` since the 2026-09-13 sweep (session 3133 and the
+  2026-09-08/09 rows are already recorded in earlier entries).
+- Vercel: latest production deployment `dpl_PhHAnZ7i92BsezDPVnUTPST3RE5P`
+  `READY`, matches `main` HEAD (`6074a68`). `get_runtime_errors` shows only
+  benign AI SDK "skipping reasoning part" / "log warnings" console messages
+  from a non-Anthropic gateway model on the workflow step route — 6 and 1
+  occurrences respectively over the last two weeks, not errors in the
+  application sense. No open pull requests.
+
 ## 2026-09-14 — Correction: the missed deploy was a one-off, not a return of the saga
 
 Downgrading the previous entry's urgency. PR #41 (the build-log entry
