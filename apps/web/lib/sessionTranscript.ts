@@ -289,7 +289,8 @@ const TOOL_VERB: Record<string, string> = {
   get_trade: "Read a trade offer",
   read_board: "Read the board",
   read_scratchpad: "Read its notes",
-  web_search: "Searched the web",
+  search_web: "Searched the web",
+  web_search: "Searched the web", // transcripts before the 2026-09-16 rename
   player_research: "Researched a player",
   get_draft_state: "Checked the draft board",
   set_team_name: "Named the team",

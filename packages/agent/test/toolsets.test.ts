@@ -121,7 +121,7 @@ describe("tool sets (§8.6)", () => {
     for (const kind of ["weekly_review", "post_waivers", "trade_window", "lineup_check", "injury_response"] as SessionKind[]) {
       const n = names(kind);
       expect(n, kind).toContain("get_league_state");
-      expect(n, kind).toContain("web_search");
+      expect(n, kind).toContain("search_web");
       expect(n, kind).toContain("player_research");
       expect(n, kind).toContain("read_scratchpad");
       expect(n, kind).toContain("write_scratchpad");

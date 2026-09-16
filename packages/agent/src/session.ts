@@ -110,6 +110,42 @@ export interface RunSessionResult {
 
 const INVALID_CALL_NUDGE_AT = 5;
 
+/**
+ * Former tool names, still answered. A session interrupted by the step cap
+ * before a rename resumes with the old name in its transcript, and a model
+ * that calls it again should get the tool, not "no tool named".
+ */
+const TOOL_ALIASES: Record<string, string> = { web_search: "search_web" };
+
+interface SchemaIssue {
+  code: string;
+  path: PropertyKey[];
+  message: string;
+  maximum?: unknown;
+  origin?: string;
+}
+
+/**
+ * One schema issue as the model reads it. A string over its cap is told the
+ * actual length and the overshoot: zod's "expected string to have <=800
+ * characters" left models trimming blind, and one decision log in four was
+ * rejected a second time.
+ */
+function describeIssue(issue: SchemaIssue, args: unknown): string {
+  const path = issue.path.map(String).join(".");
+  if (issue.code === "too_big" && issue.origin === "string") {
+    const value = issue.path.reduce<unknown>(
+      (v, key) => (v !== null && typeof v === "object" ? (v as Record<PropertyKey, unknown>)[key] : undefined),
+      args,
+    );
+    const max = Number(issue.maximum);
+    if (typeof value === "string" && Number.isFinite(max)) {
+      return `${path} is ${value.length} characters, ${value.length - max} over the ${max} limit`;
+    }
+  }
+  return `${path} ${issue.message}`;
+}
+
 /** Append a transcript row (§6 session_events). */
 async function recordEvent(
   db: EngineDb,
@@ -588,7 +624,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
 
       const toolResults: Array<{ toolCallId: string; toolName: string; result: ToolResult }> = [];
       for (const call of result.toolCalls) {
-        const tool = toolsByName.get(call.toolName);
+        const tool = toolsByName.get(call.toolName) ?? toolsByName.get(TOOL_ALIASES[call.toolName] ?? "");
         const invalidBefore = invalidToolCalls;
         let out: ToolResult;
         if (!tool) {
@@ -607,10 +643,10 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
             // while the bare zod text cost a board reply two (session 1922,
             // whose second attempt trimmed to the wrong number). Same lesson
             // as make_pick's reason cap on draft night.
-            const overLimit = parsed.error.issues.some((i) => i.message.startsWith("Too big"));
+            const overLimit = parsed.error.issues.some((i) => i.code === "too_big");
             out = toolFailure(
               "invalid_args",
-              `${call.toolName}: ${parsed.error.issues.map((i) => `${i.path.join(".")} ${i.message}`).join("; ")}`,
+              `${call.toolName}: ${parsed.error.issues.map((i) => describeIssue(i, call.args)).join("; ")}`,
               overLimit
                 ? "Shorten the named field to the stated limit and call the tool again."
                 : "Read the tool schema and try again.",
@@ -626,7 +662,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
                 error: String(err),
               });
             }
-            const price = await toolCallCost(db, call.toolName);
+            const price = await toolCallCost(db, tool.name);
             if (price > 0) {
               await recordSpend(db, clock, {
                 sessionId,
@@ -638,7 +674,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
                 costUsd: price,
                 source: "tool",
                 billedTo: "gateway",
-                toolName: call.toolName,
+                toolName: tool.name,
               });
             }
             if (tool.ending && out.ok !== false) endingToolSucceeded = true;

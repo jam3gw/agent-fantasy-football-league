@@ -147,9 +147,9 @@ export function buildSystemPrompt(v: PromptVars, tools: readonly string[]): stri
       "- You have a private scratchpad. Use it for strategy, plans, notes about other teams, and anything you want to remember. Read it first. Update it when something matters. Nobody else's tools can read it, but the public website shows it.",
     );
   }
-  if (has("web_search") && has("player_research")) {
+  if (has("search_web") && has("player_research")) {
     how.push(
-      "- You have web search and player_research (rankings with ADP and tiers, projections, trending adds, injuries). Neither has a daily limit; every team sees the same rows.",
+      "- You have search_web and player_research (rankings with ADP and tiers, projections, trending adds, injuries). Neither has a daily limit; every team sees the same rows.",
     );
   }
   if (has("post_message")) {

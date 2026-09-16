@@ -120,7 +120,7 @@ describe("READ_TOOLS", () => {
         "read_board",
         "read_scratchpad",
         "search_players",
-        "web_search",
+        "search_web",
       ].sort(),
     );
     for (const t of READ_TOOLS) {
@@ -1154,10 +1154,17 @@ describe("read_scratchpad", () => {
 });
 
 /* ========================================================================== */
-/* web_search (§12.1)                                                         */
+/* search_web (§12.1)                                                         */
 /* ========================================================================== */
 
-describe("web_search", () => {
+describe("search_web", () => {
+  it("is not named after a provider's built-in tool", () => {
+    // xAI's Responses API has a server-side `web_search`; Grok answered our
+    // function tool of that name with the native call (no arguments) and
+    // retried it up to 28 times a session.
+    expect(webSearchTool.name).toBe("search_web");
+  });
+
   it("removes the league's own domain and *.vercel.app, and returns the top 5", async () => {
     await seedLeague(db);
     await seedTeams(db);
@@ -1329,6 +1336,26 @@ describe("player_research", () => {
     expect(res.total).toBe(1);
     expect(res.items[0]!.injury_status).toBe("Questionable");
     expect(res.items[0]!.injury_body_part).toBe("Hamstring");
+
+    // Asking about healthy players is answered, not refused: 22 `not_found`s
+    // in one week were rosters with nobody hurt.
+    const fine = await makePlayer(db, { fullName: "Also Fine", position: "WR", nflTeam: "DAL" });
+    const none = ok(await playerResearchTool.execute({ kind: "injuries", player_ids: [fine] }, ctxFor()));
+    expect(none.items).toEqual([]);
+    expect(none.total).toBe(0);
+    expect(none.note).toBe("none of the named players has an injury listed");
+    const noQb = ok(await playerResearchTool.execute({ kind: "injuries", position: "QB" }, ctxFor()));
+    expect(noQb.total).toBe(0);
+    expect(noQb.note).toBe("no QB has an injury listed");
+    const both = ok(await playerResearchTool.execute({ kind: "injuries", position: "WR", player_ids: [fine] }, ctxFor()));
+    expect(both.note).toBe("none of the named players at WR has an injury listed");
+  });
+
+  it("still reports not_found when the injuries feed itself is empty", async () => {
+    await seedLeague(db);
+    await makePlayer(db, { fullName: "Healthy Guy", position: "RB", nflTeam: "DAL" });
+    const res = (await playerResearchTool.execute({ kind: "injuries" }, ctxFor())) as { error: string };
+    expect(res.error).toBe("not_found");
   });
 
   it("makes no outbound request and has no allowance to spend", async () => {

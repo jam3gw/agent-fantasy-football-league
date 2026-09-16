@@ -304,7 +304,7 @@ export default async function AdminSettingsPage({
                 <span className="mb-1 block text-muted">Add a tool</span>
                 <input
                   name="newToolName"
-                  placeholder="web_search"
+                  placeholder="search_web"
                   className="w-full rounded border border-border bg-background px-2 py-1.5 font-mono text-xs"
                 />
               </label>

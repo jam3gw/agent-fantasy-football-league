@@ -98,7 +98,7 @@ if (existingRules.length === 0) {
 /**
  * Per-call tool prices (§8.7).
  *
- * `web_search` is seeded at Tavily's list price rather than 0. At 0 the ledger
+ * `search_web` is seeded at Tavily's list price rather than 0. At 0 the ledger
  * recorded no cost for search at all, so /benchmark's cost-per-point silently
  * excluded the one tool an agent can call unboundedly — and a model that
  * searched forty times a session looked as cheap as one that searched twice.
@@ -109,7 +109,8 @@ if (existingRules.length === 0) {
  * is deliberately absent.
  */
 for (const [toolName, usdPerCall] of [
-  ["web_search", 0.008],
+  ["search_web", 0.008],
+  ["web_search", 0.008], // the tool's name until 2026-09-16; keeps old ledger rows priced
 ] as const) {
   await db
     .insert(toolCosts)
