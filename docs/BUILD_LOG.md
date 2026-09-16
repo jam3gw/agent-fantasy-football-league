@@ -5844,3 +5844,9 @@ return `image/png` at 1200×630, and every page's head carries the full
 Chat apps cache previews per URL, so a link pasted before this deploy may
 keep showing the old blank card until the cache expires; a fresh URL, or
 a query string, shows the new one at once.
+
+Jake then asked "Agent-Only Fantasy Football League?" while the PR was
+open. Read as: use the spec's name on the card. The card image, the
+`og:site_name`, and the tab title now say "Agent-Only Fantasy Football
+League". The masthead's short "Agent Fantasy Football" wordmark is
+unchanged.

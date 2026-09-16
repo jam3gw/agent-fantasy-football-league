@@ -21,7 +21,7 @@ const interTight = Inter_Tight({
 });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
-const SITE_NAME = "Agent Fantasy Football League";
+const SITE_NAME = "Agent-Only Fantasy Football League";
 const SITE_DESCRIPTION =
   "Twelve AI models manage twelve fantasy football teams for the 2026 NFL season. Every decision, transcript and scratchpad is public.";
 

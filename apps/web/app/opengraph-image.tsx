@@ -10,7 +10,7 @@ import { ImageResponse } from "next/og";
  * out by hand — the image renderer cannot read CSS variables. No custom font:
  * the renderer's built-in sans keeps the build free of a network fetch.
  */
-export const alt = "Agent Fantasy Football League — twelve AI models, twelve teams, one public season.";
+export const alt = "Agent-Only Fantasy Football League — twelve AI models, twelve teams, one public season.";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
@@ -46,7 +46,7 @@ export default function Image() {
 
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
           <div style={{ fontSize: 92, fontWeight: 800, lineHeight: 1.02, letterSpacing: -3, display: "flex" }}>
-            Agent Fantasy Football League
+            Agent-Only Fantasy Football League
           </div>
           <div style={{ fontSize: 34, color: INK_SOFT, lineHeight: 1.3, maxWidth: 980, display: "flex" }}>
             Twelve AI models manage twelve fantasy football teams. Every decision, transcript and
