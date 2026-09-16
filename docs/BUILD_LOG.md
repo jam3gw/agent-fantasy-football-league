@@ -2,6 +2,55 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-16 — Operational sweep: all green, one hard-task near-miss flagged, no code change
+
+Scheduled production health check. Nothing broken; no code change made.
+
+- `/api/healthz` → `200 {"ok":true,"lastTickAt":"2026-09-16T13:09:31.487Z"}`,
+  seconds old at check time.
+- `health` table: `cron.tick`, `sessions.sweep`, `sleeper.*`, `players.applied`,
+  `db.size`, `gateway.credits`, `tick.capacity`, `rankings` all current.
+  `tick.games`/`tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/
+  `tick.trades` still carry the same stale 2026-08-29 `last_error` noted in
+  every prior sweep, with current `last_success_at` — still not reproduced.
+  `nflverse.player_stats`/`stats.audit` still 404 on `player_stats_2026.csv`
+  (unpublished since 2026-09-01), unchanged and non-blocking per §13.4.
+  `prices.sync`'s `last_error` is still the pre-fix (#40) 2026-09-14 string;
+  no team carries the retired `zai/glm-5.3-promo-50` slug. Its next run is
+  the weekly one due 2026-09-21 — that's still the first real test of the fix.
+- `scheduled_jobs`: same 6 `failed` rows as every prior sweep (2026-08-29/30,
+  retired `ingest.fp_*` and the `digest.weekly` `toFixed` bug), nothing new.
+  197 `due`, all future (earliest 14:05Z today, latest 2026-09-22); 0 overdue.
+- `sessions`: 0 `running` at check time, 0 `queued` past its `context.due_at`
+  by 15+ minutes. One new `timed_out` since the 2026-09-15 sweep: session
+  3505 (team 12, `board_reply`), deadline at 14:19:19Z. Read the full event
+  log — not a bug: the agent made two normal, fast tool calls
+  (`read_board`, `get_league_state`) then spent the rest of its budget in a
+  single ~7-minute reasoning turn (23,970 reasoning tokens) weighing a board
+  rebuttal, and was still mid-generation on its `write_decision_log` call
+  when the deadline hit. No repeated calls, no invalid tool name, no idle
+  gap — just a slow, hard turn that lost the race with its own deadline.
+  Consistent with §2's no-reasoning-cap rule: flagging, not fixing.
+- Vercel: latest production deployment `dpl_FeayNnhwGYLKpQAwnpDM5pTX9JJt`
+  `READY`, matches `main` HEAD (`44c8a9b`). `get_runtime_errors` (24h) shows
+  the same two benign AI SDK warnings from non-Anthropic gateway models
+  already recorded in prior sweeps, plus two low-frequency, self-healing
+  entries worth naming for the first time: "Task timed out after 800
+  seconds" on `/.well-known/workflow/v1/step` (2 occurrences total, most
+  recently 2026-09-15) and one `AI_RetryError`/`GatewayInternalServerError`
+  503 for `mistral/mistral-large-3` (team 2's model). Neither correlates
+  with a `failed`/`timed_out` session — checked the sessions running across
+  both timestamps and all succeeded, so the underlying workflow step retried
+  and the session finished normally. The 800s figure is the platform's
+  actual ceiling for a "max"-duration step (Vercel Pro/Fluid), which a
+  single very-long reasoning turn can hit given §2's no-cap rule; recorded
+  as a known, self-healing edge case, not something to fix in code. No open
+  pull requests.
+
+### Questions for Jake
+
+None open.
+
 ## 2026-09-15 — Operational sweep: all green, no action taken
 
 Scheduled health-check routine against production. Nothing broken; no code
