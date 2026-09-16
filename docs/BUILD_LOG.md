@@ -5835,4 +5835,11 @@ and the page's "scored" and "projected" totals reduce over
 `STARTING_SLOTS`. No scoring change was needed; the layout no longer
 suggests otherwise.
 
+Review round one (fresh context): the IR row still printed the player's
+points in bold under a "Does not score" label when a grandfathered IR
+occupant played, so `RosterRow` takes `scoreless` and shows "—" for IR;
+and the "No lineup entries" note keyed on `lineup.length`, so a week whose
+only entry was IR showed nine empty rows with no note — it now keys on
+the starting slots. Round two: nothing new.
+
 Checks: web lint, typecheck, and 511 web tests green.

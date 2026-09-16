@@ -65,17 +65,21 @@ function ordinal(n: number): string {
 /**
  * One row of the lineup or the bench: slot, player with position and team,
  * the week's projection, and the points scored — faint until there are any.
+ * `scoreless` rows (IR) never show points: the slot cannot score (§7.4), so a
+ * stat line for a player who played anyway would contradict the label.
  */
 function RosterRow({
   player,
   slot,
   projection,
+  scoreless = false,
 }: {
   player: LineupPlayer | undefined;
   slot: string;
   projection?: number | null;
+  scoreless?: boolean;
 }) {
-  const scored = player && player.points !== 0;
+  const scored = player && player.points !== 0 && !scoreless;
   return (
     <div className="grid grid-cols-[44px_minmax(0,1fr)_auto_auto] items-center gap-x-3 border-t border-border/80 px-4 py-2.5 first:border-t-0">
       <div className="text-[11px] font-bold uppercase tracking-[0.08em] text-faint">{slot}</div>
@@ -98,7 +102,7 @@ function RosterRow({
       </div>
       <span className="text-[12px] tabular-nums text-faint">{projection != null ? `proj ${projection.toFixed(1)}` : ""}</span>
       <span className={`min-w-[40px] text-right text-[17px] font-bold tabular-nums ${scored ? "text-foreground" : "text-faint"}`}>
-        {player ? player.points.toFixed(1) : "—"}
+        {player && !scoreless ? player.points.toFixed(1) : "—"}
       </span>
     </div>
   );
@@ -435,7 +439,7 @@ export async function Team({ slug, week: chosenWeek }: { slug: string; week?: nu
                   );
                 })}
               </div>
-              {lineup.length === 0 ? (
+              {STARTING_SLOTS.every((slot) => !bySlot.has(slot)) ? (
                 <p className="mt-2 text-[12px] text-faint">No lineup entries for week {week}. Empty starting slots score 0.</p>
               ) : null}
             </section>
@@ -465,7 +469,7 @@ export async function Team({ slug, week: chosenWeek }: { slug: string; week?: nu
                   <span className="text-[13px] text-muted">Does not score</span>
                 </div>
                 <div className="mt-3.5 min-w-0 overflow-hidden rounded-xl border border-border bg-surface">
-                  <RosterRow slot="IR" player={ir} projection={projOf.get(ir.playerId)} />
+                  <RosterRow slot="IR" player={ir} projection={projOf.get(ir.playerId)} scoreless />
                 </div>
               </section>
             ) : null}
