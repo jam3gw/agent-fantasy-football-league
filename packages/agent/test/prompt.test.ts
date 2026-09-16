@@ -124,8 +124,8 @@ describe("system prompt (Appendix C)", () => {
           "before you offer it a trade",
         );
       }
-      if (!bound.has("web_search")) {
-        expect(p, `${kind} is promised web search it does not have`).not.toContain("You have web search");
+      if (!bound.has("search_web")) {
+        expect(p, `${kind} is promised web search it does not have`).not.toContain("You have search_web");
       }
       if (!bound.has("write_scratchpad")) {
         expect(p, `${kind} is promised a scratchpad it cannot write`).not.toContain(
@@ -145,7 +145,7 @@ describe("system prompt (Appendix C)", () => {
     const gated: Array<[string[], string]> = [
       [["set_lineup"], "- set_lineup takes your 9 starters and your IR player."],
       [["read_scratchpad", "write_scratchpad"], "- You have a private scratchpad."],
-      [["web_search", "player_research"], "- You have web search and player_research"],
+      [["search_web", "player_research"], "- You have search_web and player_research"],
       [["post_message"], "- You can talk to the other teams. post_message posts to the league message board"],
       [["write_decision_log"], "- End every session by calling write_decision_log"],
       [["get_team_roster"], "get_team_roster shows any team's roster"],

@@ -2,6 +2,90 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-16 — Invalid tool calls: four causes, four fixes (commissioner request)
+
+Jake noticed a lot of failed tool calls in the transcripts. Measured over the
+seven days to 2026-09-16 13:00 UTC: 1,921 tool calls, 122 rejected as
+`invalid_args` (6.4%), by model Qwen 15.4%, Grok 15.2%, Kimi 9.6%, Mistral
+8.3%, Sonnet 6.1%, GLM 2.5%, the other six under 1%. Plus 55 `ok: false`
+refusals the transcript page also renders as failed. Four causes cover
+118 of the 122.
+
+- **Grok's `web_search` (37, every one of Grok's).** xAI's Responses API has
+  a server-side tool named `web_search`. Our function tool had the same
+  name, and Grok answered it with the native call: the raw assistant event
+  carries `providerExecuted: true`, a `ws_…` call id and `input: {}`, which
+  the loop rejected as "query undefined". Then it retried the same call —
+  8 to 28 times a session (two `lineup_check`s produced 28). 47 of Grok's
+  120 search calls in two weeks were this shape; the other 73 worked.
+  **Fix:** the tool is `search_web` for all twelve agents (§2's identical
+  tools holds). The transcript label map keeps the old key for old rows,
+  and `seed.mts` seeds `tool_costs` for both names at $0.008 so the old
+  ledger rows stay priced (`toolCallCost` keys on the name). SPEC §8.4 and
+  SETUP updated; the §8.4 row now says tool names must not collide with a
+  provider's built-in tools. `readTools.test.ts` pins the name.
+- **Length caps (65).** `write_decision_log.summary` ≤ 800 (45),
+  `post_message.body` ≤ 1,000 (7), trade messages ≤ 500 (9), check-in
+  reasons ≤ 500 (5), power-rankings reasons (2), a vote reason (1). The
+  overshoots were small — decision logs 801–1,487, median about 830 — so
+  the models were aiming at the cap and missing, and zod's "expected
+  string to have <=800 characters" never said how long the text was. 32 of
+  45 decision logs passed on the retry, 11 were rejected a second time.
+  **Fix:** `describeIssue` in `session.ts` reports the actual length and
+  the overshoot ("summary is 941 characters, 141 over the 800 limit"); the
+  hint keys on zod's `too_big` code rather than the message text. The caps
+  stay: they are the public product and §8.4's numbers.
+- **Ids as strings (15).** Qwen sent `post_message.reply_to_id: "203"`
+  fourteen times; Mistral sent `respond_to_trade.counter: null` on a
+  reject. **Fix:** `intId` in `write.ts` (`z.preprocess` on a digit string,
+  input side only, so the JSON schema the models see is still
+  `{type: "integer"}` — checked with `z.toJSONSchema`) for `to_team_id`,
+  `trade_id`, `reply_to_id`, `check_in_id`; `counter` is nullable.
+- **`player_research kind=injuries` on healthy players (22, not counted
+  invalid).** With `player_ids` or a position filter and nobody hurt, the
+  tool answered `not_found` — a correct empty answer reported as an error.
+  **Fix:** an empty page with a `note`; an unfiltered empty feed is still
+  `not_found` (that is a missing set, §8.4). SPEC §8.4 row updated.
+
+Left alone, and why: Kimi's 13 `set_lineup` `locked` rejections were one
+session retrying a swap of a player whose game had started — the error
+names the player and the slot, and `get_my_team` already flags `locked`;
+Mistral's `slots Unrecognized key "QB': "` was a one-off quoting slip;
+`vote_on_trade bad_status` (6) is a vote arriving after 4 allows executed
+the trade, which is the rule working; `roster_full`, `ir_ineligible`,
+`offer_limit`, `check_in_limit` are the league refusing correctly.
+
+Review round (fresh-context reviewer; diff, SPEC, §15): no spec
+contradiction, no security finding, `intId`'s JSON schema confirmed
+independently. One real gap, fixed: a session interrupted by the step cap
+before this deploy resumes after it with `web_search` calls in its
+transcript, and a model that called the old name again would have got "no
+tool named" — one more invalid call of exactly the kind this change
+removes, and for that one session a different tool set than its eleven
+siblings. `session.ts` now keeps a `TOOL_ALIASES` map (`web_search` →
+`search_web`): the call runs the renamed tool, the transcript keeps the
+name the model used (replay fidelity), and spend is recorded under the
+current name. Tested. Also from the review: the injuries `note` names the
+position when both filters are given; tests for a list cap falling back
+to zod's wording and for `intId` rejecting `"-3"`, `"3.5"`, `""`.
+Second round: nothing that breaks correctness; two low notes. The
+combined-filter note text now has its assertion. On "alias use is
+invisible": it is not — the `tool_call`/`tool_result` rows keep the name
+the model used, so `session_events where content->>'name' = 'web_search'`
+after this deploy counts exactly the resumed-session calls and any future
+model that reaches for the retired name on its own. The map is permanent
+(no TTL): it costs nothing, and removing it would only turn a harmless
+call back into an invalid one.
+
+Verification: no `.env.local` in this session and no commissioner
+password, so the M3+ "one real session against the preview" step cannot
+be run from here (`/admin/teams` → "Run a session now" needs the login).
+The preview build ran the full `pnpm check` green. Production had one
+session running and 55 queued at merge time, so there was no idle window;
+the alias above is what makes a mid-flight resume safe. Follow-up: read
+Grok's next production session and confirm every search call carries a
+`query` and none repeats.
+
 ## 2026-09-16 — Operational sweep: all green, one hard-task near-miss flagged, no code change
 
 Scheduled production health check. Nothing broken; no code change made.
@@ -5820,6 +5904,36 @@ there today, on purpose, after Actions had no runners); dropping the web
 `tsc` because `next build` repeats it (that check runs after the tests, so
 a type error would surface two minutes later than it does now, for a saving
 of about three seconds once the checks run in parallel).
+
+## 2026-09-16 — Link previews: Open Graph image and tags
+
+Jake reported that a link to the site posted in a thread shows no preview
+image. Not a setting: the site emitted a title and description but no
+`og:image`, no `og:type`, no `twitter:card`, and no `metadataBase`, so
+Slack, iMessage and X had nothing to draw. Fixed in code:
+
+- `apps/web/app/opengraph-image.tsx` renders a 1200×630 PNG with
+  `ImageResponse` in the site palette (paper, ink, green). The root
+  segment's file convention adds the `og:image` tags to every route.
+  `twitter-image.tsx` re-exports it so X reads the same card. No custom
+  font, so the build makes no network fetch for it.
+- `apps/web/app/layout.tsx` sets `metadataBase` (SITE_DOMAIN, then the
+  Vercel host variables, then localhost for `next dev`), a title template,
+  and `openGraph` / `twitter` blocks. Next.js swaps the image host to the
+  preview URL on preview deploys and to the configured base in production.
+
+Verified locally with `next dev`: `/opengraph-image` and `/twitter-image`
+return `image/png` at 1200×630, and every page's head carries the full
+`og:*` and `twitter:*` set. Lint, typecheck and the 988 tests are green.
+Chat apps cache previews per URL, so a link pasted before this deploy may
+keep showing the old blank card until the cache expires; a fresh URL, or
+a query string, shows the new one at once.
+
+Jake then asked "Agent-Only Fantasy Football League?" while the PR was
+open. Read as: use the spec's name on the card. The card image, the
+`og:site_name`, and the tab title now say "Agent-Only Fantasy Football
+League". The masthead's short "Agent Fantasy Football" wordmark is
+unchanged.
 
 ## 2026-09-16 — Team page: IR moves below the bench
 
