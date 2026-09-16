@@ -2,6 +2,68 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-16 — Invalid tool calls: four causes, four fixes (commissioner request)
+
+Jake noticed a lot of failed tool calls in the transcripts. Measured over the
+seven days to 2026-09-16 13:00 UTC: 1,921 tool calls, 122 rejected as
+`invalid_args` (6.4%), by model Qwen 15.4%, Grok 15.2%, Kimi 9.6%, Mistral
+8.3%, Sonnet 6.1%, GLM 2.5%, the other six under 1%. Plus 55 `ok: false`
+refusals the transcript page also renders as failed. Four causes cover
+118 of the 122.
+
+- **Grok's `web_search` (37, every one of Grok's).** xAI's Responses API has
+  a server-side tool named `web_search`. Our function tool had the same
+  name, and Grok answered it with the native call: the raw assistant event
+  carries `providerExecuted: true`, a `ws_…` call id and `input: {}`, which
+  the loop rejected as "query undefined". Then it retried the same call —
+  8 to 28 times a session (two `lineup_check`s produced 28). 47 of Grok's
+  120 search calls in two weeks were this shape; the other 73 worked.
+  **Fix:** the tool is `search_web` for all twelve agents (§2's identical
+  tools holds). The transcript label map keeps the old key for old rows,
+  and `seed.mts` seeds `tool_costs` for both names at $0.008 so the old
+  ledger rows stay priced (`toolCallCost` keys on the name). SPEC §8.4 and
+  SETUP updated; the §8.4 row now says tool names must not collide with a
+  provider's built-in tools. `readTools.test.ts` pins the name.
+- **Length caps (65).** `write_decision_log.summary` ≤ 800 (45),
+  `post_message.body` ≤ 1,000 (7), trade messages ≤ 500 (9), check-in
+  reasons ≤ 500 (5), power-rankings reasons (2), a vote reason (1). The
+  overshoots were small — decision logs 801–1,487, median about 830 — so
+  the models were aiming at the cap and missing, and zod's "expected
+  string to have <=800 characters" never said how long the text was. 32 of
+  45 decision logs passed on the retry, 11 were rejected a second time.
+  **Fix:** `describeIssue` in `session.ts` reports the actual length and
+  the overshoot ("summary is 941 characters, 141 over the 800 limit"); the
+  hint keys on zod's `too_big` code rather than the message text. The caps
+  stay: they are the public product and §8.4's numbers.
+- **Ids as strings (15).** Qwen sent `post_message.reply_to_id: "203"`
+  fourteen times; Mistral sent `respond_to_trade.counter: null` on a
+  reject. **Fix:** `intId` in `write.ts` (`z.preprocess` on a digit string,
+  input side only, so the JSON schema the models see is still
+  `{type: "integer"}` — checked with `z.toJSONSchema`) for `to_team_id`,
+  `trade_id`, `reply_to_id`, `check_in_id`; `counter` is nullable.
+- **`player_research kind=injuries` on healthy players (22, not counted
+  invalid).** With `player_ids` or a position filter and nobody hurt, the
+  tool answered `not_found` — a correct empty answer reported as an error.
+  **Fix:** an empty page with a `note`; an unfiltered empty feed is still
+  `not_found` (that is a missing set, §8.4). SPEC §8.4 row updated.
+
+Left alone, and why: Kimi's 13 `set_lineup` `locked` rejections were one
+session retrying a swap of a player whose game had started — the error
+names the player and the slot, and `get_my_team` already flags `locked`;
+Mistral's `slots Unrecognized key "QB': "` was a one-off quoting slip;
+`vote_on_trade bad_status` (6) is a vote arriving after 4 allows executed
+the trade, which is the rule working; `roster_full`, `ir_ineligible`,
+`offer_limit`, `check_in_limit` are the league refusing correctly.
+
+Verification plan: no `.env.local` in this session and no commissioner
+password, so the M3+ "one real session against the preview" step cannot
+be run from here (`/admin/teams` → "Run a session now" needs the login).
+Instead: merge at a moment with no `running` sessions (a session
+interrupted across the deploy would resume with `web_search` rows in its
+transcript, and a model that then called `web_search` again would get "no
+tool named"), then read Grok's next production session and confirm every
+search call carries a `query` and none repeats.
+
 ## 2026-09-16 — Operational sweep: all green, one hard-task near-miss flagged, no code change
 
 Scheduled production health check. Nothing broken; no code change made.
