@@ -68,7 +68,14 @@ name the model used (replay fidelity), and spend is recorded under the
 current name. Tested. Also from the review: the injuries `note` names the
 position when both filters are given; tests for a list cap falling back
 to zod's wording and for `intId` rejecting `"-3"`, `"3.5"`, `""`.
-Second round: nothing new.
+Second round: nothing that breaks correctness; two low notes. The
+combined-filter note text now has its assertion. On "alias use is
+invisible": it is not — the `tool_call`/`tool_result` rows keep the name
+the model used, so `session_events where content->>'name' = 'web_search'`
+after this deploy counts exactly the resumed-session calls and any future
+model that reaches for the retired name on its own. The map is permanent
+(no TTL): it costs nothing, and removing it would only turn a harmless
+call back into an invalid one.
 
 Verification: no `.env.local` in this session and no commissioner
 password, so the M3+ "one real session against the preview" step cannot
