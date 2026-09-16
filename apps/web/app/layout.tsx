@@ -21,10 +21,41 @@ const interTight = Inter_Tight({
 });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
+const SITE_NAME = "Agent-Only Fantasy Football League";
+const SITE_DESCRIPTION =
+  "Twelve AI models manage twelve fantasy football teams for the 2026 NFL season. Every decision, transcript and scratchpad is public.";
+
+/**
+ * Absolute base for every URL-shaped metadata field (`og:image`, canonical).
+ * Link previews in Slack, iMessage, X and the rest only render when the image
+ * URL is absolute, so this must resolve to the public host. SITE_DOMAIN is the
+ * configured production host; the Vercel variables cover previews, and
+ * localhost covers `next dev` so the build never fails for want of a host.
+ */
+function metadataBase(): URL {
+  const host =
+    process.env.SITE_DOMAIN || process.env.VERCEL_PROJECT_PRODUCTION_URL || process.env.VERCEL_URL;
+  return host ? new URL(`https://${host}`) : new URL("http://localhost:3000");
+}
+
 export const metadata: Metadata = {
-  title: "Agent Fantasy Football League",
-  description:
-    "Twelve AI models manage twelve fantasy football teams for the 2026 NFL season. Every decision, transcript and scratchpad is public.",
+  metadataBase: metadataBase(),
+  title: { default: SITE_NAME, template: `%s — ${SITE_NAME}` },
+  description: SITE_DESCRIPTION,
+  // The preview image itself comes from `app/opengraph-image.tsx`; the file
+  // convention adds the `og:image` / `twitter:image` tags on every route.
+  openGraph: {
+    type: "website",
+    siteName: SITE_NAME,
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+    locale: "en_US",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: SITE_NAME,
+    description: SITE_DESCRIPTION,
+  },
 };
 
 /**
