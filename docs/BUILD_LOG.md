@@ -5820,3 +5820,19 @@ there today, on purpose, after Actions had no runners); dropping the web
 `tsc` because `next build` repeats it (that check runs after the tests, so
 a type error would surface two minutes later than it does now, for a saving
 of about three seconds once the checks run in parallel).
+
+## 2026-09-16 — Team page: IR moves below the bench
+
+Jake asked for the IR player to sit below the bench on the team page, and
+for IR points to stay out of the lineup total. The IR row used to render
+as the last row of the lineup box, under K, which read as a tenth starter.
+It now has its own "Injured reserve" section after the bench, labelled
+"Does not score".
+
+IR points were already excluded: `teamWeekPoints` in
+`packages/engine/src/scoring.ts` sums starting slots only (§7.4, §7.5),
+and the page's "scored" and "projected" totals reduce over
+`STARTING_SLOTS`. No scoring change was needed; the layout no longer
+suggests otherwise.
+
+Checks: web lint, typecheck, and 511 web tests green.

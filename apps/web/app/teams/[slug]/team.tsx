@@ -434,7 +434,6 @@ export async function Team({ slug, week: chosenWeek }: { slug: string; week?: nu
                     <RosterRow key={slot} slot={slot} player={entry} projection={entry ? projOf.get(entry.playerId) : null} />
                   );
                 })}
-                {ir ? <RosterRow slot="IR" player={ir} projection={projOf.get(ir.playerId)} /> : null}
               </div>
               {lineup.length === 0 ? (
                 <p className="mt-2 text-[12px] text-faint">No lineup entries for week {week}. Empty starting slots score 0.</p>
@@ -458,6 +457,18 @@ export async function Team({ slug, week: chosenWeek }: { slug: string; week?: nu
                 )}
               </div>
             </section>
+
+            {ir ? (
+              <section>
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <h2 className="text-[20px] font-bold tracking-[-0.02em]">Injured reserve</h2>
+                  <span className="text-[13px] text-muted">Does not score</span>
+                </div>
+                <div className="mt-3.5 min-w-0 overflow-hidden rounded-xl border border-border bg-surface">
+                  <RosterRow slot="IR" player={ir} projection={projOf.get(ir.playerId)} />
+                </div>
+              </section>
+            ) : null}
           </aside>
 
           <div className="flex min-w-0 flex-col gap-9">
