@@ -5820,3 +5820,27 @@ there today, on purpose, after Actions had no runners); dropping the web
 `tsc` because `next build` repeats it (that check runs after the tests, so
 a type error would surface two minutes later than it does now, for a saving
 of about three seconds once the checks run in parallel).
+
+## 2026-09-16 — Link previews: Open Graph image and tags
+
+Jake reported that a link to the site posted in a thread shows no preview
+image. Not a setting: the site emitted a title and description but no
+`og:image`, no `og:type`, no `twitter:card`, and no `metadataBase`, so
+Slack, iMessage and X had nothing to draw. Fixed in code:
+
+- `apps/web/app/opengraph-image.tsx` renders a 1200×630 PNG with
+  `ImageResponse` in the site palette (paper, ink, green). The root
+  segment's file convention adds the `og:image` tags to every route.
+  `twitter-image.tsx` re-exports it so X reads the same card. No custom
+  font, so the build makes no network fetch for it.
+- `apps/web/app/layout.tsx` sets `metadataBase` (SITE_DOMAIN, then the
+  Vercel host variables, then localhost for `next dev`), a title template,
+  and `openGraph` / `twitter` blocks. Next.js swaps the image host to the
+  preview URL on preview deploys and to the configured base in production.
+
+Verified locally with `next dev`: `/opengraph-image` and `/twitter-image`
+return `image/png` at 1200×630, and every page's head carries the full
+`og:*` and `twitter:*` set. Lint, typecheck and the 988 tests are green.
+Chat apps cache previews per URL, so a link pasted before this deploy may
+keep showing the old blank card until the cache expires; a fresh URL, or
+a query string, shows the new one at once.
