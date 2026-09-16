@@ -110,6 +110,13 @@ export interface RunSessionResult {
 
 const INVALID_CALL_NUDGE_AT = 5;
 
+/**
+ * Former tool names, still answered. A session interrupted by the step cap
+ * before a rename resumes with the old name in its transcript, and a model
+ * that calls it again should get the tool, not "no tool named".
+ */
+const TOOL_ALIASES: Record<string, string> = { web_search: "search_web" };
+
 interface SchemaIssue {
   code: string;
   path: PropertyKey[];
@@ -617,7 +624,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
 
       const toolResults: Array<{ toolCallId: string; toolName: string; result: ToolResult }> = [];
       for (const call of result.toolCalls) {
-        const tool = toolsByName.get(call.toolName);
+        const tool = toolsByName.get(call.toolName) ?? toolsByName.get(TOOL_ALIASES[call.toolName] ?? "");
         const invalidBefore = invalidToolCalls;
         let out: ToolResult;
         if (!tool) {
@@ -655,7 +662,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
                 error: String(err),
               });
             }
-            const price = await toolCallCost(db, call.toolName);
+            const price = await toolCallCost(db, tool.name);
             if (price > 0) {
               await recordSpend(db, clock, {
                 sessionId,
@@ -667,7 +674,7 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
                 costUsd: price,
                 source: "tool",
                 billedTo: "gateway",
-                toolName: call.toolName,
+                toolName: tool.name,
               });
             }
             if (tool.ending && out.ok !== false) endingToolSucceeded = true;

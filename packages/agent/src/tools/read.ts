@@ -2162,7 +2162,10 @@ export const playerResearchTool = readTool(
           kind: args.kind,
           position,
           season,
-          note: only.size > 0 ? "none of the named players has an injury listed" : `no ${position} has an injury listed`,
+          note:
+            only.size > 0
+              ? `none of the named players${position === "ALL" ? "" : ` at ${position}`} has an injury listed`
+              : `no ${position} has an injury listed`,
         });
       }
       return toolFailure(

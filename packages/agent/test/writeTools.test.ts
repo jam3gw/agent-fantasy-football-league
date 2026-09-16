@@ -260,8 +260,9 @@ describe("vote_on_trade", () => {
     // `counter: null` for a plain reject. Neither is worth a rejected call.
     const vote = voteOnTradeTool.schema.safeParse({ trade_id: "999", vote: "allow", reason: "fine" });
     expect(vote.success && vote.data.trade_id).toBe(999);
-    expect(voteOnTradeTool.schema.safeParse({ trade_id: "9x", vote: "allow", reason: "fine" }).success).toBe(false);
-    expect(voteOnTradeTool.schema.safeParse({ trade_id: 2.5, vote: "allow", reason: "fine" }).success).toBe(false);
+    for (const bad of ["9x", "-3", "3.5", "", 2.5]) {
+      expect(voteOnTradeTool.schema.safeParse({ trade_id: bad, vote: "allow", reason: "fine" }).success, String(bad)).toBe(false);
+    }
     const post = postMessageTool.schema.safeParse({ body: "hi", reply_to_id: "203" });
     expect(post.success && post.data.reply_to_id).toBe(203);
     const reject = respondToTradeTool.schema.safeParse({ trade_id: 1, action: "reject", counter: null });

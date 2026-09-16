@@ -264,6 +264,68 @@ describe("runSession (§8.2)", () => {
     expect(rejected.result.hint).toContain("Shorten the named field");
   });
 
+  it("a tool called by its former name runs, and is billed and counted under the current one", async () => {
+    // A session interrupted before the 2026-09-16 rename resumes with
+    // `web_search` calls in its transcript; calling it again must not be
+    // "no tool named" — that is one more invalid call of the kind the
+    // rename removes.
+    const search: LeagueTool = defineTool({
+      name: "search_web",
+      description: "search",
+      schema: z.object({ query: z.string().min(1) }),
+      async execute(args) {
+        return { ok: true, query: (args as { query: string }).query };
+      },
+    });
+    const id = await makeSession("weekly_review");
+    const result = await runSession(
+      id,
+      deps(
+        [
+          step({ toolCalls: [{ toolCallId: "old", toolName: "web_search", args: { query: "inactives" } }] }),
+          step({ toolCalls: [{ toolCallId: "ok", toolName: "write_decision_log", args: { summary: "done" } }] }),
+        ],
+        { tools: [search, logTool] },
+      ),
+    );
+    expect(result.status).toBe("succeeded");
+    expect(result.invalidToolCalls).toBe(0);
+    expect(result.toolCalls).toBe(2);
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
+    const res = events
+      .map((e) => e.content as { name?: string; tool_call_id?: string; result?: { query?: string } })
+      .find((c) => c.tool_call_id === "old" && c.result)!;
+    expect(res.name).toBe("web_search"); // the transcript keeps what the model said, for replay
+    expect(res.result!.query).toBe("inactives");
+  });
+
+  it("a cap on a list falls back to zod's own wording", async () => {
+    const pick: LeagueTool = defineTool({
+      name: "pick_two",
+      description: "at most two",
+      schema: z.object({ ids: z.array(z.string()).max(2) }),
+      async execute() {
+        return { ok: true };
+      },
+    });
+    const id = await makeSession("weekly_review");
+    await runSession(
+      id,
+      deps(
+        [
+          step({ toolCalls: [{ toolCallId: "many", toolName: "pick_two", args: { ids: ["a", "b", "c"] } }] }),
+          step({ toolCalls: [{ toolCallId: "ok", toolName: "write_decision_log", args: { summary: "done" } }] }),
+        ],
+        { tools: [pick, logTool] },
+      ),
+    );
+    const rejected = (await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id)))
+      .map((e) => e.content as { result?: { ok?: boolean; message?: string; hint?: string } })
+      .find((c) => c.result?.ok === false)!;
+    expect(rejected.result!.message).toBe("pick_two: ids Too big: expected array to have <=2 items");
+    expect(rejected.result!.hint).toContain("Shorten the named field");
+  });
+
   it("an unknown tool name is an invalid call, not a crash", async () => {
     const id = await makeSession("weekly_review");
     const result = await runSession(

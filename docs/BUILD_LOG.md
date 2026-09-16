@@ -55,14 +55,29 @@ Mistral's `slots Unrecognized key "QB': "` was a one-off quoting slip;
 the trade, which is the rule working; `roster_full`, `ir_ineligible`,
 `offer_limit`, `check_in_limit` are the league refusing correctly.
 
-Verification plan: no `.env.local` in this session and no commissioner
+Review round (fresh-context reviewer; diff, SPEC, §15): no spec
+contradiction, no security finding, `intId`'s JSON schema confirmed
+independently. One real gap, fixed: a session interrupted by the step cap
+before this deploy resumes after it with `web_search` calls in its
+transcript, and a model that called the old name again would have got "no
+tool named" — one more invalid call of exactly the kind this change
+removes, and for that one session a different tool set than its eleven
+siblings. `session.ts` now keeps a `TOOL_ALIASES` map (`web_search` →
+`search_web`): the call runs the renamed tool, the transcript keeps the
+name the model used (replay fidelity), and spend is recorded under the
+current name. Tested. Also from the review: the injuries `note` names the
+position when both filters are given; tests for a list cap falling back
+to zod's wording and for `intId` rejecting `"-3"`, `"3.5"`, `""`.
+Second round: nothing new.
+
+Verification: no `.env.local` in this session and no commissioner
 password, so the M3+ "one real session against the preview" step cannot
 be run from here (`/admin/teams` → "Run a session now" needs the login).
-Instead: merge at a moment with no `running` sessions (a session
-interrupted across the deploy would resume with `web_search` rows in its
-transcript, and a model that then called `web_search` again would get "no
-tool named"), then read Grok's next production session and confirm every
-search call carries a `query` and none repeats.
+The preview build ran the full `pnpm check` green. Production had one
+session running and 55 queued at merge time, so there was no idle window;
+the alias above is what makes a mid-flight resume safe. Follow-up: read
+Grok's next production session and confirm every search call carries a
+`query` and none repeats.
 
 ## 2026-09-16 — Operational sweep: all green, one hard-task near-miss flagged, no code change
 
