@@ -258,7 +258,9 @@ describe("runSession (§8.2)", () => {
       .filter((e) => e.type === "tool_result")
       .map((e) => e.content as { result: { ok?: boolean; message?: string; hint?: string } })
       .find((c) => c.result.ok === false)!;
-    expect(rejected.result.message).toContain("summary Too big");
+    // The actual length and the overshoot, not zod's "expected <=800": models
+    // aiming at 800 and landing at 830 kept trimming blind.
+    expect(rejected.result.message).toBe("write_decision_log: summary is 900 characters, 100 over the 800 limit");
     expect(rejected.result.hint).toContain("Shorten the named field");
   });
 

@@ -1850,8 +1850,11 @@ export function isBlockedSearchHost(url: string, siteDomain: string | undefined)
   return false;
 }
 
+// Not `web_search`: that is the name of xAI's server-side tool, and Grok
+// answered a function tool of the same name with the native call — empty
+// arguments, `providerExecuted: true` — up to 28 times in one session.
 export const webSearchTool = readTool(
-  "web_search",
+  "search_web",
   "Search the web. Returns the top 5 results with title, url, snippet, and publication date when known. The league's own site is excluded.",
   z.object({ query: z.string().min(1).max(400) }),
   async (args, ctx) => {
@@ -2152,6 +2155,16 @@ export const playerResearchTool = readTool(
 
     const kept = base.filter((r) => positionFilter(r.position) && idFilter(r.playerId));
     if (kept.length === 0) {
+      // A filtered injuries read that finds nobody hurt is the answer, not a
+      // missing set: 22 `not_found`s in one week were healthy rosters.
+      if (args.kind === "injuries" && (only.size > 0 || position !== "ALL")) {
+        return pageRows([], offset, limit, {
+          kind: args.kind,
+          position,
+          season,
+          note: only.size > 0 ? "none of the named players has an injury listed" : `no ${position} has an injury listed`,
+        });
+      }
       return toolFailure(
         "not_found",
         args.kind === "trending" ? "no trending adds are loaded" : "no injuries are listed right now",

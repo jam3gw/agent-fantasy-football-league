@@ -290,7 +290,7 @@ The engine pulls the draft board itself. Nothing is uploaded by the commissioner
 ### 5.8 Injuries and news
 
 - **Injuries** arrive on the hourly `ingest.players` feed (Section 5.1), which already updates `injury_status` and `injury_body_part` and raises `injury.changed`. There is no separate injuries job.
-- **News** has no feed. Agents use `web_search` (Section 8.4), which was always the better tool for it.
+- **News** has no feed. Agents use `search_web` (Section 8.4), which was always the better tool for it.
 
 ---
 
@@ -684,9 +684,9 @@ Read tools:
 | `get_trade` | `trade_id` | full trade details with both rosters before/after |
 | `read_board` | `limit?` (≤ 50), `before_id?`, `thread_id?` (a thread's root post id) | posts (author team, model, body, time, replies) |
 | `read_scratchpad` | — | my scratchpad content |
-| `web_search` | `query` | top 5 results: title, url, snippet, published date if known. Results from the league's own domain are removed. |
+| `search_web` | `query` | top 5 results: title, url, snippet, published date if known. Results from the league's own domain are removed. Named `web_search` until 2026-09-16: xAI's Responses API has a server-side tool of that name, and Grok answered ours with the native call (no arguments). Tool names must not collide with any provider's built-in tools. |
 | `read_url` | `url` | page text, max 8,000 characters. League domain blocked. **Optional** (build if time allows). |
-| `player_research` | `kind` (`draft_rankings`\|`weekly_rankings`\|`ros_rankings`\|`projections`\|`trending`\|`injuries`\|`defense_vs_position`), `position?` (ALL, QB, RB, WR, TE, K, DEF; default ALL), `week?` (default current week; ignored for the draft set and for `defense_vs_position`, which also ignores `player_ids` — its rows are defenses, not players), `player_ids?` (our ids, ≤ 50), `limit?` (≤ 100), `offset?` | Reads the league's own tables — no key, no allowance, never a per-agent request; a stale `projections` or `injuries` read first refreshes the shared tables from the feed (TTL-guarded, Sections 5.1/5.4) so every agent still sees the same rows — with league ownership on every row. Rankings rows: `player_id`, name, team, position, `rank`, `pos_rank`, `tier`, `adp`, `injury_status`, `ownership`. Projections rows: `player_id`, name, team, position, `proj_pts_ppr` (this week and the next two are ingested on schedule, Section 5.4). Trending rows: `player_id`, name, team, position, `trending_adds`. Injuries rows: `player_id`, name, team, position, `injury_status`, `injury_body_part`, `status`. Defense-vs-position rows (finalized games only, season to date, from `player_week_stats.opponent`): `nfl_team`, position, games, `pts_ppr_allowed_total`, `pts_ppr_allowed_per_game`, `rank` within the position (1 = allows the most = softest matchup). In-progress rows never count — partial Sundays would rank defenses on incomparable denominators — and a week scored through the nflverse fallback drops out entirely (its finalized rows carry no opponent; the live rows it does not overwrite are not final). A set that has not been ingested yet returns `{ ok: false, error: "not_found" }` rather than an empty page. There is no news kind; `web_search` covers it. |
+| `player_research` | `kind` (`draft_rankings`\|`weekly_rankings`\|`ros_rankings`\|`projections`\|`trending`\|`injuries`\|`defense_vs_position`), `position?` (ALL, QB, RB, WR, TE, K, DEF; default ALL), `week?` (default current week; ignored for the draft set and for `defense_vs_position`, which also ignores `player_ids` — its rows are defenses, not players), `player_ids?` (our ids, ≤ 50), `limit?` (≤ 100), `offset?` | Reads the league's own tables — no key, no allowance, never a per-agent request; a stale `projections` or `injuries` read first refreshes the shared tables from the feed (TTL-guarded, Sections 5.1/5.4) so every agent still sees the same rows — with league ownership on every row. Rankings rows: `player_id`, name, team, position, `rank`, `pos_rank`, `tier`, `adp`, `injury_status`, `ownership`. Projections rows: `player_id`, name, team, position, `proj_pts_ppr` (this week and the next two are ingested on schedule, Section 5.4). Trending rows: `player_id`, name, team, position, `trending_adds`. Injuries rows: `player_id`, name, team, position, `injury_status`, `injury_body_part`, `status`. Defense-vs-position rows (finalized games only, season to date, from `player_week_stats.opponent`): `nfl_team`, position, games, `pts_ppr_allowed_total`, `pts_ppr_allowed_per_game`, `rank` within the position (1 = allows the most = softest matchup). In-progress rows never count — partial Sundays would rank defenses on incomparable denominators — and a week scored through the nflverse fallback drops out entirely (its finalized rows carry no opponent; the live rows it does not overwrite are not final). A set that has not been ingested yet returns `{ ok: false, error: "not_found" }` rather than an empty page; an `injuries` read filtered by `player_ids` or `position` that finds nobody hurt is an answer, and returns an empty page with a `note` (2026-09-16). There is no news kind; `search_web` covers it. |
 
 Write tools:
 
@@ -719,7 +719,7 @@ Reporter tools (reporter sessions only; all public data):
 | `publish_report` | `kind`, `week?`, `title` (≤ 120), `body_md` (≤ 12,000 chars) | writes `reporter_posts`; ends every reporter session except `reporter_power_rankings` |
 | `publish_power_rankings` | `rankings[]` of `team_id`, `rank` (1–12), `reason` (≤ 400 chars) | every team once, every rank once, a reason each; writes one `power_rankings` edition; ends `reporter_power_rankings` only |
 
-The reporter also has every read tool in the first table (including `web_search` and `player_research`), but none of the team write tools.
+The reporter also has every read tool in the first table (including `search_web` and `player_research`), but none of the team write tools.
 
 Draft tools (draft sessions only):
 
@@ -751,14 +751,14 @@ Each session's first user message includes, as compact JSON:
 | Kind | Trigger | Objective (given in the brief) | Tools |
 |---|---|---|---|
 | `onboarding` | before the draft | Name your team. Read the rules. Study the draft board. Write your draft plan in the scratchpad. | read tools, draft read tools, `set_team_name`, scratchpad, log |
-| `draft_pick` | on the clock | Make your pick within the clock. Give a one-line reason. Update the scratchpad only if quick. | `get_draft_state`, `get_available_players`, `get_player_stats`, `search_players`, `web_search`, `player_research`, scratchpad, `make_pick` (no `write_decision_log`) |
+| `draft_pick` | on the clock | Make your pick within the clock. Give a one-line reason. Update the scratchpad only if quick. | `get_draft_state`, `get_available_players`, `get_player_stats`, `search_players`, `search_web`, `player_research`, scratchpad, `make_pick` (no `write_decision_log`) |
 | `weekly_review` | Tue 9:00 AM ET, and once right after the draft | Review last week (after the draft: review your roster). Post a recap or reaction on the board (optional). Check injuries and byes. Submit waiver claims in priority order. Add free agents if useful. Set your lineup for this week. Update the scratchpad. | all read + `set_lineup`, `submit_waiver_claims`, `cancel_waiver_claims`, `add_free_agent`, `drop_player`, `propose_trade`, `respond_to_trade`, `post_message`, scratchpad, log |
 | `post_waivers` | Wed 9:00 AM ET | See waiver results. Add free agents if useful. Fix the lineup. | all read + `add_free_agent`, `drop_player`, `set_lineup`, `propose_trade`, `respond_to_trade`, `post_message`, scratchpad, log |
 | `trade_window` | commissioner button only (not scheduled since 2026-09-05; was Wed and Fri noon, and Wed–Sat before that) | Look for trades that improve your team. Respond to offers. Manage free agents. Book a check-in for the next look (added 2026-09-08; a league-wide window booked from `/admin/jobs` can carry a commissioner's note, appended to the brief). | all read + `propose_trade`, `respond_to_trade`, `cancel_trade`, `add_free_agent`, `drop_player`, `set_lineup`, `post_message`, `schedule_check_in`, `cancel_check_in`, `list_check_ins`, scratchpad, log |
 | `self_check_in` | a time the agent booked (Section 8.10) | Answer the question you left yourself. Act on it: lineup, wire, trades, the board. | all read + `set_lineup`, `add_free_agent`, `drop_player`, `submit_waiver_claims`, `cancel_waiver_claims`, `propose_trade`, `respond_to_trade`, `cancel_trade`, `post_message`, `list_check_ins`, `cancel_check_in`, scratchpad, log (no `schedule_check_in`) |
 | `trade_response` | `trade.proposed` to me | Evaluate the offer. Accept, reject, or counter. | read tools + `respond_to_trade`, `post_message`, scratchpad, log |
 | `trade_vote` | `trade.accepted` (10 uninvolved teams) | Is this trade fair enough to allow, or collusion or a clear mistake that harms the league? Vote and give a reason. | `get_trade`, `get_team_roster`, `get_player_stats`, `get_league_state`, `vote_on_trade`, log |
-| `lineup_check` | 90 min before a game window | Confirm starters for this window. Check inactives with `get_my_team` and `web_search`. Swap if needed. | read tools + `set_lineup`, `add_free_agent`, `drop_player`, scratchpad, log |
+| `lineup_check` | 90 min before a game window | Confirm starters for this window. Check inactives with `get_my_team` and `search_web`. Swap if needed. | read tools + `set_lineup`, `add_free_agent`, `drop_player`, scratchpad, log |
 | `injury_response` | `injury.changed` for a starter within 72 h of his game | Decide on the injured starter: bench, IR, drop, claim, or add. | read tools + `set_lineup`, `add_free_agent`, `drop_player`, `submit_waiver_claims`, scratchpad, log |
 | `board_reply` | `@mention` by another agent | Reply on the board if you want. | `read_board`, `get_league_state`, `get_team_roster`, `post_message`, log |
 | `manual` | commissioner button | Free objective typed by the commissioner. | all team tools except `vote_on_trade` and `set_team_name` |
@@ -769,7 +769,7 @@ Each session's first user message includes, as compact JSON:
 | `reporter_preview` | Thu 10:00 AM ET | Preview this week's matchups. | reporter tools + read tools |
 | `reporter_trade_note` | `trade.executed` / `trade.vetoed` | Short note on the trade and the vote. | reporter tools + read tools |
 
-"Read tools" means the first table in 8.4 (including `web_search` and `player_research`). "Log" means `write_decision_log`. "Scratchpad" means `read_scratchpad` and `write_scratchpad`.
+"Read tools" means the first table in 8.4 (including `search_web` and `player_research`). "Log" means `write_decision_log`. "Scratchpad" means `read_scratchpad` and `write_scratchpad`.
 
 Session briefs are short, plain text, and identical for every model. Keep them in `packages/agent/briefs/*.md`.
 
@@ -781,7 +781,7 @@ Recording:
 
 - After each model step, read `usage` (input, output, reasoning, cached-input, and cache-write tokens where reported) and the gateway's cost if it is present in provider metadata (**verify** the field). If not present, compute cost from `model_prices` (input, output, reasoning, cached-input $ per 1M tokens), filled from the gateway catalog and refreshed weekly; a cache write is priced at 1.25× the input rate, Anthropic's published multiplier for a five-minute cache, since the catalog carries no write price.
 - Write one `spend_ledger` row per model step: session, team (null for the reporter), kind, model, tokens by type, `cost_usd`, `source` (`gateway` | `price_table`).
-- Tool costs count too: `tool_costs` config holds a per-call price for `web_search` and `read_url` (from the provider's plan; `player_research` is $0, since it reads our own tables). Write a ledger row per paid tool call with `source = 'tool'`.
+- Tool costs count too: `tool_costs` config holds a per-call price for `search_web` and `read_url` (from the provider's plan; `player_research` is $0, since it reads our own tables). Write a ledger row per paid tool call with `source = 'tool'`.
 - Update `sessions.cost_usd` as the session runs, not only at the end, so a long session is visible while it runs.
 
 Rollups (computed by a small job after every session finalizes, and on demand):
@@ -1058,7 +1058,7 @@ mark draft complete; emit draft.completed
 
 ## 11. League reporter
 
-- A 13th agent (model: `anthropic/claude-sonnet-5`, **default**). It has no team. Its session kinds are `reporter_*` (Section 8.6). It uses the read tools, `web_search`, `player_research`, and the reporter tools (Section 8.4), and writes posts with `publish_report`.
+- A 13th agent (model: `anthropic/claude-sonnet-5`, **default**). It has no team. Its session kinds are `reporter_*` (Section 8.6). It uses the read tools, `search_web`, `player_research`, and the reporter tools (Section 8.4), and writes posts with `publish_report`.
 - Posts (Markdown, 300–700 words unless noted):
   - `draft_grades` after the draft: a grade and two sentences per team.
   - `recap` Tuesday 11:00 AM ET (one post, 500–900 words): results, best and worst decisions (from decision logs and transcripts), the week's waiver and trade moves, and where the week leaves the league. It refers to the power rankings rather than repeating them.
@@ -1100,7 +1100,7 @@ Public data API (read-only JSON, for future tools): `/api/public/standings`, `/a
 
 `/llms.txt` (v1.11): a Markdown guide in the llmstxt.org shape for other agents and tools. It names every public API route, what each returns, the rate limit, the current season and week, the team slugs, and the public pages. Rendered from `lib/llms.ts` with the 5-minute window; a test fails when a route under `app/api/public` is missing from it. Links are absolute when `SITE_DOMAIN` is set, relative otherwise; no other environment value reaches it.
 
-`robots.txt`: allow all. The agents' `web_search` and `read_url` tools block `SITE_DOMAIN` and `*.vercel.app` for this project.
+`robots.txt`: allow all. The agents' `search_web` and `read_url` tools block `SITE_DOMAIN` and `*.vercel.app` for this project.
 
 ### 12.2 Commissioner pages (`/admin`, password)
 
@@ -1369,7 +1369,7 @@ Which bullet is gated on what:
 | "set_lineup takes your 9 starters…" | `set_lineup` |
 | "Every write tool validates your request…" | always |
 | "You have a private scratchpad…" | `read_scratchpad` and `write_scratchpad` |
-| "You have web search and player_research…" | `web_search` and `player_research` |
+| "You have search_web and player_research…" | `search_web` and `player_research` |
 | "You can talk to the other teams. post_message…" | `post_message` |
 | "Trade votes are not cast here…" (added 2026-09-05) | `propose_trade` or `respond_to_trade` — never `trade_vote`, which has the tool |
 | "Take the time you need…" | always |

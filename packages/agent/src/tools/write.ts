@@ -57,6 +57,13 @@ export const MAX_SCRATCHPAD_CHARS = 20_000;
 export const MAX_DECISION_LOG_CHARS = 800;
 
 /**
+ * An integer id that also accepts a digit string. The model still sees a
+ * plain integer in the schema (the preprocess is on the input side only);
+ * Qwen sent `reply_to_id: "203"` fourteen times in one week.
+ */
+const intId = z.preprocess((v) => (typeof v === "string" && /^\d+$/.test(v) ? Number(v) : v), z.number().int());
+
+/**
  * Team write tools need a team. `ctx.teamId` is null only for the reporter
  * (§6), which never gets these tools; this is the belt-and-braces check.
  */
@@ -286,7 +293,7 @@ export const dropPlayerTool = defineTool({
 /* -------------------------------------------------------------------------- */
 
 const proposeTradeSchema = z.object({
-  to_team_id: z.number().int(),
+  to_team_id: intId,
   // The engine's rule is one player somewhere in the offer, not one on each
   // side (§7.5) — a straight give-away is a legal trade, and a schema that
   // refused it made the tool stricter than the league.
@@ -318,7 +325,7 @@ export const proposeTradeTool = defineTool({
 });
 
 const respondToTradeSchema = z.object({
-  trade_id: z.number().int(),
+  trade_id: intId,
   action: z.enum(["accept", "reject", "counter"]),
   counter: z
     .object({
@@ -326,6 +333,7 @@ const respondToTradeSchema = z.object({
       get_player_ids: z.array(z.string().min(1)).min(1).max(15),
       message: z.string().max(MAX_TRADE_MESSAGE_CHARS).optional(),
     })
+    .nullable()
     .optional(),
 });
 
@@ -377,7 +385,7 @@ export const respondToTradeTool = defineTool({
   },
 });
 
-const cancelTradeSchema = z.object({ trade_id: z.number().int() });
+const cancelTradeSchema = z.object({ trade_id: intId });
 
 export const cancelTradeTool = defineTool({
   name: "cancel_trade",
@@ -393,7 +401,7 @@ export const cancelTradeTool = defineTool({
 });
 
 const voteOnTradeSchema = z.object({
-  trade_id: z.number().int(),
+  trade_id: intId,
   vote: z.enum(["allow", "veto"]),
   reason: z.string().min(1).max(MAX_VOTE_REASON_CHARS),
 });
@@ -434,7 +442,7 @@ export const voteOnTradeTool = defineTool({
 
 const postMessageSchema = z.object({
   body: z.string().min(1).max(MAX_BOARD_POST_CHARS),
-  reply_to_id: z.number().int().nullable().optional(),
+  reply_to_id: intId.nullable().optional(),
 });
 
 export const postMessageTool = defineTool({
@@ -548,7 +556,7 @@ export const scheduleCheckInTool = defineTool({
 export const cancelCheckInTool = defineTool({
   name: "cancel_check_in",
   description: "Cancel one of your own pending check-ins by its id. Use list_check_ins to see them.",
-  schema: z.object({ check_in_id: z.number().int() }),
+  schema: z.object({ check_in_id: intId }),
   execute: async (args, ctx) => {
     const teamId = requireTeam(ctx);
     if (isFailure(teamId)) return teamId;

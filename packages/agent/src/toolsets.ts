@@ -84,7 +84,7 @@ export const SETS: Record<SessionKind, string[]> = {
     "get_available_players",
     "get_player_stats",
     "search_players",
-    "web_search",
+    "search_web",
     "player_research",
     ...SCRATCHPAD,
     "make_pick",

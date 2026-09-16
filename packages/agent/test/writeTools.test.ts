@@ -4,6 +4,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
+import { z } from "zod";
 import { FixedClock } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
 import {
@@ -21,6 +22,7 @@ import {
 import {
   postMessageTool,
   proposeTradeTool,
+  respondToTradeTool,
   setLineupTool,
   setTeamNameTool,
   voteOnTradeTool,
@@ -251,6 +253,21 @@ describe("vote_on_trade", () => {
       ctxFor({ teamId, kind: "trade_vote" }),
     );
     expect(res).toMatchObject({ ok: false, error: "not_found" });
+  });
+
+  it("accepts an id sent as a digit string, while the schema still shows an integer", () => {
+    // Qwen sent `reply_to_id: "203"` fourteen times in a week; Mistral sent
+    // `counter: null` for a plain reject. Neither is worth a rejected call.
+    const vote = voteOnTradeTool.schema.safeParse({ trade_id: "999", vote: "allow", reason: "fine" });
+    expect(vote.success && vote.data.trade_id).toBe(999);
+    expect(voteOnTradeTool.schema.safeParse({ trade_id: "9x", vote: "allow", reason: "fine" }).success).toBe(false);
+    expect(voteOnTradeTool.schema.safeParse({ trade_id: 2.5, vote: "allow", reason: "fine" }).success).toBe(false);
+    const post = postMessageTool.schema.safeParse({ body: "hi", reply_to_id: "203" });
+    expect(post.success && post.data.reply_to_id).toBe(203);
+    const reject = respondToTradeTool.schema.safeParse({ trade_id: 1, action: "reject", counter: null });
+    expect(reject.success).toBe(true);
+    const props = z.toJSONSchema(voteOnTradeTool.schema).properties as Record<string, { type?: string }>;
+    expect(props.trade_id!.type).toBe("integer");
   });
 
   it("caps the reason at 200 characters", async () => {
