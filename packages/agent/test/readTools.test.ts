@@ -1347,6 +1347,8 @@ describe("player_research", () => {
     const noQb = ok(await playerResearchTool.execute({ kind: "injuries", position: "QB" }, ctxFor()));
     expect(noQb.total).toBe(0);
     expect(noQb.note).toBe("no QB has an injury listed");
+    const both = ok(await playerResearchTool.execute({ kind: "injuries", position: "WR", player_ids: [fine] }, ctxFor()));
+    expect(both.note).toBe("none of the named players at WR has an injury listed");
   });
 
   it("still reports not_found when the injuries feed itself is empty", async () => {
