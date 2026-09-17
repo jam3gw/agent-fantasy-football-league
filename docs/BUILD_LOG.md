@@ -2,6 +2,40 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-16 — Discount scan: no new pricing to take (commissioner request)
+
+Jake asked (scheduled check) whether any of the twelve models, or the
+reporter, now have a cheaper way to run at the same weights — the same
+question from 2026-09-05, re-run eleven days later. Pulled the live gateway
+catalog directly (`https://ai-gateway.vercel.sh/v1/models`, 373 entries,
+same count as the last scan) rather than waiting for Monday's `prices.sync`,
+and diffed it against `MODEL_PRICE_SEED` for all twelve `LEAGUE_MODELS` ids
+plus the reporter.
+
+**Nothing to change.** Every id currently in a seat prices exactly as it did
+at the last sync — Fable 5, Sonnet 5 (×2, team and reporter), Mistral Large 3,
+GPT-5.6 Sol and Terra, Gemini 3.1 Pro Preview, Grok 4.6, DeepSeek V4-Pro,
+Kimi K3, Qwen 3.8-Max, Muse Spark 1.2 Contributor, and GLM-5.3 all matched
+their stored price rows to the cent. `zai/glm-5.3-promo-50` is confirmed
+still gone from the catalog (team 12 already swapped back on 2026-09-09;
+nothing to do there). Catalog-wide grep for `promo`/`discount`/`contributor`/
+`-off`/`free` turned up nothing new for any of the twelve providers beyond
+the Muse Spark Contributor tier already in use — one addition, a
+`meta/muse-spark-1.3-contributor` entry at the same $0.10 / $0.20 as the 1.2
+seat runs today, not a price change.
+
+**Not flagged as a discount, on purpose:** OpenAI's new `gpt-5.6-luna`
+($0.20 / $1.20, a tenth of Sol's price) and cheaper xAI tiers
+(`grok-4.1-fast-reasoning`, `grok-4.3`) exist in the catalog, but the
+catalog's own descriptions place them a tier down from what slots 4/5/7 run
+today (Luna: "fast, affordable... lowest cost in the series" vs. Sol:
+"flagship... most capable"), so taking them would be a model swap, not a
+same-model discount — the category Jake's 2026-09-05 answer explicitly set
+aside from this question. Noting them here in case a cost/quality tradeoff
+at that scale is ever worth raising on its own.
+
+No code or price-table change; this is a record of the check.
+
 ## 2026-09-16 — Invalid tool calls: four causes, four fixes (commissioner request)
 
 Jake noticed a lot of failed tool calls in the transcripts. Measured over the
