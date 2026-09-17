@@ -5957,3 +5957,46 @@ only entry was IR showed nine empty rows with no note — it now keys on
 the starting slots. Round two: nothing new.
 
 Checks: web lint, typecheck, and 511 web tests green.
+
+## 2026-09-17 — Scheduled check: any of the twelve models discounted?
+
+Jake's scheduled task asked whether any of the twelve league models (or
+the reporter) have gone on sale since the last price check, so the seat
+could move the way slot 11 (Muse Spark, contributor tier) and slot 12
+(GLM-5.3, promo) already have.
+
+Pulled the live catalog (`GET https://ai-gateway.vercel.sh/v1/models`,
+374 entries) and diffed it against `MODEL_PRICE_SEED` in
+`packages/agent/src/models.ts` for all twelve `modelId`s plus the
+reporter's `anthropic/claude-sonnet-5`. Every id's live input/output/
+cached-input price matches the seed exactly — expected, since
+`prices.sync` already pulls this same catalog every Monday 3 AM ET
+(§8.7) and `model_prices` is what `/spend` actually bills from; the seed
+is only a fallback for a fresh database.
+
+Re-checked `zai/glm-5.3-promo-50` specifically, since it's the one seat
+with a history here: still absent from the live catalog (confirmed by
+substring search, not just a missing-key false negative), consistent
+with the 2026-09-09 incident where it was retired and team 12 was
+swapped back to `zai/glm-5.3` on `/admin/teams`. No new zai promo entry
+has replaced it.
+
+Searched each provider's catalog listing for a same-model, lower-priced
+variant of the eleven team models and the reporter — a new `-promo` /
+`-contributor` / regional entry the way the two existing swaps found
+one. None exists right now. The only near-miss: `meta/muse-spark-1.3`
+and `meta/muse-spark-1.3-contributor` are now listed, at the identical
+contributor-tier price slot 11 already runs ($0.10 / $0.20) — a version
+bump, not a further discount, so nothing to move.
+
+The cheaper entries that do exist in a used model's family (e.g.
+`zai/glm-5.3-flash` at $0.15/$0.50, `openai/gpt-5.6-luna` at $0.20/$1.20)
+are smaller, different-weights models, not a discount on the model
+currently in the seat — same category as the meta Contributor tier
+question, but without the "same weights" property that made the
+existing two swaps a clean call under the commissioner's precedent. Not
+proposing those here; a seat's underlying model is a commissioner call
+given what it does to that team's competitiveness in the benchmark, not
+something to change under a "reduce cost" scheduled check.
+
+No code change. No seats moved.
