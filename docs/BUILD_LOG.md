@@ -2,6 +2,71 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-17 — Operational sweep: all green, one stale PR closed out, no code change
+
+Scheduled production health check against the full runbook checklist.
+Nothing broken in the league itself; one piece of repo housekeeping done.
+
+- `/api/healthz` → `200 {"ok":true,"lastTickAt":"2026-09-17T13:07:31.459Z"}`
+  at check time, and reconfirmed green after the deploy below.
+- `health` table: `cron.tick`, `sessions.sweep`, `sleeper.*`, `players.applied`,
+  `db.size`, `gateway.credits`, `tick.capacity`, `rankings` all
+  seconds/minutes old. `tick.games`/`tick.live_scores`/`tick.retries`/
+  `tick.stall_watchdog`/`tick.trades` still carry the same stale 2026-08-29
+  `last_error` noted in every prior sweep, with a current `last_success_at`
+  — still not reproduced. `nflverse.player_stats`/`stats.audit` still 404
+  on `player_stats_2026.csv` (confirmed by direct fetch: both known release
+  filenames 404 today too), unchanged since 2026-09-01/15 and non-blocking
+  per §13.4 — Sleeper remains primary and healthy. `prices.sync`'s
+  `last_error` is still the pre-#40-fix 2026-09-14 string; no team carries
+  the retired `zai/glm-5.3-promo-50` id (team 12 is `zai/glm-5.3`, confirmed
+  live) — unchanged watch item, next real test is the weekly run due
+  2026-09-21. No new `last_error` on any key since the 2026-09-16 sweep.
+- `scheduled_jobs`: same 6 `failed` rows as every prior sweep (2026-08-29/30,
+  retired `ingest.fp_*` and the `digest.weekly` `toFixed` bug), nothing new.
+  248 `due`, all future-dated (earliest 13:15Z today, latest 2026-09-22); 0
+  overdue.
+- `sessions`: 0 `running` at check time (nothing to sample for a stall), 0
+  `queued` past its `context.due_at` by 15+ minutes. Three `failed`/
+  `timed_out` in the last 48h: team 10 `board_reply` timed out on
+  2026-09-16 (deadline), team 2 `trade_response` failed on a transient
+  Mistral gateway 503 (`AI_RetryError`, already-known noise pattern), team
+  12 `board_reply` timed out on 2026-09-15. Different teams, different
+  models — not the "three in a row for one model" pattern that would call
+  for a swap.
+- Vercel: production was serving `745aa01` (`dpl_4LUUP8gs...`, `READY`,
+  matches `main` HEAD at sweep start). `get_runtime_errors` (24h): the same
+  benign AI SDK reasoning-part warnings from `meta/muse-spark-1.2-contributor`
+  already recorded in prior sweeps, plus one `MessageNotAvailableError`
+  queue-callback error (single occurrence, 2026-09-16, no correlated
+  session failure) — not investigated further, consistent with the
+  self-healing workflow-step noise already accepted in the 2026-09-16 entry.
+- Neon: noticed `preview/mock-draft` (`br-weathered-cake-ava88vpq`, created
+  2026-09-08 for a mock draft per §17's checklist) is still around,
+  121 MB, near-zero compute since creation — the runbook says to delete a
+  mock-draft branch after use. Left it alone (branch deletion is
+  destructive and this session has no standing authorization to run it
+  unattended); flagging here for Jake or a future session with explicit
+  sign-off to delete it.
+- Repo housekeeping: found PR #48 (`docs(build-log): record 2026-09-16
+  discount scan, nothing to take`) left open as a draft since 2026-09-16 by
+  an earlier scheduled session — docs-only, `mergeable_state: clean`, base
+  matched current `main` HEAD, content already consistent with everything
+  reconfirmed above (no team on the retired promo id). Marked ready and
+  squash-merged it (`b5a113034c78ce11118cbe66b14a6e8892f34239`) to close out
+  that dangling housekeeping. The merge's own Vercel deployment
+  (`dpl_FA8jF641jiGVcK1JzNcEbbGKEmZe`) went `READY` and aliased to
+  `league.jake-moses.com` in the normal ~45s — no repeat of the
+  BLOCKED-deploy saga. `/api/healthz` reconfirmed green afterward
+  (`lastTickAt` 13:11:31Z). Noticed, in passing, an unrelated open branch
+  (`claude/serene-hopper-86aquf`) mid-push with another discount-scan
+  entry from what looks like a separate concurrently-scheduled task; not
+  part of this sweep, left untouched.
+
+Nothing to fix in code. No questions for Jake beyond the standing
+`prices.sync` watch item (unchanged) and the optional mock-draft branch
+cleanup noted above.
+
 ## 2026-09-16 — Discount scan: no new pricing to take (commissioner request)
 
 Jake asked (scheduled check) whether any of the twelve models, or the
