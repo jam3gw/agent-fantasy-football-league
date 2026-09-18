@@ -2,6 +2,67 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-18 — `LEAGUE_MODELS` slot 12 synced to the live seat: `zai/glm-5.3`, not the dead promo
+
+A scheduled discount-research pass (asked to look for cheaper models to
+swap to) surfaced two things about slot 12: the 50%-off `zai/glm-5.3-promo-50`
+entry it flagged as a savings idea had actually already ended around
+2026-09-09, and — the part worth fixing — `packages/agent/src/models.ts`
+still hardcoded that dead id as `LEAGUE_MODELS`' slot-12 default, even
+though the live `teams.model_id` had been swapped back to `zai/glm-5.3` in
+production the same day the promo broke. `apps/web/scripts/seed.mts` seeds
+a fresh database's teams straight from `LEAGUE_MODELS`, so a new
+environment (or a from-scratch re-seed) would have silently recreated a
+team pointed at a model id the gateway no longer serves.
+
+Jake: "can't change the model type, would break the experiment" (correct —
+no swap proposed here, this only syncs the repo to what's already running)
+and "fix this" for the stale-code half.
+
+Fixed: `LEAGUE_MODELS` slot 12 is now `zai/glm-5.3` ($1.40/$4.40/$0.14,
+matching both the live gateway catalog and `teams.model_id` in production),
+with a comment recording the promo's rise and fall. Dropped the now-useless
+`"zai/glm-5.3-promo-50"` row from `MODEL_PRICE_SEED` (a fresh database has
+no reason to seed a price for a catalog id that doesn't exist).
+
+Two tests depended on the old value and needed updating, not just
+tolerating the diff:
+
+- `packages/agent/test/gateway.test.ts`: two spots used
+  `zai/glm-5.3-promo-50` as an illustrative catalog/`LEAGUE_MODELS` id;
+  switched to `zai/glm-5.3` so they exercise what the array actually
+  contains now.
+- `apps/web/test/tradeWindows.test.ts`'s "alerts on the live seat's model
+  id, not the static `LEAGUE_MODELS` default" test relied on team 12's
+  fixture (`zai/glm-5.3`, from `packages/engine/test/helpers/factories.ts`)
+  diverging from `LEAGUE_MODELS` (previously the promo id) to prove the
+  #40 fix reads the live DB, not the static default. With slot 12 now
+  matching the fixture, that pair no longer diverges, so the test was
+  moved to team 2 instead — the fixture hardcodes `anthropic/claude-opus-5`
+  while `LEAGUE_MODELS` slot 2 is `mistral/mistral-large-3` (the
+  commissioner's permanent 2026-08-29 swap), a divergence that doesn't
+  depend on a promo's lifecycle and won't need re-chasing next time a
+  price promo ends.
+
+Not touched, on purpose: the already-merged `prices.sync` alerting fix
+(#40) and its "the health row is stale until the 2026-09-21 run"
+situation — that is a separate, already-diagnosed, already-correct
+in-progress watch item (see the 2026-09-14 through 09-17 sweep entries
+below), not a bug this change needed to touch.
+
+Checks: `pnpm check` green across all 6 workspace packages — lint,
+typecheck, and the full 995-test suite (81 files), including both edited
+test files.
+
+Review round (fresh-context reviewer; diff, `LEAGUE_MODELS`/`MODEL_PRICE_SEED`
+consumers repo-wide, VERIFIED/BUILD_LOG history): ship it. Confirmed no
+other consumer assumes slot 12 is still the promo id or that
+`MODEL_PRICE_SEED` still carries the promo row; confirmed the remaining
+`zai/glm-5.3-promo-50` references (the other `gateway.test.ts` test, which
+is self-contained; `retry.test.ts`'s synthetic literals; dated log/history
+entries) are all correctly left untouched; confirmed the team-2 divergence
+substitute is durable. Nothing new — PR #54 merged.
+
 ## 2026-09-18 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
