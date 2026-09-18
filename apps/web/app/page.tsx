@@ -141,7 +141,7 @@ function MatchupTile({ card, records }: { card: GameCard; records: Map<number, s
 
   return (
     <Link
-      href={`/matchups/${card.week}`}
+      href={`/matchups/${card.week}#matchup-${card.matchupId}`}
       className="block rounded-xl border border-border bg-surface px-4 py-3 text-foreground transition-colors hover:border-accent hover:text-foreground"
     >
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2">
@@ -215,7 +215,7 @@ function MatchupRow({ card, records }: { card: GameCard; records: Map<number, st
       : -1;
   return (
     <Link
-      href={`/matchups/${card.week}`}
+      href={`/matchups/${card.week}#matchup-${card.matchupId}`}
       className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 border-b border-border py-2.5 text-foreground transition-colors hover:text-foreground [&:hover_.name]:text-accent"
     >
       {sides.map((side, i) => (

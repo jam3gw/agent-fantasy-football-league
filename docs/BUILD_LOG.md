@@ -6055,4 +6055,33 @@ and the "No lineup entries" note keyed on `lineup.length`, so a week whose
 only entry was IR showed nine empty rows with no note — it now keys on
 the starting slots. Round two: nothing new.
 
-Checks: web lint, typecheck, and 511 web tests green.
+Review round one (fresh context): the featured game is drawn in two
+pieces, a hero band with the scores and a lineup section below it, and the
+anchor was on the lineup section, so a click on the featured card scrolled
+past the scores. The anchor is now on the hero band. A source-level test
+(`apps/web/test/matchupAnchors.test.ts`) pins the links and anchors. Round
+two: nothing new.
+
+Checks: web lint, typecheck, and 513 web tests green.
+
+## 2026-09-18 — Home page: a matchup card opens its own matchup
+
+Jake clicked a week 2 matchup card on the home page and landed at the top
+of the week's matchups page, which opens on a different game (the closest
+one). Each matchup section on `/matchups/[week]` now carries an
+`id="matchup-<id>"` anchor with a small scroll margin, and the home page's
+tiles and rows link to `/matchups/<week>#matchup-<id>`.
+
+A `?matchup=` query param was the other option and was rejected: reading
+`searchParams` would turn the page dynamic and lose the CDN revalidate
+window the page's own note (§12.1) depends on. A hash is handled in the
+browser, so the prerendered page is unchanged.
+
+Review round one (fresh context): the featured game is drawn in two
+pieces, a hero band with the scores and a lineup section below it, and the
+anchor was on the lineup section, so a click on the featured card scrolled
+past the scores. The anchor is now on the hero band. A source-level test
+(`apps/web/test/matchupAnchors.test.ts`) pins the links and anchors. Round
+two: nothing new.
+
+Checks: web lint, typecheck, and 513 web tests green.
