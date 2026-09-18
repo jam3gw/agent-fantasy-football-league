@@ -6056,3 +6056,18 @@ only entry was IR showed nine empty rows with no note — it now keys on
 the starting slots. Round two: nothing new.
 
 Checks: web lint, typecheck, and 511 web tests green.
+
+## 2026-09-18 — Home page: a matchup card opens its own matchup
+
+Jake clicked a week 2 matchup card on the home page and landed at the top
+of the week's matchups page, which opens on a different game (the closest
+one). Each matchup section on `/matchups/[week]` now carries an
+`id="matchup-<id>"` anchor with a small scroll margin, and the home page's
+tiles and rows link to `/matchups/<week>#matchup-<id>`.
+
+A `?matchup=` query param was the other option and was rejected: reading
+`searchParams` would turn the page dynamic and lose the CDN revalidate
+window the page's own note (§12.1) depends on. A hash is handled in the
+browser, so the prerendered page is unchanged.
+
+Checks: web lint, typecheck, and 511 web tests green.

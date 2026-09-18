@@ -449,7 +449,7 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
         ) : null}
 
         {featured ? (
-          <section className="mb-12">
+          <section id={`matchup-${featured.matchupId}`} className="mb-12 scroll-mt-6">
             <div className="mb-3 grid grid-cols-[minmax(0,1fr)_64px_minmax(0,1fr)] gap-4 px-1 text-[10px] font-bold uppercase tracking-[0.12em] text-faint">
               <div className="hidden sm:block sm:text-right">{teamName(featured.awayTeam)}</div>
               <div className="hidden sm:block sm:text-center">Slot</div>
@@ -496,7 +496,7 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
         {cards
           .filter((c) => c.matchupId !== featured?.matchupId)
           .map((card) => (
-            <section key={card.matchupId} className="mb-10">
+            <section key={card.matchupId} id={`matchup-${card.matchupId}`} className="mb-10 scroll-mt-6">
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3 border-b border-border pb-3">
                 <div className="text-[17px] font-semibold tracking-[-0.01em]">
                   <span className={card.awayPoints > card.homePoints ? "text-accent" : ""}>
