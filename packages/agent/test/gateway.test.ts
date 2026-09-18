@@ -36,16 +36,16 @@ const CATALOG = [
     context_window: 1000000,
     pricing: { input: "0.00001", output: "0.00005", input_cache_read: "0.000001", regional: { us: { input: "0.000011" } } },
   },
-  { id: "zai/glm-5.3-promo-50", context_window: 1048576, pricing: { input: "0.0000007", output: "0.0000022", input_cache_read: "0.00000013" } },
+  { id: "zai/glm-5.3", context_window: 1000000, pricing: { input: "0.0000014", output: "0.0000044", input_cache_read: "0.00000014" } },
 ];
 
 describe("checkGatewayModelId", () => {
   it("answers ok / not_found from the catalog, and unknown when it cannot be read", async () => {
     const fetchImpl = catalog(CATALOG);
-    expect(await checkGatewayModelId("zai/glm-5.3-promo-50", { apiKey: "k", fetchImpl })).toBe("ok");
+    expect(await checkGatewayModelId("zai/glm-5.3", { apiKey: "k", fetchImpl })).toBe("ok");
     expect(await checkGatewayModelId("zai/glm-9", { apiKey: "k", fetchImpl })).toBe("not_found");
     const down = (async () => new Response("", { status: 503 })) as unknown as typeof fetch;
-    expect(await checkGatewayModelId("zai/glm-5.3-promo-50", { apiKey: "k", fetchImpl: down })).toBe("unknown");
+    expect(await checkGatewayModelId("zai/glm-5.3", { apiKey: "k", fetchImpl: down })).toBe("unknown");
   });
 });
 
@@ -73,7 +73,7 @@ describe("syncModelPrices (§8.7 weekly refresh)", () => {
     expect(fable.cachedInputUsdPerM).toBe(1);
 
     // League models with no row yet are added when the catalog has them...
-    expect(result.updated).toContain("zai/glm-5.3-promo-50");
+    expect(result.updated).toContain("zai/glm-5.3");
     // ...and every id the catalog lacks is reported, with its row untouched.
     expect(result.missing).toContain("meta/muse-spark-1.2");
     for (const m of LEAGUE_MODELS) {
