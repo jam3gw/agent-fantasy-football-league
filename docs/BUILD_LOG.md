@@ -8,12 +8,19 @@ Scheduled production health check against the full runbook checklist.
 Nothing broken; two things worth a note, neither actionable.
 
 - `/api/healthz` → `200 {"ok":true,...}` with `lastTickAt` seconds old at
-  every check during the sweep. One `403 Forbidden` on a single direct
-  `curl` to `league.jake-moses.com/api/healthz`, timed to the moment a
-  concurrent session's PR #51 production deploy (`dpl_ct4Pue972c...`,
-  `9a405b7`) went `READY` and re-aliased the domain; two retries 5s apart
-  both came back `200` with a fresh `lastTickAt`. Read as a momentary
-  alias swap, not an outage — not reproduced.
+  every check during the sweep. A handful of direct `curl` checks to
+  `league.jake-moses.com/api/healthz` came back `403` instead, both around
+  the PR #51 re-alias and again minutes later around this entry's own PR
+  #52 deploy. Headers on the `403`s carry `x-vercel-mitigated: deny` — this
+  sweep's own repeated automated polling tripping Vercel's firewall/bot
+  mitigation on the shared sandbox egress IP, not an application outage or
+  an alias-swap artifact: interleaved `200`s during the same bursts carried
+  a fresh `lastTickAt` throughout, and `cron.tick` in the `health` table
+  below never showed a gap. Not something to fix in code; noted so a future
+  sweep doesn't mistake it for a real one, and because it means *this*
+  check's own `curl` loop is not a reliable healthz prober — the external
+  uptime monitor (§ RUNBOOK "External uptime monitoring"), hitting far less
+  frequently from its own IP, is the one this failure mode doesn't apply to.
 - `health` table: `cron.tick`, `sessions.sweep`, `sleeper.*`,
   `players.applied`, `db.size`, `gateway.credits`, `tick.capacity`,
   `rankings` all seconds/minutes old. The `tick.games`/`tick.live_scores`/
