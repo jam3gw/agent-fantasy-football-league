@@ -2,6 +2,58 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-18 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+Nothing broken; two things worth a note, neither actionable.
+
+- `/api/healthz` → `200 {"ok":true,...}` with `lastTickAt` seconds old at
+  every check during the sweep. One `403 Forbidden` on a single direct
+  `curl` to `league.jake-moses.com/api/healthz`, timed to the moment a
+  concurrent session's PR #51 production deploy (`dpl_ct4Pue972c...`,
+  `9a405b7`) went `READY` and re-aliased the domain; two retries 5s apart
+  both came back `200` with a fresh `lastTickAt`. Read as a momentary
+  alias swap, not an outage — not reproduced.
+- `health` table: `cron.tick`, `sessions.sweep`, `sleeper.*`,
+  `players.applied`, `db.size`, `gateway.credits`, `tick.capacity`,
+  `rankings` all seconds/minutes old. The `tick.games`/`tick.live_scores`/
+  `tick.retries`/`tick.stall_watchdog`/`tick.trades` stale 2026-08-29
+  `last_error`s persist unchanged against current `last_success_at`, as in
+  every prior sweep. `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, unchanged since 2026-09-01/15, non-blocking
+  per §13.4 (Sleeper primary and healthy). `prices.sync`'s `last_error` is
+  still the pre-#40-fix 2026-09-14 string, unchanged; next real test is
+  the weekly run due 2026-09-21. No new `last_error` on any key since the
+  2026-09-17 sweep.
+- `scheduled_jobs`: same 6 `failed` rows as every prior sweep
+  (2026-08-29/30, retired `ingest.fp_*` and the `digest.weekly` `toFixed`
+  bug), nothing new. 0 `due` rows overdue by 15+ minutes.
+- `sessions`: 0 `running` at check time. 0 `queued` past its
+  `context.due_at` by 15+ minutes — earliest queued due_at is same-day,
+  latest 2026-09-21. One new `failed`/`timed_out` session since the
+  2026-09-17 sweep: id 3831 (team 7 `reporter_preview`, Thu 10:00 AM ET
+  scheduled run) failed `no_report` at 14:03 UTC 2026-09-17; the
+  same-day retry (id 3832, 14:14 UTC) succeeded and published normally —
+  self-healed by the existing retry sweep (§8.8), no code fix warranted.
+  No `running` or recently-ended session showed a stall pattern (no
+  stuck no-progress session, no repeated-identical-tool-call loop); the
+  team 10/12 `board_reply` timeouts and the team 2 transient gateway 503
+  already diagnosed in the 2026-09-17 entry had no new occurrences.
+- Vercel: production is `READY` on `9a405b7` (PR #51, merged and deployed
+  by a concurrent session during this sweep — home-page matchup cards now
+  link to their own matchup anchor). `get_runtime_errors` (24h): the same
+  two benign AI SDK warning clusters already recorded in prior sweeps
+  (`meta/muse-spark-1.2-contributor` reasoning-part warning, AI SDK
+  warning-logging notice), no new error group.
+- Neon: `preview/mock-draft` (`br-weathered-cake-ava88vpq`) is still
+  present, unchanged from the 2026-09-17 note — still flagged for
+  deletion with Jake's sign-off, not deleted here (destructive, no
+  standing authorization).
+
+Nothing to fix in code. No questions for Jake beyond the standing
+`prices.sync` watch item and the optional mock-draft branch cleanup, both
+unchanged from the prior sweep.
+
 ## 2026-09-17 — Operational sweep: all green, one stale PR closed out, no code change
 
 Scheduled production health check against the full runbook checklist.
