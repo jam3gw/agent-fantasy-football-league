@@ -276,7 +276,7 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
   return (
     <div>
       {featured ? (
-        <div className="bg-band text-band-text">
+        <div id={`matchup-${featured.matchupId}`} className="scroll-mt-6 bg-band text-band-text">
           <Container className="pb-9 pt-8">
             <div className="flex flex-wrap items-center gap-3">
               {featuredStatus === "live" ? (
@@ -449,7 +449,7 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
         ) : null}
 
         {featured ? (
-          <section id={`matchup-${featured.matchupId}`} className="mb-12 scroll-mt-6">
+          <section className="mb-12">
             <div className="mb-3 grid grid-cols-[minmax(0,1fr)_64px_minmax(0,1fr)] gap-4 px-1 text-[10px] font-bold uppercase tracking-[0.12em] text-faint">
               <div className="hidden sm:block sm:text-right">{teamName(featured.awayTeam)}</div>
               <div className="hidden sm:block sm:text-center">Slot</div>
