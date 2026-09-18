@@ -52,7 +52,16 @@ below), not a bug this change needed to touch.
 
 Checks: `pnpm check` green across all 6 workspace packages — lint,
 typecheck, and the full 995-test suite (81 files), including both edited
-test files. Fresh-context review round in progress.
+test files.
+
+Review round (fresh-context reviewer; diff, `LEAGUE_MODELS`/`MODEL_PRICE_SEED`
+consumers repo-wide, VERIFIED/BUILD_LOG history): ship it. Confirmed no
+other consumer assumes slot 12 is still the promo id or that
+`MODEL_PRICE_SEED` still carries the promo row; confirmed the remaining
+`zai/glm-5.3-promo-50` references (the other `gateway.test.ts` test, which
+is self-contained; `retry.test.ts`'s synthetic literals; dated log/history
+entries) are all correctly left untouched; confirmed the team-2 divergence
+substitute is durable. Nothing new — PR #54 merged.
 
 ## 2026-09-17 — Operational sweep: all green, one stale PR closed out, no code change
 
