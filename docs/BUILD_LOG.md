@@ -2,6 +2,61 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-19 — Discount scan: still nothing to take; one stale duplicate PR closed
+
+Third scheduled re-run of Jake's "any of the twelve models (or the
+reporter) cheaper to run at the same weights" question, after 2026-09-05
+and 2026-09-16. Pulled the live catalog directly
+(`GET https://ai-gateway.vercel.sh/v1/models`, 372 entries) and diffed it
+against both `MODEL_PRICE_SEED` and the current `LEAGUE_MODELS`/
+`REPORTER_MODEL` ids in `packages/agent/src/models.ts` (already carrying
+the slot-12 fix from #54).
+
+**Nothing to change.** All twelve league models plus the reporter price
+exactly as stored: Fable 5 10/50, Mistral Large 3 0.5/1.5, Sonnet 5 2/10
+(team and reporter), GPT-5.6 Terra 2/12, Gemini 3.1 Pro 2/12, Grok 4.6
+2/6, DeepSeek V4-Pro 0.66/1.98, Kimi K3 3/15, Qwen 3.8-Max 2/6, Muse
+Spark 1.2 Contributor 0.1/0.2, GLM-5.3 1.4/4.4. One exception, not a
+discount: `openai/gpt-5.6-sol` now lists at 4/20 in the catalog, double
+the `MODEL_PRICE_SEED` figure (2/10) — a price *increase* since the
+2026-08-28 capture, already carried into `model_prices` by the weekly
+`prices.sync` job, nothing for this check to act on. `zai/glm-5.3-promo-50`
+remains absent from the catalog.
+
+Catalog-wide check for a new `-promo`/`-contributor`/regional/reduced-price
+entry on a model that's actually in a seat, across all ten providers:
+nothing new. One observation, not actioned:
+
+- **`anthropic/claude-fable-5.1`** now exists in the catalog: same
+  input/output price as `claude-fable-5` ($10/$50) but a 75% cheaper
+  cached-read rate ($0.25/M vs. $1/M). It's a different model version
+  (different weights), not the same model at a lower price — the category
+  Jake's "can't change the model type, would break the experiment" answer
+  (2026-09-18 entry, above) already puts out of scope for a cost-only
+  check. Noted here only because Fable 5 is the league's single most
+  expensive seat and leans on caching; a model-swap evaluation is a
+  separate, deliberate decision, not something this scan proposes.
+- `meta/muse-spark-1.3-contributor` still listed at the same $0.10/$0.20
+  slot 11 already runs (unchanged since 2026-09-16, still just a version
+  bump).
+
+**Repo housekeeping, found while checking:** two other scheduled sessions
+had independently run this same question — PR #48 (2026-09-16 scan,
+already merged) and PR #49 (2026-09-17 scan, left open as a draft).
+Reconfirmed #49's content against today's fetch: same "nothing to take"
+conclusion, no new information, and it had gone stale against `main`
+(`mergeable_state: dirty` once marked ready — five commits landed on
+`main` since its base, including #54's slot-12 sync, which duplicates
+part of what #49 described). Closed #49 without merging rather than
+resolve a conflict to land a now-redundant record; commented on the PR
+with what superseded it. Nothing here suggests the duplicate scheduling
+itself needs a code fix — flagging for Jake in case the discount-check
+schedule itself should be de-duplicated, since this is the second time a
+concurrently-scheduled instance of the same check has produced overlapping
+PRs (see the 2026-09-17 operational-sweep entry for the first).
+
+No code or price-table change.
+
 ## 2026-09-18 — `LEAGUE_MODELS` slot 12 synced to the live seat: `zai/glm-5.3`, not the dead promo
 
 A scheduled discount-research pass (asked to look for cheaper models to
