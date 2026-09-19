@@ -2,6 +2,53 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-19 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: `{"ok":true,"lastTickAt":"2026-09-19T13:08:31.575Z"}`,
+  fetched from `league.jake-moses.com` — seconds old at check time. (The
+  `*.vercel.app` alias itself answers Vercel's SSO redirect, as expected
+  for `all_except_custom_domains`; `league.jake-moses.com` is the public
+  path per `docs/SETUP.md` §5.)
+- **`health` table**: `cron.tick` 29 s old, `sessions.sweep` 149 s old,
+  `sleeper.stats`/`sleeper.players`/`sleeper.trending`/`rankings`/
+  `gateway.credits`/`db.size`/`players.applied` all seconds-to-minutes
+  old. No `last_error_at` newer than the 2026-09-18 sweep. The recurring
+  stale entries are unchanged and already tracked: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades`
+  still carry the same since-fixed 2026-08-29 `last_error` under a
+  current `last_success_at`; `nflverse.player_stats`/`stats.audit` still
+  404 on `player_stats_2026.csv`, unchanged since 2026-09-01, non-blocking
+  per §13.4 (Sleeper primary is healthy); `prices.sync`'s
+  `zai/glm-5.3-promo-50` catalog error (last error 2026-09-14) predates
+  #54's fix and hasn't recurred since. `live.poll` is ~32 h stale, which
+  is correct — it only runs while a game is live and none was at check
+  time.
+- **`scheduled_jobs`**: no `failed` rows since the last sweep; the six
+  extant failures are all 2026-08-29/08-31, already recorded in prior
+  entries (the retired `ingest.fp_*` job types and one `digest.weekly`
+  formatting bug from that week).
+- **Sessions**: none queued past `due_at` by 15+ minutes; none `running`
+  (queue not backed up); none `failed`/`timed_out` since the last sweep —
+  the most recent (`id 3831`, `reporter_preview`, `no_report`,
+  2026-09-17) was already noted in the 2026-09-18 entry. Sampled the last
+  24 h of sessions for stuck-loop signs (`invalid_tool_calls` vs.
+  `tool_calls`): all ten highest-`invalid_tool_calls` sessions in the
+  window succeeded with 0–2 invalid calls out of 4–18 total — normal
+  range, nothing resembling a repeated-call loop.
+- **Vercel**: production deployment `dpl_DRyPbRrhJd9FoDTqv962zZmHbzTj`
+  READY on `main`@`715fd57` (#54), matching the repo's `main` at check
+  time before this entry. `get_runtime_errors` (24 h) shows only the
+  known benign `meta/muse-spark-1.2-contributor` AI SDK reasoning-part
+  warnings, unchanged in kind from every prior sweep.
+
+No code change. Restarted this session's branch
+(`claude/practical-archimedes-l1oldp`) from `main` before this entry — its
+prior remote tracking branch was gone (PR already merged) and `main` had
+moved one commit ahead (#55, the 2026-09-19 discount scan below) since
+this branch's last base.
+
 ## 2026-09-19 — Discount scan: still nothing to take; one stale duplicate PR closed
 
 Third scheduled re-run of Jake's "any of the twelve models (or the
