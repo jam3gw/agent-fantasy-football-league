@@ -276,7 +276,7 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
   return (
     <div>
       {featured ? (
-        <div className="bg-band text-band-text">
+        <div id={`matchup-${featured.matchupId}`} className="scroll-mt-6 bg-band text-band-text">
           <Container className="pb-9 pt-8">
             <div className="flex flex-wrap items-center gap-3">
               {featuredStatus === "live" ? (
@@ -496,7 +496,7 @@ export default async function MatchupsPage({ params }: { params: Promise<{ week:
         {cards
           .filter((c) => c.matchupId !== featured?.matchupId)
           .map((card) => (
-            <section key={card.matchupId} className="mb-10">
+            <section key={card.matchupId} id={`matchup-${card.matchupId}`} className="mb-10 scroll-mt-6">
               <div className="mb-3 flex flex-wrap items-baseline justify-between gap-3 border-b border-border pb-3">
                 <div className="text-[17px] font-semibold tracking-[-0.01em]">
                   <span className={card.awayPoints > card.homePoints ? "text-accent" : ""}>

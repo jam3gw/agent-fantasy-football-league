@@ -2,6 +2,254 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-18 — `LEAGUE_MODELS` slot 12 synced to the live seat: `zai/glm-5.3`, not the dead promo
+
+A scheduled discount-research pass (asked to look for cheaper models to
+swap to) surfaced two things about slot 12: the 50%-off `zai/glm-5.3-promo-50`
+entry it flagged as a savings idea had actually already ended around
+2026-09-09, and — the part worth fixing — `packages/agent/src/models.ts`
+still hardcoded that dead id as `LEAGUE_MODELS`' slot-12 default, even
+though the live `teams.model_id` had been swapped back to `zai/glm-5.3` in
+production the same day the promo broke. `apps/web/scripts/seed.mts` seeds
+a fresh database's teams straight from `LEAGUE_MODELS`, so a new
+environment (or a from-scratch re-seed) would have silently recreated a
+team pointed at a model id the gateway no longer serves.
+
+Jake: "can't change the model type, would break the experiment" (correct —
+no swap proposed here, this only syncs the repo to what's already running)
+and "fix this" for the stale-code half.
+
+Fixed: `LEAGUE_MODELS` slot 12 is now `zai/glm-5.3` ($1.40/$4.40/$0.14,
+matching both the live gateway catalog and `teams.model_id` in production),
+with a comment recording the promo's rise and fall. Dropped the now-useless
+`"zai/glm-5.3-promo-50"` row from `MODEL_PRICE_SEED` (a fresh database has
+no reason to seed a price for a catalog id that doesn't exist).
+
+Two tests depended on the old value and needed updating, not just
+tolerating the diff:
+
+- `packages/agent/test/gateway.test.ts`: two spots used
+  `zai/glm-5.3-promo-50` as an illustrative catalog/`LEAGUE_MODELS` id;
+  switched to `zai/glm-5.3` so they exercise what the array actually
+  contains now.
+- `apps/web/test/tradeWindows.test.ts`'s "alerts on the live seat's model
+  id, not the static `LEAGUE_MODELS` default" test relied on team 12's
+  fixture (`zai/glm-5.3`, from `packages/engine/test/helpers/factories.ts`)
+  diverging from `LEAGUE_MODELS` (previously the promo id) to prove the
+  #40 fix reads the live DB, not the static default. With slot 12 now
+  matching the fixture, that pair no longer diverges, so the test was
+  moved to team 2 instead — the fixture hardcodes `anthropic/claude-opus-5`
+  while `LEAGUE_MODELS` slot 2 is `mistral/mistral-large-3` (the
+  commissioner's permanent 2026-08-29 swap), a divergence that doesn't
+  depend on a promo's lifecycle and won't need re-chasing next time a
+  price promo ends.
+
+Not touched, on purpose: the already-merged `prices.sync` alerting fix
+(#40) and its "the health row is stale until the 2026-09-21 run"
+situation — that is a separate, already-diagnosed, already-correct
+in-progress watch item (see the 2026-09-14 through 09-17 sweep entries
+below), not a bug this change needed to touch.
+
+Checks: `pnpm check` green across all 6 workspace packages — lint,
+typecheck, and the full 995-test suite (81 files), including both edited
+test files.
+
+Review round (fresh-context reviewer; diff, `LEAGUE_MODELS`/`MODEL_PRICE_SEED`
+consumers repo-wide, VERIFIED/BUILD_LOG history): ship it. Confirmed no
+other consumer assumes slot 12 is still the promo id or that
+`MODEL_PRICE_SEED` still carries the promo row; confirmed the remaining
+`zai/glm-5.3-promo-50` references (the other `gateway.test.ts` test, which
+is self-contained; `retry.test.ts`'s synthetic literals; dated log/history
+entries) are all correctly left untouched; confirmed the team-2 divergence
+substitute is durable. Nothing new — PR #54 merged.
+
+## 2026-09-18 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+Nothing broken; two things worth a note, neither actionable.
+
+- `/api/healthz` → `200 {"ok":true,...}` with `lastTickAt` seconds old at
+  every check during the sweep. A handful of direct `curl` checks to
+  `league.jake-moses.com/api/healthz` came back `403` instead, both around
+  the PR #51 re-alias and again minutes later around this entry's own PR
+  #52 deploy. Headers on the `403`s carry `x-vercel-mitigated: deny` — this
+  sweep's own repeated automated polling tripping Vercel's firewall/bot
+  mitigation on the shared sandbox egress IP, not an application outage or
+  an alias-swap artifact: interleaved `200`s during the same bursts carried
+  a fresh `lastTickAt` throughout, and `cron.tick` in the `health` table
+  below never showed a gap. Not something to fix in code; noted so a future
+  sweep doesn't mistake it for a real one, and because it means *this*
+  check's own `curl` loop is not a reliable healthz prober — the external
+  uptime monitor (§ RUNBOOK "External uptime monitoring"), hitting far less
+  frequently from its own IP, is the one this failure mode doesn't apply to.
+- `health` table: `cron.tick`, `sessions.sweep`, `sleeper.*`,
+  `players.applied`, `db.size`, `gateway.credits`, `tick.capacity`,
+  `rankings` all seconds/minutes old. The `tick.games`/`tick.live_scores`/
+  `tick.retries`/`tick.stall_watchdog`/`tick.trades` stale 2026-08-29
+  `last_error`s persist unchanged against current `last_success_at`, as in
+  every prior sweep. `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, unchanged since 2026-09-01/15, non-blocking
+  per §13.4 (Sleeper primary and healthy). `prices.sync`'s `last_error` is
+  still the pre-#40-fix 2026-09-14 string, unchanged; next real test is
+  the weekly run due 2026-09-21. No new `last_error` on any key since the
+  2026-09-17 sweep.
+- `scheduled_jobs`: same 6 `failed` rows as every prior sweep
+  (2026-08-29/30, retired `ingest.fp_*` and the `digest.weekly` `toFixed`
+  bug), nothing new. 0 `due` rows overdue by 15+ minutes.
+- `sessions`: 0 `running` at check time. 0 `queued` past its
+  `context.due_at` by 15+ minutes — earliest queued due_at is same-day,
+  latest 2026-09-21. One new `failed`/`timed_out` session since the
+  2026-09-17 sweep: id 3831 (team 7 `reporter_preview`, Thu 10:00 AM ET
+  scheduled run) failed `no_report` at 14:03 UTC 2026-09-17; the
+  same-day retry (id 3832, 14:14 UTC) succeeded and published normally —
+  self-healed by the existing retry sweep (§8.8), no code fix warranted.
+  No `running` or recently-ended session showed a stall pattern (no
+  stuck no-progress session, no repeated-identical-tool-call loop); the
+  team 10/12 `board_reply` timeouts and the team 2 transient gateway 503
+  already diagnosed in the 2026-09-17 entry had no new occurrences.
+- Vercel: production is `READY` on `9a405b7` (PR #51, merged and deployed
+  by a concurrent session during this sweep — home-page matchup cards now
+  link to their own matchup anchor). `get_runtime_errors` (24h): the same
+  two benign AI SDK warning clusters already recorded in prior sweeps
+  (`meta/muse-spark-1.2-contributor` reasoning-part warning, AI SDK
+  warning-logging notice), no new error group.
+- Neon: `preview/mock-draft` (`br-weathered-cake-ava88vpq`) is still
+  present, unchanged from the 2026-09-17 note — still flagged for
+  deletion with Jake's sign-off, not deleted here (destructive, no
+  standing authorization).
+
+Nothing to fix in code. No questions for Jake beyond the standing
+`prices.sync` watch item and the optional mock-draft branch cleanup, both
+unchanged from the prior sweep.
+
+## 2026-09-17 — Operational sweep: all green, one stale PR closed out, no code change
+
+Scheduled production health check against the full runbook checklist.
+Nothing broken in the league itself; one piece of repo housekeeping done.
+
+- `/api/healthz` → `200 {"ok":true,"lastTickAt":"2026-09-17T13:07:31.459Z"}`
+  at check time, and reconfirmed green after the deploy below.
+- `health` table: `cron.tick`, `sessions.sweep`, `sleeper.*`, `players.applied`,
+  `db.size`, `gateway.credits`, `tick.capacity`, `rankings` all
+  seconds/minutes old. `tick.games`/`tick.live_scores`/`tick.retries`/
+  `tick.stall_watchdog`/`tick.trades` still carry the same stale 2026-08-29
+  `last_error` noted in every prior sweep, with a current `last_success_at`
+  — still not reproduced. `nflverse.player_stats`/`stats.audit` still 404
+  on `player_stats_2026.csv` (confirmed by direct fetch: both known release
+  filenames 404 today too), unchanged since 2026-09-01/15 and non-blocking
+  per §13.4 — Sleeper remains primary and healthy. `prices.sync`'s
+  `last_error` is still the pre-#40-fix 2026-09-14 string; no team carries
+  the retired `zai/glm-5.3-promo-50` id (team 12 is `zai/glm-5.3`, confirmed
+  live) — unchanged watch item, next real test is the weekly run due
+  2026-09-21. No new `last_error` on any key since the 2026-09-16 sweep.
+- `scheduled_jobs`: same 6 `failed` rows as every prior sweep (2026-08-29/30,
+  retired `ingest.fp_*` and the `digest.weekly` `toFixed` bug), nothing new.
+  248 `due`, all future-dated (earliest 13:15Z today, latest 2026-09-22); 0
+  overdue.
+- `sessions`: 0 `running` at check time (nothing to sample for a stall), 0
+  `queued` past its `context.due_at` by 15+ minutes. Three `failed`/
+  `timed_out` in the last 48h: team 10 `board_reply` timed out on
+  2026-09-16 (deadline), team 2 `trade_response` failed on a transient
+  Mistral gateway 503 (`AI_RetryError`, already-known noise pattern), team
+  12 `board_reply` timed out on 2026-09-15. Different teams, different
+  models — not the "three in a row for one model" pattern that would call
+  for a swap.
+- Vercel: production was serving `745aa01` (`dpl_4LUUP8gs...`, `READY`,
+  matches `main` HEAD at sweep start). `get_runtime_errors` (24h): the same
+  benign AI SDK reasoning-part warnings from `meta/muse-spark-1.2-contributor`
+  already recorded in prior sweeps, plus one `MessageNotAvailableError`
+  queue-callback error (single occurrence, 2026-09-16, no correlated
+  session failure) — not investigated further, consistent with the
+  self-healing workflow-step noise already accepted in the 2026-09-16 entry.
+- Neon: noticed `preview/mock-draft` (`br-weathered-cake-ava88vpq`, created
+  2026-09-08 for a mock draft per §17's checklist) is still around,
+  121 MB, near-zero compute since creation — the runbook says to delete a
+  mock-draft branch after use. Left it alone (branch deletion is
+  destructive and this session has no standing authorization to run it
+  unattended); flagging here for Jake or a future session with explicit
+  sign-off to delete it.
+- Repo housekeeping: found PR #48 (`docs(build-log): record 2026-09-16
+  discount scan, nothing to take`) left open as a draft since 2026-09-16 by
+  an earlier scheduled session — docs-only, `mergeable_state: clean`, base
+  matched current `main` HEAD, content already consistent with everything
+  reconfirmed above (no team on the retired promo id). Marked ready and
+  squash-merged it (`b5a113034c78ce11118cbe66b14a6e8892f34239`) to close out
+  that dangling housekeeping. The merge's own Vercel deployment
+  (`dpl_FA8jF641jiGVcK1JzNcEbbGKEmZe`) went `READY` and aliased to
+  `league.jake-moses.com` in the normal ~45s — no repeat of the
+  BLOCKED-deploy saga. `/api/healthz` reconfirmed green afterward
+  (`lastTickAt` 13:11:31Z). Noticed, in passing, an unrelated open branch
+  (`claude/serene-hopper-86aquf`) mid-push with another discount-scan
+  entry from what looks like a separate concurrently-scheduled task; not
+  part of this sweep, left untouched.
+
+Nothing to fix in code. No questions for Jake beyond the standing
+`prices.sync` watch item (unchanged) and the optional mock-draft branch
+cleanup noted above.
+
+## 2026-09-17 — Scheduled check: any of the twelve models discounted?
+
+Jake's scheduled task asked whether any of the twelve league models (or
+the reporter) have gone on sale since the last price check, so the seat
+could move the way slot 11 (Muse Spark, contributor tier) and slot 12
+(GLM-5.3, promo) already have. (This ran concurrently with, and reaches
+the same conclusion as, the "Discount scan" entry below from the same
+day's earlier run — recorded separately since each is its own scheduled
+firing; see that entry for the version-bump and different-weights notes,
+not repeated here.)
+
+Pulled the live catalog (`GET https://ai-gateway.vercel.sh/v1/models`,
+374 entries) and diffed it against `MODEL_PRICE_SEED` in
+`packages/agent/src/models.ts` for all twelve `modelId`s plus the
+reporter's `anthropic/claude-sonnet-5`. Every id's live input/output/
+cached-input price matches the seed exactly — expected, since
+`prices.sync` already pulls this same catalog every Monday 3 AM ET
+(§8.7) and `model_prices` is what `/spend` actually bills from; the seed
+is only a fallback for a fresh database.
+
+Re-checked `zai/glm-5.3-promo-50` specifically, since it's the one seat
+with a history here: still absent from the live catalog (confirmed by
+substring search, not just a missing-key false negative), consistent
+with the 2026-09-09 incident where it was retired and team 12 was
+swapped back to `zai/glm-5.3` on `/admin/teams`. No new zai promo entry
+has replaced it.
+
+No code change. No seats moved.
+
+## 2026-09-16 — Discount scan: no new pricing to take (commissioner request)
+
+Jake asked (scheduled check) whether any of the twelve models, or the
+reporter, now have a cheaper way to run at the same weights — the same
+question from 2026-09-05, re-run eleven days later. Pulled the live gateway
+catalog directly (`https://ai-gateway.vercel.sh/v1/models`, 373 entries,
+same count as the last scan) rather than waiting for Monday's `prices.sync`,
+and diffed it against `MODEL_PRICE_SEED` for all twelve `LEAGUE_MODELS` ids
+plus the reporter.
+
+**Nothing to change.** Every id currently in a seat prices exactly as it did
+at the last sync — Fable 5, Sonnet 5 (×2, team and reporter), Mistral Large 3,
+GPT-5.6 Sol and Terra, Gemini 3.1 Pro Preview, Grok 4.6, DeepSeek V4-Pro,
+Kimi K3, Qwen 3.8-Max, Muse Spark 1.2 Contributor, and GLM-5.3 all matched
+their stored price rows to the cent. `zai/glm-5.3-promo-50` is confirmed
+still gone from the catalog (team 12 already swapped back on 2026-09-09;
+nothing to do there). Catalog-wide grep for `promo`/`discount`/`contributor`/
+`-off`/`free` turned up nothing new for any of the twelve providers beyond
+the Muse Spark Contributor tier already in use — one addition, a
+`meta/muse-spark-1.3-contributor` entry at the same $0.10 / $0.20 as the 1.2
+seat runs today, not a price change.
+
+**Not flagged as a discount, on purpose:** OpenAI's new `gpt-5.6-luna`
+($0.20 / $1.20, a tenth of Sol's price) and cheaper xAI tiers
+(`grok-4.1-fast-reasoning`, `grok-4.3`) exist in the catalog, but the
+catalog's own descriptions place them a tier down from what slots 4/5/7 run
+today (Luna: "fast, affordable... lowest cost in the series" vs. Sol:
+"flagship... most capable"), so taking them would be a model swap, not a
+same-model discount — the category Jake's 2026-09-05 answer explicitly set
+aside from this question. Noting them here in case a cost/quality tradeoff
+at that scale is ever worth raising on its own.
+
+No code or price-table change; this is a record of the check.
+
 ## 2026-09-16 — Invalid tool calls: four causes, four fixes (commissioner request)
 
 Jake noticed a lot of failed tool calls in the transcripts. Measured over the
@@ -5956,47 +6204,33 @@ and the "No lineup entries" note keyed on `lineup.length`, so a week whose
 only entry was IR showed nine empty rows with no note — it now keys on
 the starting slots. Round two: nothing new.
 
-Checks: web lint, typecheck, and 511 web tests green.
+Review round one (fresh context): the featured game is drawn in two
+pieces, a hero band with the scores and a lineup section below it, and the
+anchor was on the lineup section, so a click on the featured card scrolled
+past the scores. The anchor is now on the hero band. A source-level test
+(`apps/web/test/matchupAnchors.test.ts`) pins the links and anchors. Round
+two: nothing new.
 
-## 2026-09-17 — Scheduled check: any of the twelve models discounted?
+Checks: web lint, typecheck, and 513 web tests green.
 
-Jake's scheduled task asked whether any of the twelve league models (or
-the reporter) have gone on sale since the last price check, so the seat
-could move the way slot 11 (Muse Spark, contributor tier) and slot 12
-(GLM-5.3, promo) already have.
+## 2026-09-18 — Home page: a matchup card opens its own matchup
 
-Pulled the live catalog (`GET https://ai-gateway.vercel.sh/v1/models`,
-374 entries) and diffed it against `MODEL_PRICE_SEED` in
-`packages/agent/src/models.ts` for all twelve `modelId`s plus the
-reporter's `anthropic/claude-sonnet-5`. Every id's live input/output/
-cached-input price matches the seed exactly — expected, since
-`prices.sync` already pulls this same catalog every Monday 3 AM ET
-(§8.7) and `model_prices` is what `/spend` actually bills from; the seed
-is only a fallback for a fresh database.
+Jake clicked a week 2 matchup card on the home page and landed at the top
+of the week's matchups page, which opens on a different game (the closest
+one). Each matchup section on `/matchups/[week]` now carries an
+`id="matchup-<id>"` anchor with a small scroll margin, and the home page's
+tiles and rows link to `/matchups/<week>#matchup-<id>`.
 
-Re-checked `zai/glm-5.3-promo-50` specifically, since it's the one seat
-with a history here: still absent from the live catalog (confirmed by
-substring search, not just a missing-key false negative), consistent
-with the 2026-09-09 incident where it was retired and team 12 was
-swapped back to `zai/glm-5.3` on `/admin/teams`. No new zai promo entry
-has replaced it.
+A `?matchup=` query param was the other option and was rejected: reading
+`searchParams` would turn the page dynamic and lose the CDN revalidate
+window the page's own note (§12.1) depends on. A hash is handled in the
+browser, so the prerendered page is unchanged.
 
-Searched each provider's catalog listing for a same-model, lower-priced
-variant of the eleven team models and the reporter — a new `-promo` /
-`-contributor` / regional entry the way the two existing swaps found
-one. None exists right now. The only near-miss: `meta/muse-spark-1.3`
-and `meta/muse-spark-1.3-contributor` are now listed, at the identical
-contributor-tier price slot 11 already runs ($0.10 / $0.20) — a version
-bump, not a further discount, so nothing to move.
+Review round one (fresh context): the featured game is drawn in two
+pieces, a hero band with the scores and a lineup section below it, and the
+anchor was on the lineup section, so a click on the featured card scrolled
+past the scores. The anchor is now on the hero band. A source-level test
+(`apps/web/test/matchupAnchors.test.ts`) pins the links and anchors. Round
+two: nothing new.
 
-The cheaper entries that do exist in a used model's family (e.g.
-`zai/glm-5.3-flash` at $0.15/$0.50, `openai/gpt-5.6-luna` at $0.20/$1.20)
-are smaller, different-weights models, not a discount on the model
-currently in the seat — same category as the meta Contributor tier
-question, but without the "same weights" property that made the
-existing two swaps a clean call under the commissioner's precedent. Not
-proposing those here; a seat's underlying model is a commissioner call
-given what it does to that team's competitiveness in the benchmark, not
-something to change under a "reduce cost" scheduled check.
-
-No code change. No seats moved.
+Checks: web lint, typecheck, and 513 web tests green.
