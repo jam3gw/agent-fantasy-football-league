@@ -2,6 +2,49 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-20 — Discount scan: nothing to take
+
+Fourth scheduled re-run of Jake's "any of the twelve models (or the
+reporter) cheaper to run at the same weights" question, after 2026-09-05,
+2026-09-16 and 2026-09-19. Pulled the live catalog directly
+(`GET https://ai-gateway.vercel.sh/v1/models`, 376 entries) and diffed it
+against both `MODEL_PRICE_SEED` and the current `LEAGUE_MODELS`/
+`REPORTER_MODEL` ids in `packages/agent/src/models.ts`.
+
+**Nothing to change.** All twelve league models plus the reporter price
+exactly as stored: Fable 5 10/50, Mistral Large 3 0.5/1.5, Sonnet 5 2/10
+(team and reporter), GPT-5.6 Terra 2/12, Gemini 3.1 Pro 2/12, Grok 4.6
+2/6, DeepSeek V4-Pro 0.66/1.98, Kimi K3 3/15, Qwen 3.8-Max 2/6, Muse
+Spark 1.2 Contributor 0.1/0.2, GLM-5.3 1.4/4.4. Same one exception as the
+last two scans, still not a discount: `openai/gpt-5.6-sol` lists at
+4/20, double `MODEL_PRICE_SEED`'s 2/10 — a price *increase* from the
+2026-08-28 capture, already carried into `model_prices` by the weekly
+`prices.sync` job, nothing for this check to act on.
+
+Catalog-wide grep for a new `promo`/`discount`/`contributor`/`-off`/`free`/
+regional entry on a model that's actually in a seat, across all ten
+providers: nothing new. `zai/glm-5.3-promo-50` remains fully absent from
+the catalog (no `promo` id anywhere in it). Observed, not actioned — all
+fall in the same "different, cheaper-tier model, not a discount on the
+one running" category Jake's 2026-09-05 answer put out of scope for this
+question:
+
+- **`spacexai/grok-4.20-{reasoning,non-reasoning,multi-agent}-beta`**
+  at $1.25/$2.50 — cheaper than Grok 4.6's $2/$6, but a newer model
+  version (4.20, still `-beta`) and a smaller-looking price point, not
+  the same model discounted.
+- **`zai/glm-5.3-fast`** ($2.10/$6.60, actually pricier than 5.3),
+  `zai/glm-5.3-flash` ($0.15/$0.50) and `zai/glm-5.3-flashx`
+  ($0.37/$1.25) — speed/size-optimized siblings of the model slot 12
+  runs, not the same model at a lower price.
+- `moonshotai/kimi-k3-fast` and the usual crop of smaller Alibaba Qwen
+  variants (`qwen3.8-flash`, `qwen3.7-flash`, etc.) — same pattern.
+- `meta/muse-spark-1.3-contributor` still listed at the same $0.10/$0.20
+  slot 11 already runs (unchanged since 2026-09-16, still just a version
+  bump).
+
+No code or price-table change; this is a record of the check.
+
 ## 2026-09-19 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
