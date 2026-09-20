@@ -2,6 +2,42 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-20 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: `{"ok":true,"lastTickAt":"2026-09-20T13:06:31.355Z"}`,
+  fetched from `league.jake-moses.com` — 40 s old at check time.
+- **`health` table**: `cron.tick`/`sessions.sweep` seconds old; `sleeper.players`/
+  `sleeper.projections`/`nflverse.schedule`/`players.applied`/`db.size`/
+  `gateway.credits`/`tick.capacity` all minutes-to-hours old, as expected for
+  their own cadence. No `last_error_at` newer than the 2026-09-19 sweep. The
+  same tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades` still
+  carry the since-fixed 2026-08-29 `last_error` under a current
+  `last_success_at`; `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, unchanged since 2026-09-01, non-blocking per §13.4
+  (Sleeper primary healthy); `prices.sync`'s `zai/glm-5.3-promo-50` catalog
+  error (last error 2026-09-14, pre-#54) hasn't recurred — its next run is
+  Monday 2026-09-21 03:00 ET, per the 2026-09-14 entry.
+- **`scheduled_jobs`**: no `failed` rows since the last sweep; the six extant
+  failures are all 2026-08-29/08-31, already recorded in prior entries.
+- **Sessions**: none queued past `due_at` by 15+ minutes (all queued rows are
+  today's future `lineup_check`s); none `running`; none `failed`/`timed_out`
+  since the 2026-09-17 `reporter_preview` `no_report` already noted in an
+  earlier entry. Sampled the last 96 h for stuck-loop signs
+  (`invalid_tool_calls` vs. `tool_calls`): the only elevated ratios (team 10,
+  4/4, 4/6, 4/40, all 2026-09-16 13:43–15:44 UTC) predate #46's fix (merged
+  2026-09-16 16:05 UTC); every session since sits at 0–2 invalid calls out of
+  2–20 total, the same normal range as the last sweep. Per-team session
+  counts over 7 days (10–21) show no team going quiet.
+- **Vercel**: production deployment `dpl_FtRW62VyrBVtvptmgqkLRC2ShNpw` READY
+  on `main`@`c8cc037` (#57), matching the repo's `main` at check time.
+  `get_runtime_errors` and `get_runtime_logs` (both 24 h) show nothing.
+
+No code change. This session's branch had no remote tracking ref (prior PR
+already merged), so it was restarted from `main` before this entry.
+
 ## 2026-09-20 — Discount scan: nothing to take
 
 Fourth scheduled re-run of Jake's "any of the twelve models (or the
