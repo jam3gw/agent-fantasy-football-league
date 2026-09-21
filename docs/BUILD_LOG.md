@@ -43,8 +43,9 @@ Changed:
   `VERCEL_GIT_PREVIOUS_SHA` (the branch's last successful deployment,
   which Vercel exposes once an ignore command exists), falling back to
   `HEAD^`: a push of a code commit followed by a docs commit still builds,
-  and a docs commit after a failed build retries it. A missing base
-  (first commit, shallow clone) makes `git diff` exit 128, which builds.
+  and a docs commit after a failed build retries it. (Corrected the same
+  evening, below: a missing base made `git diff` exit 128, which Vercel
+  treats as a failed deployment, not as "build".)
 - `docs/RUNBOOK.md`: the skip rule and the build machine setting, with
   the numbers above, so the next person does not switch it back.
 
@@ -77,6 +78,22 @@ canceled by the new ignore command — a redeploy of an unchanged commit has
 which is the rule working, not a fault. The first full 4-core build will
 be the next code push; the 2026-09-08 entry measured that build at 146 s
 on this machine size.
+
+Then the docs-only follow-up push (this entry) failed its deployment,
+`errorStep: ignoreStep`: "Command failed with exit code 128 ... fatal: bad
+object b1ae74a...". The branch had been recreated from `main` after #61
+merged, so `VERCEL_GIT_PREVIOUS_SHA` still named the deleted branch's
+last deployment, which the fresh clone does not contain. The review round
+had called that case safe ("exit 128 builds"); it is not: **Vercel treats
+any exit code other than 0 or 1 from the ignore command as a failed
+deployment.** On `main` the same thing would happen once enough skipped
+docs commits pushed the last successful deployment outside the shallow
+clone, and the next code commit would fail to deploy. Fixed: the command
+is now `scripts/vercel-ignore-build.sh`, which checks the base exists
+(`git cat-file -e`), falls back to `HEAD^`, and exits 1 whenever no base
+is usable, so only 0 or 1 ever reach Vercel. Tested locally: docs-only
+since base → 0; code since base → 1; unknown base with a usable `HEAD^` →
+falls back; root commit with no `HEAD^` → 1.
 
 ### Questions for Jake
 
