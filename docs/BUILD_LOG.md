@@ -2,6 +2,38 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-21 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: `{"ok":true,"lastTickAt":"2026-09-21T13:12:31.608Z"}` — 33 s
+  old at check time.
+- **`health` table**: `cron.tick` (10 s), `sessions.sweep` (3 min) fresh. The
+  same tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades` still
+  carry the since-fixed 2026-08-29 `last_error` under a current
+  `last_success_at`; `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, unchanged since 2026-09-01, non-blocking per §13.4
+  (Sleeper primary healthy). `prices.sync`'s `zai/glm-5.3-promo-50` catalog
+  error has not recurred on its 2026-09-21 03:00 ET run (`last_error` now
+  null) — resolved. `email.send` last succeeded 2026-09-15 (no alarm or
+  digest has needed sending since); no new `last_error` on any key.
+- **`scheduled_jobs`**: no `failed` rows since the last sweep; the same six
+  extant failures from 2026-08-29/08-31 are unchanged.
+- **Sessions**: none queued past `due_at` by 15+ minutes, none `running`,
+  none `failed`/`timed_out` in the last 24 h. Sampled the last 96 h for
+  stuck-loop signs (`invalid_tool_calls` vs. `tool_calls`): highest ratio is
+  3/13, the rest 1–2 out of 2–20 — the same normal range as prior sweeps, no
+  repeated identical errors. Per-team session counts over 7 days (10–22),
+  every team active within the last 24 h — no team going quiet.
+- **Vercel**: production deployment `dpl_6sEa2jKea3CrC6UDvVsyseiotpxQ` READY
+  on `main`@`61af37b` (#58), matching the repo's `main` at check time.
+  `get_runtime_errors` (24 h) shows only the same two known benign AI SDK
+  warnings (`meta/muse-spark-1.2-contributor` reasoning-part skip) seen in
+  every prior sweep.
+
+No code change.
+
 ## 2026-09-21 — Discount scan: nothing to take
 
 Fourth scheduled re-run of Jake's "any of the twelve models (or the
