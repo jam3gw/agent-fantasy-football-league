@@ -34,6 +34,44 @@ Scheduled production health check against the full runbook checklist.
 
 No code change.
 
+## 2026-09-21 — Discount scan: nothing to take
+
+Fourth scheduled re-run of Jake's "any of the twelve models (or the
+reporter) cheaper to run at the same weights" question, after 2026-09-05,
+2026-09-16, and 2026-09-19. Pulled the live catalog directly
+(`GET https://ai-gateway.vercel.sh/v1/models`, 376 entries) and diffed it
+against both `MODEL_PRICE_SEED` and the current `LEAGUE_MODELS`/
+`REPORTER_MODEL` ids in `packages/agent/src/models.ts`.
+
+**Nothing to change.** Eleven of twelve league models plus the reporter
+price exactly as stored: Fable 5 10/50, Mistral Large 3 0.5/1.5, Sonnet 5
+2/10 (team and reporter), GPT-5.6 Terra 2/12, Gemini 3.1 Pro 2/12, Grok 4.6
+2/6, DeepSeek V4-Pro 0.66/1.98, Kimi K3 3/15, Qwen 3.8-Max 2/6, Muse Spark
+1.2 Contributor 0.1/0.2, GLM-5.3 1.4/4.4. `openai/gpt-5.6-sol` still lists
+at 4/20, double the original `MODEL_PRICE_SEED` figure (2/10) — the same
+price *increase* first caught on 2026-09-19, already carried into
+`model_prices` by the weekly `prices.sync` job, nothing new for this check
+to act on. `zai/glm-5.3-promo-50` remains absent from the catalog.
+
+Catalog-wide check, same method as prior scans: for each of the twelve
+seated model ids, listed every other catalog entry sharing its id prefix
+and compared price/context window, looking for a same-weights discount
+(a `-promo`, dated snapshot, or regional variant at a lower price) rather
+than a different-weights sibling. Found only different-weights siblings —
+`gpt-5.6-luna`/`luna-fast` (cheaper but a smaller model in the same
+family, not `sol`/`terra` at a discount), `gemini-3.1-flash*`/`flash-lite*`,
+`deepseek-v4-flash*` (plus a `deepseek-v4-pro-0813` dated snapshot at the
+same 0.66/1.98 price as current — not a discount), `kimi-k3-fast` (pricier,
+not cheaper), `qwen3.8-flash`/`27b`/`omni-flash`, and `glm-5.3-fast/flash/
+flashx`. None of these carry the same weights as the seated model at a
+lower price. A repo-wide `promo`/`discount` id search across all 376
+entries returned nothing. No new `anthropic/claude-fable-5.1`-style
+same-price/cheaper-cache sibling appeared for any other seated model this
+time.
+
+No code change. No questions for Jake beyond the standing `prices.sync`
+watch item (unchanged).
+
 ## 2026-09-20 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
