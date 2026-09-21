@@ -68,9 +68,19 @@ BLOCKED-deploy check now says a `CANCELED` docs-only deployment is
 expected, so the next sweep does not chase it as a missed deploy. Second
 round: nothing new.
 
+Follow-up, 21:14 UTC: Jake switched the machine to Standard. Confirmed by
+redeploying the PR's preview commit through the API: the new build log
+opens with "Build machine configuration: 4 cores, 8 GB" (the previous
+one said "30 cores, 60 GB (Turbo Build Machine)"). The redeploy was then
+canceled by the new ignore command — a redeploy of an unchanged commit has
+`VERCEL_GIT_PREVIOUS_SHA` equal to `HEAD`, so there is nothing to build —
+which is the rule working, not a fault. The first full 4-core build will
+be the next code push; the 2026-09-08 entry measured that build at 146 s
+on this machine size.
+
 ### Questions for Jake
 
-- **Please set the build machine back to Standard.** Vercel dashboard,
+- ~~**Please set the build machine back to Standard.**~~ Done 2026-09-21. Vercel dashboard,
   project `agent-fantasy-football-league`, Settings, Build and Deployment,
   Build Machine: choose **Standard** and turn off the automatic (elastic)
   selection. Only a team owner can do this; the API refused this session.
