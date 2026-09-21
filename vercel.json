@@ -3,6 +3,12 @@
   "framework": "nextjs",
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm check && pnpm --filter @league/web build",
+  "ignoreCommand": "git diff --quiet \"${VERCEL_GIT_PREVIOUS_SHA:-HEAD^}\" HEAD -- . ':!docs' ':!README.md' ':!CLAUDE.md' ':!AGENTS.md' ':!LICENSE'",
   "outputDirectory": "apps/web/.next",
-  "crons": [{ "path": "/api/cron/tick", "schedule": "* * * * *" }]
+  "crons": [
+    {
+      "path": "/api/cron/tick",
+      "schedule": "* * * * *"
+    }
+  ]
 }

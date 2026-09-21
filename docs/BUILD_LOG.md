@@ -2,6 +2,82 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-21 — Vercel cost: builds are the bill; docs-only commits no longer build
+
+Jake asked for a lower Vercel bill. Pulled the team's billing charges
+(`list_billing_charges`, one UTC day per call) for four sample days and the
+last hundred deployments to see what the money buys.
+
+| Day (UTC) | Deploys | Build CPU minutes | Everything else | Total |
+|---|---|---|---|---|
+| 2026-09-07 | 2 | $0.00 | $0.30 | $0.30 |
+| 2026-09-14 | 6 | $1.26 | $0.35 | $1.61 |
+| 2026-09-18 | 11 | $2.31 | $0.20 | $2.51 |
+| 2026-09-19 | 5 | $1.05 | $0.15 | $1.20 |
+
+- **Builds are 80–90% of the bill**, at a steady $0.21 per deployment. The
+  build log of the current production deployment says why: "Build machine
+  configuration: 30 cores, 60 GB (Turbo Build Machine)". The 2026-09-08
+  build-speed entry measured the same build on 4 cores at 146 s; on Turbo
+  it is 38 s. The machine changed after 2026-09-08 in the dashboard (not
+  in this repo; `vercel.json` never set one). On 2026-09-07, still on the
+  4-core machine, the build line was $0.00: Standard minutes fall inside
+  the plan's included allowance, Turbo minutes are billed on top.
+- **Everything else is $0.15–0.35 a day**: ISR writes ($0.04–0.15; the home
+  page and matchups revalidate every 30 s per §12.1, the rest every 5 min),
+  observability events ($0.01–0.06; the per-minute tick's logs), Fluid
+  CPU and memory ($0.03–0.07), storage and transfer (cents). All at or
+  near plan-included levels; none worth a spec change.
+- **37 of the 97 commits on `main` since 2026-09-08 touched only
+  `docs/`** (mostly this file), and every one of them ran a full build.
+
+Changed:
+
+- `vercel.json`: `ignoreCommand` skips the build when the push touches
+  only `docs/`, the root `README.md`, `CLAUDE.md`, `AGENTS.md`, or
+  `LICENSE`. Everything under `apps/` and `packages/` still builds
+  (`packages/agent/briefs/*.md` are build inputs, so the rule names files,
+  not `*.md`). Checked against the last thirty commits on `main`: every
+  docs-only commit and docs-only merge skips, every commit with code
+  builds. Saves about 38% of builds at any machine size. The diff base is
+  `VERCEL_GIT_PREVIOUS_SHA` (the branch's last successful deployment,
+  which Vercel exposes once an ignore command exists), falling back to
+  `HEAD^`: a push of a code commit followed by a docs commit still builds,
+  and a docs commit after a failed build retries it. A missing base
+  (first commit, shallow clone) makes `git diff` exit 128, which builds.
+- `docs/RUNBOOK.md`: the skip rule and the build machine setting, with
+  the numbers above, so the next person does not switch it back.
+
+Tried and refused: `update_project` with `resourceConfig.buildMachineType:
+"basic"` and `buildMachineSelection: "fixed"` returned 400 "You must be a
+team owner or project admin to update build machines for this project."
+The session's Vercel token is not an owner.
+
+Expected result: with the skip alone, about $0.75 a day less at last
+week's pace (roughly $22 a month). With the machine back on Standard as
+well, the build line goes to about $0 and the bill to roughly $0.20–0.35
+a day (about $6–10 a month), from about $1.20–2.50 (about $36–75 a month).
+
+Review round (fresh-context reviewer; diff, SPEC, runbook): pathspecs
+verified in a scratch repo (`:!docs` and the root names are anchored, so
+a nested `README.md` or `docs/` still builds); no build or runtime code
+reads any excluded file; no security finding. Fixed: the diff base was
+`HEAD^`, which skipped a two-commit push ending in a docs commit — now
+`VERCEL_GIT_PREVIOUS_SHA` with `HEAD^` as the fallback; the runbook's
+BLOCKED-deploy check now says a `CANCELED` docs-only deployment is
+expected, so the next sweep does not chase it as a missed deploy. Second
+round: nothing new.
+
+### Questions for Jake
+
+- **Please set the build machine back to Standard.** Vercel dashboard,
+  project `agent-fantasy-football-league`, Settings, Build and Deployment,
+  Build Machine: choose **Standard** and turn off the automatic (elastic)
+  selection. Only a team owner can do this; the API refused this session.
+  Builds go from about 40 s to about 150 s, and the build line on the
+  invoice from about $0.21 per deploy to about $0.03, mostly inside the
+  included minutes. This is the one change that removes most of the bill.
+
 ## 2026-09-21 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
