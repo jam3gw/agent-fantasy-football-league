@@ -75,6 +75,29 @@ describe("odds.run job (§11.1)", () => {
     expect(await db.select().from(scheduledJobs).where(eq(scheduledJobs.type, "odds.run"))).toHaveLength(0);
   });
 
+  it("a Sunday chain measures from its own start: Thursday's game does not stop it, the 1 PM slate does", async () => {
+    await seedLeague(db, { currentWeek: 3 });
+    await db.insert(matchups).values({ week: 3, homeTeamId: ids[0]!, awayTeamId: ids[1]! });
+    await makeGame(db, { week: 3, kickoffAt: new Date("2026-09-25T00:15:00Z"), home: "DAL", away: "NYG" }); // Thu 8:15 PM ET
+    await makeGame(db, { week: 3, kickoffAt: new Date("2026-09-27T17:00:00Z"), home: "KC", away: "BUF" }); // Sun 1:00 PM ET
+    const chain = "2026-09-27T15:30:00.000Z"; // Sun 11:30 AM ET
+    await runJob(db, new FixedClock(chain), "odds.run", { snapshot: "sun" });
+    expect(await db.select().from(scheduledJobs).where(eq(scheduledJobs.type, "odds.run"))).toHaveLength(1);
+    // The 12:30 retry: its next try would be 1:00 PM, the kickoff, so it stops.
+    await expect(
+      runJob(db, new FixedClock("2026-09-27T16:30:00Z"), "odds.run", { snapshot: "sun", week: 3, attempt: 2, chain }),
+    ).rejects.toThrow(/no projections/);
+    expect(await db.select().from(scheduledJobs).where(eq(scheduledJobs.type, "odds.run"))).toHaveLength(1);
+  });
+
+  it("does not retry into a week whose games have all kicked off", async () => {
+    await seedLeague(db, { currentWeek: 3 });
+    await db.insert(matchups).values({ week: 3, homeTeamId: ids[0]!, awayTeamId: ids[1]! });
+    await makeGame(db, { week: 3, kickoffAt: new Date("2026-09-21T00:20:00Z"), home: "KC", away: "BUF" });
+    await expect(runJob(db, clock, "odds.run", { snapshot: "thu" })).rejects.toThrow(/no projections/);
+    expect(await db.select().from(scheduledJobs).where(eq(scheduledJobs.type, "odds.run"))).toHaveLength(0);
+  });
+
   it("a retry that finds projections stores the run and clears the health error", async () => {
     await seedLeague(db, { currentWeek: 3 });
     await db.insert(matchups).values({ week: 3, homeTeamId: ids[0]!, awayTeamId: ids[1]! });

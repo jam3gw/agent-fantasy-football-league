@@ -74,6 +74,14 @@ so it cannot be the reporter; it now feeds the reporter instead.
   is a bad reply); retries stop before the snapshot's first kickoff, so a
   late Sunday run cannot score an easier mid-game call; tests for a retry
   that succeeds and clears the health error.
+- **Review round 4** (4 findings, all low). Fixed: no retry into a week
+  whose games have all kicked off; a test that a Sunday chain measures from
+  its own start (Thursday's game does not stop it, the 1 PM slate does);
+  spec now says calls cut off by a timeout or a dropped connection may be
+  billed and not recorded. Accepted: two overlapping first attempts for the
+  same snapshot (the 9:30 job plus a hand-booked run minutes later) start
+  two retry chains; both may call Jev once projections land and the loser's
+  spend is not recorded — fractions of a cent, nothing stored twice.
 
 ## 2026-09-22 — Operational sweep: all green, no code change
 

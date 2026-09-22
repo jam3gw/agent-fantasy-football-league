@@ -217,8 +217,10 @@ export async function runJob(
         const set = { lastError: err.message, lastErrorAt: now };
         await db.insert(health).values({ key: "odds", ...set }).onConflictDoUpdate({ target: health.key, set });
         const nextAt = new Date(now.getTime() + 30 * 60_000);
-        const kickoff = await firstKickoffAfter(db, season, week, new Date(chain));
-        if (attempt >= ODDS_RETRIES || (kickoff !== null && nextAt.getTime() >= kickoff.getTime())) throw err;
+        const slate = await firstKickoffAfter(db, season, week, new Date(chain));
+        // No slate left (games exist, all kicked off before the chain began): nothing pregame to call.
+        const tooLate = slate.hasGames && (slate.next === null || nextAt.getTime() >= slate.next.getTime());
+        if (attempt >= ODDS_RETRIES || tooLate) throw err;
         const next = attempt + 1;
         await bookJob(db, "odds.run", nextAt, { snapshot, week, attempt: next, chain }, `odds.run:${season}:${week}:${snapshot}:${chain}:retry${next}`);
         return;
@@ -433,14 +435,22 @@ function windowLabel(payload: Record<string, unknown>): string | null {
   return typeof payload.window === "string" && payload.window.trim() ? payload.window.trim() : null;
 }
 
-/** The first kickoff of the week after `from`: the slate a snapshot taken at `from` is for. */
-async function firstKickoffAfter(db: EngineDb, season: number, week: number, from: Date): Promise<Date | null> {
+/**
+ * The first kickoff of the week after `from`: the slate a snapshot taken at
+ * `from` is for. `hasGames` false means the schedule has no games for the week.
+ */
+async function firstKickoffAfter(
+  db: EngineDb,
+  season: number,
+  week: number,
+  from: Date,
+): Promise<{ hasGames: boolean; next: Date | null }> {
   const games = await db
     .select({ kickoffAt: nflGames.kickoffAt })
     .from(nflGames)
     .where(and(eq(nflGames.season, season), eq(nflGames.week, week)))
     .orderBy(asc(nflGames.kickoffAt));
-  return games.find((g) => g.kickoffAt.getTime() > from.getTime())?.kickoffAt ?? null;
+  return { hasGames: games.length > 0, next: games.find((g) => g.kickoffAt.getTime() > from.getTime())?.kickoffAt ?? null };
 }
 
 /** True once the week's first NFL game has kicked off. A week with no games recorded is not under way. */
