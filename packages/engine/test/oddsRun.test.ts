@@ -4,7 +4,7 @@ import { FixedClock } from "@league/shared";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { SEASON, makeGame, seedFullRoster, seedLeague, seedTeams, setLineupEntry } from "./helpers/factories.ts";
 import { health, matchupOdds, matchups, oddsRuns, playerPlayOdds, playerWeekProj, playerWeekStats, players } from "../src/db/schema.ts";
-import type { JevAsk, JevRequest } from "../src/odds.ts";
+import type { JevAsk, JevReply, JevRequest } from "../src/odds.ts";
 import { jevSpend, latestWeekOdds, loadOddsMatchups, oddsScoreboard, playedFromStats, runMatchupOdds } from "../src/oddsRun.ts";
 
 let db: TestDb;
@@ -60,7 +60,7 @@ afterEach(async () => {
 
 function fakeJev(opts: { play?: number; home?: number; failOn?: "noul" | "choice" } = {}): { ask: JevAsk; calls: JevRequest[] } {
   const calls: JevRequest[] = [];
-  const ask: JevAsk = async (req) => {
+  const ask: JevAsk = async (req): Promise<JevReply> => {
     calls.push(req);
     const q = Object.values(req.questions)[0]!;
     if (opts.failOn === q.type) throw new Error("HTTP 529 for https://api.typesafe.ai/v1/systemone");
@@ -144,7 +144,8 @@ describe("runMatchupOdds (§11.1)", () => {
     expect([...methods].sort()).toEqual(["baseline", "rule"]);
     const run = (await db.select().from(oddsRuns))[0]!;
     expect(run.jevModel).toBeNull();
-    expect(run.jevInputTokens).toBe(0);
+    // The noul call before the failing choice was billed, so it is recorded.
+    expect(run.jevInputTokens).toBe(300);
     const h = (await db.select().from(health).where(eq(health.key, "jev")))[0];
     expect(h?.lastError).toMatch(/529/);
   });

@@ -247,7 +247,15 @@ export async function runMatchupOdds(
   const jevPlayRequests = new Map<string, unknown>();
   const jevDirect = new Map<number, { homeWinProb: number; confidence: number; state: unknown }>();
   if (args.jev) {
-    const jev = args.jev;
+    // Count tokens as each reply lands: a later failure still leaves the calls
+    // that succeeded billed, and the run records what was spent (§11.1).
+    const inner = args.jev;
+    const jev: JevAsk = async (req) => {
+      const reply = await inner(req);
+      jevTokens += reply.inputTokens;
+      jevModel = reply.model;
+      return reply;
+    };
     try {
       const plays = await mapLimited(doubtful, JEV_CONCURRENCY, async (s) => {
         const req = jevPlayRequest(s, now);
@@ -269,13 +277,9 @@ export async function runMatchupOdds(
       for (const x of plays) {
         jevPlay.set(x.s.playerId, x.p);
         jevPlayRequests.set(x.s.playerId, x.req.state);
-        jevTokens += x.reply.inputTokens;
-        jevModel = x.reply.model;
       }
       for (const x of directs) {
         jevDirect.set(x.m.matchupId, { homeWinProb: x.p, confidence: x.confidence, state: x.req.state });
-        jevTokens += x.reply.inputTokens;
-        jevModel = x.reply.model;
       }
     } catch (err) {
       jevError = String(err instanceof Error ? err.message : err).slice(0, 500);
