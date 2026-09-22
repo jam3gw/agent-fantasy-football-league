@@ -1072,7 +1072,7 @@ mark draft complete; emit draft.completed
 
 ### 11.1 Matchup odds (added 2026-09-22, commissioner)
 
-The league records win probabilities for every matchup from four methods, stores all four, and scores them when the week finalizes. Two methods use Jev (TypeSafe AI's System One model, `POST https://api.typesafe.ai/v1/systemone`). Jev returns typed answers with probabilities, not text. The comparison is part of the benchmark: does Jev beat a projection baseline and a fixed injury rule?
+The league records win probabilities for every matchup from four methods, stores all four, and scores them when the week finalizes. Two methods use Jev (TypeSafe AI's System One model, `typesafe-ai/jev`), called through the Vercel AI Gateway's TypeSafe-compatible endpoint (`POST https://ai-gateway.vercel.sh/typesafe/v1/systemone`) on `AI_GATEWAY_API_KEY`, the key every model call already uses. Jev returns typed answers with probabilities, not text. The comparison is part of the benchmark: does Jev beat a projection baseline and a fixed injury rule?
 
 - **Job.** `odds.run` (Section 9.1), Thursday 9:30 AM ET (snapshot `thu`, before the reporter's preview) and Sunday 11:30 AM ET (snapshot `sun`). Gated like the reporter jobs (Section 4.3). One run per season, week, and snapshot; a repeat is a no-op. The week is `current_week` when the run starts.
 - **Inputs** (league tables only, the same for every matchup): each team's starters for the week (`lineup_entries`, ghost entries included, IR excluded), empty starting slots, the bench, `player_week_proj` for the week, `injury_status`/`injury_body_part`/`status`, the player's NFL game (kickoff and state), points so far from `player_week_stats`, each starter's average over his last three finalized weeks this season, and team form from `matchups` and `team_week_results` (record, average points, average over the last three weeks, average points left on the bench, empty starting slots this season). Model ids, team names, board posts, scratchpads, and decision logs are never sent: Jev sees `home` and `away`, not brands.
@@ -1083,7 +1083,7 @@ The league records win probabilities for every matchup from four methods, stores
   - `jev_composite` (Design B): `p` from one Jev Noul question per injured starter ("will this player be active and play in this game?"), state = that player's facts only; the math above is ours. Starters with no injury status keep `p = 1`, as in `rule`.
   - `jev_direct` (Design A): one Jev Choice question per matchup ("which team scores more points this week?", options `home` and `away`); the state is both teams' lineups, benches, form, and the totals the code computed. Jev weighs the facts itself. Its confidence is stored in `detail`.
 - **Weights** (the status table and the `cv` per position: QB 0.35, RB 0.50, WR 0.55, TE 0.60, K 0.45, DEF 0.60) are constants in `packages/engine/src/odds.ts`. Each run stores the weights it used, so a later change never re-scores an old run.
-- **Jev.** Model `jev-1.13.0`, pinned (an alias moves under us mid-season; the response's versioned id is stored). No key (`JEV_API_KEY` unset) or a failed Jev call: the run still stores `baseline` and `rule`, the Jev methods are left out for the whole run, the run is `partial` with the reason, and `health` key `jev` shows the error. A Jev method is never stored for part of a week. Cost: Jev bills input tokens only ($0.042 per million; **verify** — read from docs.typesafe.ai/models on 2026-09-22, recorded in `docs/VERIFIED.md`); each run stores its tokens and dollars, and `/spend` shows them as one league line. They are not a session, so they are not in `spend_ledger`.
+- **Jev.** Model `typesafe-ai/jev`, the only id the gateway offers; it follows TypeSafe's newest release, so the model id the reply names is stored on each run. No gateway key (`AI_GATEWAY_API_KEY` unset, as in tests) or a failed Jev call: the run still stores `baseline` and `rule`, the Jev methods are left out for the whole run, the run is `partial` with the reason, and `health` key `jev` shows the error. A Jev method is never stored for part of a week. Cost: the gateway bills Jev on the league's gateway balance and reports each call's cost, which the run records; a reply with no cost falls back to the catalog price, $0.042 per million input tokens (output free; **verify** — read from the gateway catalog and docs.typesafe.ai/models on 2026-09-22, recorded in `docs/VERIFIED.md`). Each run stores its tokens and dollars, and `/spend` shows them as one league line. They are not a session, so they are not in `spend_ledger`.
 - **Scoring.** Computed on read, never stored: once a matchup is final, the outcome is 1 (home won), 0 (away won), or 0.5 (tie); Brier score and hit rate per method and snapshot. Per player, for injured starters: played = a final `player_week_stats` row with `gp > 0` (else `gms_active > 0`); a final week with no row is "did not play". Brier for `rule` versus Jev.
 - **Who sees it.** The site (`/odds`) and the reporter (`get_matchup_odds`, Section 8.4). The twelve team agents never get the odds: no team tool reads them, and the site is blocked in their web tools (Section 12.1).
 ```
@@ -1222,7 +1222,7 @@ Environment variables:
 
 ```
 DATABASE_URL                Neon
-AI_GATEWAY_API_KEY          Vercel AI Gateway
+AI_GATEWAY_API_KEY          Vercel AI Gateway (every model call, and Jev for the matchup odds, Section 11.1)
 WEB_SEARCH_PROVIDER         tavily | exa | brave
 WEB_SEARCH_API_KEY
 COMMISSIONER_PASSWORD
@@ -1238,8 +1238,6 @@ ALERT_EMAIL_TO              cost alarms and health alerts go here
 RESEND_API_KEY              email sending for alarms
 ALERT_WEBHOOK_URL           optional; alarms are POSTed as JSON
 SIMULATION_MODE             false | true (enables clock_override and fixture data)
-JEV_API_KEY                 optional; TypeSafe AI key for the Jev matchup odds (Section 11.1).
-                            Unset, odds.run stores only the non-Jev methods.
 ```
 
 `vercel.json`: one cron `* * * * *` to `/api/cron/tick`. Functions: `maxDuration: 800` for workflow step routes and the tick.

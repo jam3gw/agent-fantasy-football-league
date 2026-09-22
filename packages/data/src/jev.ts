@@ -1,16 +1,18 @@
 /**
- * TypeSafe AI's Jev (SPEC §11.1): `POST https://api.typesafe.ai/v1/systemone`
- * with a state and typed questions; typed answers come back. The engine sees
+ * TypeSafe AI's Jev through the Vercel AI Gateway (SPEC §11.1). The gateway's
+ * TypeSafe-compatible endpoint takes TypeSafe's own request and returns its
+ * own answer shapes, plus the gateway's cost for the call. The engine sees
  * only a `JevAsk`; this is the one implementation that touches the network.
  *
- * The key goes in the Authorization header and nowhere else: never into an
- * error message, a log line, or a stored row.
+ * The key (`AI_GATEWAY_API_KEY`, the one every model call already uses) goes
+ * in the Authorization header and nowhere else: never into an error message,
+ * a log line, or a stored row.
  */
 import type { JevAnswer, JevAsk, JevReply, JevRequest } from "@league/engine";
 import { JEV_MODEL } from "@league/engine";
 import { HttpError, RETRY_POLICY } from "./http.ts";
 
-export const JEV_URL = "https://api.typesafe.ai/v1/systemone";
+export const JEV_URL = "https://ai-gateway.vercel.sh/typesafe/v1/systemone";
 
 export interface JevClientOptions {
   apiKey: string;
@@ -28,7 +30,12 @@ function retryable(status: number): boolean {
 
 function parseReply(body: unknown): JevReply {
   if (!body || typeof body !== "object") throw new Error("jev: response is not an object");
-  const b = body as { model?: unknown; answers?: unknown; usage?: { input_tokens?: unknown } };
+  const b = body as {
+    model?: unknown;
+    answers?: unknown;
+    usage?: { input_tokens?: unknown };
+    provider_metadata?: { gateway?: { cost?: unknown } };
+  };
   if (typeof b.model !== "string") throw new Error("jev: response has no model");
   if (!b.answers || typeof b.answers !== "object") throw new Error("jev: response has no answers");
   const answers: Record<string, JevAnswer> = {};
@@ -48,7 +55,10 @@ function parseReply(body: unknown): JevReply {
     // left out, and the caller fails on the missing key.
   }
   const inputTokens = typeof b.usage?.input_tokens === "number" ? b.usage.input_tokens : 0;
-  return { model: b.model, answers, inputTokens };
+  // The gateway reports cost as a decimal string ("0.00001155").
+  const rawCost = Number(b.provider_metadata?.gateway?.cost);
+  const costUsd = b.provider_metadata?.gateway?.cost !== undefined && Number.isFinite(rawCost) ? rawCost : null;
+  return { model: b.model, answers, inputTokens, costUsd };
 }
 
 export function jevClient(opts: JevClientOptions): JevAsk {
@@ -76,7 +86,7 @@ export function jevClient(opts: JevClientOptions): JevAsk {
           const detail = (await res.text().catch(() => "")).slice(0, 300);
           const retryAfter = Number(res.headers.get("retry-after"));
           if (Number.isFinite(retryAfter) && retryAfter > 0) wait = Math.min(30_000, retryAfter * 1000);
-          throw new HttpError(JEV_URL, res.status, `HTTP ${res.status} from Jev${detail ? `: ${detail}` : ""}`);
+          throw new HttpError(JEV_URL, res.status, `HTTP ${res.status} from Jev via AI Gateway${detail ? `: ${detail}` : ""}`);
         }
         return parseReply(await res.json());
       } catch (err) {

@@ -4,19 +4,21 @@ Each entry: date, the request made, what came back. Items marked **verify** in S
 
 ## 2026-09-22 — TypeSafe Jev API and price (§11.1 verify)
 
-Read `https://docs.typesafe.ai/api.md` and `https://docs.typesafe.ai/models.md` (no key needed for the docs).
+Read `https://docs.typesafe.ai/api.md`, `https://docs.typesafe.ai/models.md`, Vercel's `/docs/ai-gateway/sdks-and-apis/typesafe` and `/docs/ai-gateway/modalities/evaluation`, and `GET https://ai-gateway.vercel.sh/v1/models` (no key needed for any of them).
 
 | Item | Result |
 |---|---|
-| Endpoint | `POST https://api.typesafe.ai/v1/systemone`, `Authorization: Bearer <key>`, JSON body `{ state, model, questions }` |
+| Gateway catalog | `typesafe-ai/jev`, `type: "evaluation"`, context 32,000, pricing `input 0.000000042`, `output 0`, `zdr: all`, `no_training: all` |
+| Endpoint the league uses | `POST https://ai-gateway.vercel.sh/typesafe/v1/systemone`, `Authorization: Bearer $AI_GATEWAY_API_KEY`, body `{ model: "typesafe-ai/jev", state, questions }` — TypeSafe's own shapes; the reply adds `provider_metadata.gateway.cost` (a decimal string). The gateway also has `POST /v1/evaluate` (question type `boolean`, answer `probability`) and AI SDK 7's `experimental_evaluate`; the league does not use them |
+| TypeSafe direct (not used) | `POST https://api.typesafe.ai/v1/systemone` with a TypeSafe key, same body |
 | Question types | `noul` (yes/no, answer `noul` 0–1), `choice` (answer `choice`, `probabilities` summing to 1, `confidence`), `score` |
-| Model | `jev-1.13.0`; aliases `jev-latest` and `jev-preview` both point to it today. The league pins `jev-1.13.0` |
+| Model | TypeSafe's current release is `jev-1.13.0`. The gateway offers only `typesafe-ai/jev`, which follows the newest release, so the league cannot pin a version; each run stores the model id the reply names |
 | Price | $0.042 per million input tokens; output tokens free |
 | Limits | 1,200 requests/min, 250k tokens/s (docs say limits move without notice); 32k tokens for `state` plus the longest question |
 | Errors | 401 bad key, 422 bad body, 429 rate limit, 529 overloaded (retry with backoff) |
 | Known weak spots (`/model-jaggedness/jev-1.13.md`) | counting and arithmetic, dates read as text, long irrelevant state, P(yes) and 1 − P(no) not complementary. The league does all sums and time differences in code and asks each question one way only |
 
-Not checked: a live call. No `JEV_API_KEY` exists yet (Jev is in limited early access); `odds.run` stores the two non-Jev methods until one is set. The first live run should be read end to end and recorded here.
+Not checked: a live call. No call was made from this session. The first live `odds.run` on the preview deploy should be read end to end (answers, `usage`, the gateway cost, and the `model` field) and recorded here.
 
 ## 2026-09-08 — Gateway cost field and the ledger, checked on session 2598 (§8.7 verify)
 

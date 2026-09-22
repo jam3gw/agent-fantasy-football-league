@@ -1,6 +1,6 @@
 /**
  * `odds.run` (§11.1, §9.1): booked Thursday 9:30 AM and Sunday 11:30 AM ET,
- * gated like the reporter jobs, and without `JEV_API_KEY` it stores the two
+ * gated like the reporter jobs, and without `AI_GATEWAY_API_KEY` it stores the two
  * non-Jev methods and never calls TypeSafe.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -20,7 +20,7 @@ const clock = new FixedClock("2026-09-22T18:00:00Z");
 beforeEach(async () => {
   ({ db, close } = await createTestDb());
   ids = await seedTeams(db);
-  vi.stubEnv("JEV_API_KEY", "");
+  vi.stubEnv("AI_GATEWAY_API_KEY", "");
 });
 afterEach(async () => {
   vi.unstubAllEnvs();

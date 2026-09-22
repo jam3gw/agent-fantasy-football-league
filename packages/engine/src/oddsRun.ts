@@ -240,9 +240,10 @@ export async function runMatchupOdds(
 
   const doubtful: OddsStarter[] = weekMatchups.flatMap((m) => [...m.home.starters, ...m.away.starters].filter(needsPlayCall));
 
-  let jevError: string | null = args.jev ? null : "no_key: JEV_API_KEY is not set";
+  let jevError: string | null = args.jev ? null : "no_key: AI_GATEWAY_API_KEY is not set";
   let jevModel: string | null = null;
   let jevTokens = 0;
+  let jevCost = 0;
   const jevPlay = new Map<string, number>();
   const jevPlayRequests = new Map<string, unknown>();
   const jevDirect = new Map<number, { homeWinProb: number; confidence: number; state: unknown }>();
@@ -253,6 +254,7 @@ export async function runMatchupOdds(
     const jev: JevAsk = async (req) => {
       const reply = await inner(req);
       jevTokens += reply.inputTokens;
+      jevCost += reply.costUsd ?? (reply.inputTokens * JEV_USD_PER_M_INPUT) / 1_000_000;
       jevModel = reply.model;
       return reply;
     };
@@ -288,7 +290,6 @@ export async function runMatchupOdds(
     }
   }
   const withJev = jevError === null;
-  const jevCost = (jevTokens * JEV_USD_PER_M_INPUT) / 1_000_000;
 
   const matchupRows: Array<typeof matchupOdds.$inferInsert> = [];
   const playerRows: Array<typeof playerPlayOdds.$inferInsert> = [];

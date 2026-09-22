@@ -11,9 +11,17 @@ import { formatEt } from "@league/shared";
 import type { OddsMethod, StartingSlot } from "./db/schema.ts";
 import { STARTING_SLOTS, eligibleForSlot } from "./roster.ts";
 
-/** Pinned: an alias moves mid-season and the scoreboard compares one model. */
-export const JEV_MODEL = "jev-1.13.0";
-/** Jev bills input tokens only (docs.typesafe.ai/models, read 2026-09-22). */
+/**
+ * Jev through the Vercel AI Gateway (§11.1). The gateway offers only this id,
+ * which follows TypeSafe's newest release; the version that answered is
+ * stored per run when the reply names one.
+ */
+export const JEV_MODEL = "typesafe-ai/jev";
+/**
+ * Jev bills input tokens only: $0.042 per million (gateway catalog and
+ * docs.typesafe.ai/models, read 2026-09-22). Used only when a reply carries
+ * no gateway cost of its own.
+ */
 export const JEV_USD_PER_M_INPUT = 0.042;
 
 /**
@@ -285,6 +293,8 @@ export interface JevReply {
   model: string;
   answers: Record<string, JevAnswer>;
   inputTokens: number;
+  /** The gateway's own cost for the call, when it reports one. */
+  costUsd: number | null;
 }
 
 /** The engine's view of Jev: one request in, one reply out. `packages/data` implements it. */

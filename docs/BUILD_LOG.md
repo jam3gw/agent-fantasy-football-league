@@ -19,23 +19,23 @@ so it cannot be the reporter; it now feeds the reporter instead.
   `/spend`, and the reporter's new `get_matchup_odds` tool; the preview brief
   mentions it. No team agent can read the odds (tested), so the "same
   information for all twelve" rule holds.
-- **Choices made without asking** (closest to the spec): Jev pinned to
-  `jev-1.13.0`, not the alias, so a mid-season release cannot change what the
-  scoreboard compares; team names and model ids are never sent to Jev; a
+- **Jev through the AI Gateway** (Jake, 2026-09-22: "assume we will be able
+  to use this model through Vercel's AI Gateway"). The catalog already lists
+  `typesafe-ai/jev`; the league calls the gateway's TypeSafe-compatible
+  endpoint on `AI_GATEWAY_API_KEY`, so there is no separate key, and records
+  the gateway's own cost per call. The gateway offers no pinned version, so
+  each run stores the model id the reply names.
+- **Choices made without asking** (closest to the spec): team names and model ids are never sent to Jev; a
   failed Jev call drops both Jev methods for the whole snapshot rather than
   storing a half week; Jev's cost lives on `odds_runs` and one `/spend` line,
   not in `spend_ledger` (which needs a session); the rule table (Q 80%, D 20%)
   and the per-position spread are first guesses, stored with each run so a
   later change never re-scores old runs.
 - **Migration 0008** adds three new tables only; no existing table changes.
-- **Not done: a live Jev call.** There is no `JEV_API_KEY` (limited early
-  access). Until one is set in Vercel, every snapshot is `partial`: baseline
-  and rule only. Recorded in `docs/VERIFIED.md`.
-
-### Questions for Jake
-
-- Do you have a TypeSafe early-access key? Add it as `JEV_API_KEY` in the
-  Vercel project (Production and Preview). Nothing else is needed.
+- **Not done: a live Jev call.** It needs the gateway key, which this
+  session does not hold; the first preview-deploy run is the check (see
+  `docs/VERIFIED.md`).
+- **Merge held** until Jake says so (his instruction on the PR request).
 
 ## 2026-09-22 — Operational sweep: all green, no code change
 

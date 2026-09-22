@@ -63,13 +63,15 @@ function fakeJev(opts: { play?: number; home?: number; failOn?: "noul" | "choice
   const ask: JevAsk = async (req): Promise<JevReply> => {
     calls.push(req);
     const q = Object.values(req.questions)[0]!;
-    if (opts.failOn === q.type) throw new Error("HTTP 529 for https://api.typesafe.ai/v1/systemone");
-    if (q.type === "noul") return { model: "jev-1.13.0", answers: { plays: { type: "noul", noul: opts.play ?? 0.9 } }, inputTokens: 300 };
+    if (opts.failOn === q.type) throw new Error("HTTP 529 from Jev via AI Gateway");
+    if (q.type === "noul") return { model: "typesafe-ai/jev", answers: { plays: { type: "noul", noul: opts.play ?? 0.9 } }, inputTokens: 300, costUsd: null };
     const h = opts.home ?? 0.6;
     return {
-      model: "jev-1.13.0",
+      model: "typesafe-ai/jev",
       answers: { winner: { type: "choice", choice: h >= 0.5 ? "home" : "away", probabilities: { home: h, away: 1 - h }, confidence: 0.4 } },
       inputTokens: 2000,
+      // The gateway reports its own cost on this call; the noul above falls back to the price table.
+      costUsd: 0.0001,
     };
   };
   return { ask, calls };
@@ -99,8 +101,8 @@ describe("runMatchupOdds (§11.1)", () => {
     const rows = await db.select().from(matchupOdds);
     expect(rows).toHaveLength(8);
     const run = (await db.select().from(oddsRuns))[0]!;
-    expect(run).toMatchObject({ status: "succeeded", jevModel: "jev-1.13.0", jevInputTokens: 4300 });
-    expect(run.jevCostUsd).toBeCloseTo((4300 * 0.042) / 1e6, 6);
+    expect(run).toMatchObject({ status: "succeeded", jevModel: "typesafe-ai/jev", jevInputTokens: 4300 });
+    expect(run.jevCostUsd).toBeCloseTo(2 * 0.0001 + (300 * 0.042) / 1e6, 6);
 
     const calls = await db.select().from(playerPlayOdds);
     expect(calls).toHaveLength(1);
@@ -151,7 +153,7 @@ describe("runMatchupOdds (§11.1)", () => {
   });
 
   it("rejects an answer out of shape instead of storing it", async () => {
-    const ask: JevAsk = async () => ({ model: "jev-1.13.0", answers: {}, inputTokens: 1 });
+    const ask: JevAsk = async () => ({ model: "typesafe-ai/jev", answers: {}, inputTokens: 1, costUsd: null });
     const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: ask });
     expect(res.status).toBe("partial");
     expect(res.jevError).toMatch(/no noul answer/);

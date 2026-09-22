@@ -192,7 +192,8 @@ export async function runJob(
       const { runMatchupOdds } = await import("@league/engine");
       const { jevClient } = await import("@league/data");
       const { env } = await import("./env");
-      const key = env.jevApiKey;
+      // Jev runs through the AI Gateway on the key every model call uses.
+      const key = env.aiGatewayApiKey;
       const result = await runMatchupOdds(db, clock, {
         season,
         week: Number(payload.week ?? settings.currentWeek),

@@ -90,7 +90,7 @@ describe("get_matchup_odds (§11.1)", () => {
     const [m] = await db.insert(matchups).values({ week: 1, homeTeamId: ids[0]!, awayTeamId: ids[1]! }).returning();
     const [run] = await db
       .insert(oddsRuns)
-      .values({ season: SEASON, week: 1, snapshot: "thu", status: "succeeded", jevModel: "jev-1.13.0", weights: {} })
+      .values({ season: SEASON, week: 1, snapshot: "thu", status: "succeeded", jevModel: "typesafe-ai/jev", weights: {} })
       .returning();
     await db.insert(matchupOdds).values([
       { runId: run!.id, matchupId: m!.id, method: "baseline", homeWinProb: 0.61234, homeExpected: 110, awayExpected: 104 },
