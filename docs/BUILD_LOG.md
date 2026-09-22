@@ -2,6 +2,70 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-22 — Discount scan: nothing to take
+
+Fifth scheduled re-run of Jake's "any of the twelve models (or the reporter)
+cheaper to run at the same weights" question, after 2026-09-05, 09-16, 09-19,
+09-20, 09-21. Pulled the live catalog directly
+(`GET https://ai-gateway.vercel.sh/v1/models`, 380 entries, up from 376 on
+09-21) and diffed it against both `MODEL_PRICE_SEED` and the current
+`LEAGUE_MODELS`/`REPORTER_MODEL` ids in `packages/agent/src/models.ts`. Also
+searched the open web this time (Jake's prompt asked for a "deep dive on the
+internet") for price-cut announcements on each seated model family, to catch
+anything not yet reflected in the gateway catalog.
+
+**Nothing to change.** All twelve league models plus the reporter price
+exactly as stored: Fable 5 10/50, Mistral Large 3 0.5/1.5, Sonnet 5 2/10
+(team and reporter), GPT-5.6 Terra 2/12, Gemini 3.1 Pro 2/12, Grok 4.6 2/6,
+DeepSeek V4-Pro 0.66/1.98, Kimi K3 3/15, Qwen 3.8-Max 2/6, Muse Spark 1.2
+Contributor 0.1/0.2, GLM-5.3 1.4/4.4. Same one exception as the last three
+scans, still not a discount: `openai/gpt-5.6-sol` lists at 4/20, double
+`MODEL_PRICE_SEED`'s 2/10 — press coverage (OpenAI Developer Community,
+citybiz, technology.org) confirms this is itself a promotional cut from an
+undiscounted $5/$25, "committed through November 21, 2026," not a path back
+toward our stored 2/10. Already carried into `model_prices` by the weekly
+`prices.sync` job; nothing for this check to act on either way.
+
+Catalog-wide grep for `promo`/`discount`/`-off`/`free`/`contributor` across
+all 380 entries: only the usual non-matches — `meta/muse-spark-1.3-contributor`
+(version bump of the tier slot 11 already runs, same $0.10/$0.20),
+`inclusionai/ling-3.0-flash-*-free` and `poolside/laguna-s-2.1-free` (models
+nobody is seated on). `zai/glm-5.3-promo-50` remains absent from the catalog,
+confirming it's still gone since the 2026-09-09 pull (see #54) — the web
+search below turned up why: DigitalOcean's 50%-off GLM-5.3 promo on AI
+Gateway ran only through 2026-09-07, so the pull's disappearance and this
+absence are the same expired promo, not a new problem.
+
+Same-prefix sibling check, same method as prior scans — new entries since
+09-21 are newer-version or different-weights models, not discounts on a
+seated id:
+
+- `spacexai/grok-4.7` (released 2026-09-21, per x.ai's own post) — the
+  gateway prices it at 1.20/3.60, cheaper than the seated Grok 4.6's 2/6,
+  but general web coverage (androidheadlines, superpowerdaily, xenospectrum)
+  says xAI shipped it "at Grok 4.6 prices," $2/$6 unchanged; the two sources
+  disagree and neither matters here, since a newer model version is out of
+  scope for this question regardless of its price (Jake's 2026-09-05 answer).
+  Flagging the gateway/press pricing mismatch itself as worth a second look
+  independent of this scan.
+- `spacexai/grok-4.20-{reasoning,non-reasoning,multi-agent}` moved from
+  `-beta` (seen 09-20) to a shipped release at the same 1.25/2.50, plus
+  `grok-4.3`/`grok-4.5` (1.25/2.50 and 2/6) — all newer versions, not Grok
+  4.6 discounted.
+- `deepseek/deepseek-v4.1-flash` at 0.30/1.20 (Sept 10 DeepSeek V4-Flash
+  price cut, per KuCoin/BenchLM coverage) — the Flash tier, not the Pro
+  tier slot 8 runs, so a different-weights sibling per the standing rule,
+  same as `deepseek-v4-flash*` on prior scans.
+- `alibaba/qwen3.8-max-0902` (dated snapshot, same 2/6) and
+  `alibaba/qwen3.8-2.4t-a95b` (same 2/6, a parameter-count variant) — no
+  price difference from the seated `qwen3.8-max`.
+- `anthropic/claude-sonnet-4.6` and `anthropic/claude-fable-5.1` — both
+  already present as of the 09-21 scan, both same-or-higher price than the
+  seated 5-series ids, nothing new.
+
+No code change. No questions for Jake beyond the standing `prices.sync`
+watch item (unchanged).
+
 ## 2026-09-21 — Vercel cost: builds are the bill; docs-only commits no longer build
 
 Jake asked for a lower Vercel bill. Pulled the team's billing charges
