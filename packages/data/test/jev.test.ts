@@ -119,6 +119,25 @@ describe("jevClient (§11.1)", () => {
     for (const bad of [null, undefined, "", "  ", "abc", "-1", -1, true, {}]) expect(parseGatewayCost(bad), String(bad)).toBeNull();
   });
 
+  it("retries a timeout while the body is read, but not a body that is not JSON", async () => {
+    const timeoutBody = () => {
+      const r = new Response("{}", { status: 200 });
+      vi.spyOn(r, "json").mockRejectedValue(new DOMException("timed out", "TimeoutError"));
+      return r;
+    };
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(timeoutBody())
+      .mockResolvedValueOnce(json(200, { model: "typesafe-ai/jev", answers: {}, usage: { input_tokens: 1 } }));
+    const reply = await jevClient({ apiKey: "k", fetchImpl, backoffMs: 0 })(req);
+    expect(reply.model).toBe("typesafe-ai/jev");
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+
+    const notJson = vi.fn(async () => new Response("<html>", { status: 200 }));
+    await expect(jevClient({ apiKey: "k", fetchImpl: notJson as typeof fetch, backoffMs: 0 })(req)).rejects.toThrow("jev: response is not JSON");
+    expect(notJson).toHaveBeenCalledTimes(1);
+  });
+
   it("fails fast on a malformed reply", async () => {
     const fetchImpl = vi.fn(async () => json(200, { answers: {} }));
     await expect(jevClient({ apiKey: "k", fetchImpl: fetchImpl as typeof fetch, backoffMs: 0 })(req)).rejects.toThrow("jev: response has no model");

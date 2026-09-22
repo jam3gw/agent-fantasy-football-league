@@ -199,26 +199,28 @@ export async function runJob(
       const key = env.aiGatewayApiKey;
       const week = Number(payload.week ?? settings.currentWeek);
       const attempt = Number(payload.attempt ?? 0);
+      // A chain of retries is named by when its first attempt ran, so a second
+      // chain for the same snapshot (a hand-booked re-run) never collides with
+      // the first one's keys.
+      const chain = typeof payload.chain === "string" ? payload.chain : clock.now().toISOString();
       let result;
       try {
         result = await runMatchupOdds(db, clock, { season, week, snapshot, jev: key ? jevClient({ apiKey: key }) : null });
       } catch (err) {
         // §11.1: no projections yet. Book the same snapshot again in 30
-        // minutes rather than lose it; after ODDS_RETRIES tries (three hours)
-        // the job fails and /admin/health shows why.
+        // minutes rather than lose it; after ODDS_RETRIES tries (three hours),
+        // or when the next try would land after the snapshot's first kickoff
+        // (odds taken mid-game would not be a pregame call), the job fails
+        // and /admin/health shows why.
         if (!(err instanceof NoProjectionsError)) throw err;
         const now = clock.now();
         const set = { lastError: err.message, lastErrorAt: now };
         await db.insert(health).values({ key: "odds", ...set }).onConflictDoUpdate({ target: health.key, set });
-        if (attempt >= ODDS_RETRIES) throw err;
+        const nextAt = new Date(now.getTime() + 30 * 60_000);
+        const kickoff = await firstKickoffAfter(db, season, week, new Date(chain));
+        if (attempt >= ODDS_RETRIES || (kickoff !== null && nextAt.getTime() >= kickoff.getTime())) throw err;
         const next = attempt + 1;
-        await bookJob(
-          db,
-          "odds.run",
-          new Date(now.getTime() + 30 * 60_000),
-          { snapshot, week, attempt: next },
-          `odds.run:${season}:${week}:${snapshot}:retry${next}`,
-        );
+        await bookJob(db, "odds.run", nextAt, { snapshot, week, attempt: next, chain }, `odds.run:${season}:${week}:${snapshot}:${chain}:retry${next}`);
         return;
       }
       if (!result.existed && result.status !== "no_matchups") {
@@ -429,6 +431,16 @@ async function bookSessionsForKind(
 /** The label on a commissioner-booked `trade_window` row, or null when the row has none (or an empty one). */
 function windowLabel(payload: Record<string, unknown>): string | null {
   return typeof payload.window === "string" && payload.window.trim() ? payload.window.trim() : null;
+}
+
+/** The first kickoff of the week after `from`: the slate a snapshot taken at `from` is for. */
+async function firstKickoffAfter(db: EngineDb, season: number, week: number, from: Date): Promise<Date | null> {
+  const games = await db
+    .select({ kickoffAt: nflGames.kickoffAt })
+    .from(nflGames)
+    .where(and(eq(nflGames.season, season), eq(nflGames.week, week)))
+    .orderBy(asc(nflGames.kickoffAt));
+  return games.find((g) => g.kickoffAt.getTime() > from.getTime())?.kickoffAt ?? null;
 }
 
 /** True once the week's first NFL game has kicked off. A week with no games recorded is not under way. */

@@ -128,8 +128,11 @@ export function jevClient(opts: JevClientOptions): JevAsk {
         let body: unknown;
         try {
           body = await res.json();
-        } catch {
-          throw new JevCallError("jev: response is not JSON", 0, null);
+        } catch (err) {
+          // Only a body that is not JSON is a bad reply. A timeout or a reset
+          // while the body streams is transient: rethrow it for the retry.
+          if (err instanceof SyntaxError) throw new JevCallError("jev: response is not JSON", 0, null);
+          throw err;
         }
         return parseReply(body);
       } catch (err) {

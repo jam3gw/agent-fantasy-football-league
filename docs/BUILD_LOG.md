@@ -67,6 +67,13 @@ so it cannot be the reporter; it now feeds the reporter instead.
   cost parsing, a reserve-list starter with no tag, and the job's retry.
   Accepted: calls cut off at the five-minute deadline may be billed and not
   recorded (spec says so).
+- **Review round 3** (4 findings, 0 high). Fixed: retry keys now carry the
+  chain's start time, so a hand-booked re-run after a finished chain books
+  its own retries instead of silently doing nothing; a timeout or reset
+  while a reply body streams is retried again (only a body that is not JSON
+  is a bad reply); retries stop before the snapshot's first kickoff, so a
+  late Sunday run cannot score an easier mid-game call; tests for a retry
+  that succeeds and clears the health error.
 
 ## 2026-09-22 — Operational sweep: all green, no code change
 
