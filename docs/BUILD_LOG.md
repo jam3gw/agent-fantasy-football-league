@@ -2,6 +2,49 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-22 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: hit directly at `https://league.jake-moses.com/api/healthz`
+  → `{"ok":true,"lastTickAt":"2026-09-22T13:08:31.684Z"}`, a few seconds old
+  at request time.
+- **`health` table**: `cron.tick` 23 s old, `sessions.sweep` 3 min old. The
+  same tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades` still
+  carry the since-fixed 2026-08-29 `last_error` under a current
+  `last_success_at`; `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, non-blocking per §13.4 (Sleeper primary
+  healthy). `prices.sync` and `email.send` unchanged from the last sweep
+  (no new error, no digest needed since 2026-09-15). No new `last_error`
+  on any key.
+- **`scheduled_jobs`**: no `failed` rows since the last sweep; the same six
+  extant failures from 2026-08-30/08-31 are unchanged.
+- **Sessions**: none queued past `due_at` by 15+ minutes, none
+  `failed`/`timed_out` since the last sweep. Two sessions `running`
+  (team 1 and team 8 `weekly_review`, both started 13:04:31), both with
+  `session_events`/`session_stream` rows seconds old — actively
+  progressing, not stalled.
+- **Session logs (96 h sample, 89 sessions)**: no stuck loops — zero
+  sessions with 3+ identical repeated tool calls or errors, no duration
+  outlier past a `kind`'s normal range (`lineup_check` max 7.19 min,
+  `weekly_review` max 4.63 min, `self_check_in` max 10.05 min).
+  `invalid_tool_calls`/`tool_calls` ratios in the normal 0–0.22 range for
+  all but two: team 10's `board_reply` sessions 4009 and 4208 hit
+  `write_decision_log`'s summary-length validation twice before
+  succeeding (0.40 ratio) — both finished in under a minute and
+  self-corrected on retry, not a stall. Worth watching if it recurs;
+  no code change made for two occurrences.
+- **Vercel**: production deployment `dpl_6oyVqKxLbQVrtA1LNyedwadxKkAQ`
+  READY on `main`@`615217d` (#62), matching the repo's `main` at check
+  time. The newer #63 (docs-only discount-scan entry) deployment shows
+  `CANCELED` as expected from the ignore-build rule. `get_runtime_errors`
+  (24 h) shows only the same known benign AI SDK warning
+  (`meta/muse-spark-1.2-contributor` reasoning-part skip) seen in every
+  prior sweep.
+
+No code change.
+
 ## 2026-09-22 — Discount scan: nothing to take
 
 Fifth scheduled re-run of Jake's "any of the twelve models (or the reporter)
