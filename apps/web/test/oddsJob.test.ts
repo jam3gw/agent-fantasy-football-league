@@ -6,9 +6,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
-import { matchupOdds, matchups, oddsRuns, scheduledJobs } from "@league/engine";
+import { matchupOdds, matchups, oddsRuns, playerWeekProj, scheduledJobs } from "@league/engine";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
-import { seedLeague, seedTeams } from "../../../packages/engine/test/helpers/factories";
+import { makePlayer, seedLeague, seedTeams } from "../../../packages/engine/test/helpers/factories";
 import { bookRecurringJobs, runJob } from "../lib/jobs";
 
 let db: TestDb;
@@ -42,6 +42,13 @@ describe("odds.run booking (§9.1)", () => {
 });
 
 describe("odds.run job (§11.1)", () => {
+  it("fails the job for a week with no projections, storing nothing", async () => {
+    await seedLeague(db, { currentWeek: 3 });
+    await db.insert(matchups).values({ week: 3, homeTeamId: ids[0]!, awayTeamId: ids[1]! });
+    await expect(runJob(db, clock, "odds.run", { snapshot: "thu" })).rejects.toThrow(/no projections/);
+    expect(await db.select().from(oddsRuns)).toHaveLength(0);
+  });
+
   it("is gated before the season starts", async () => {
     await seedLeague(db, { phase: "regular", currentWeek: 1, startWeek: 2 });
     await db.insert(matchups).values({ week: 1, homeTeamId: ids[0]!, awayTeamId: ids[1]! });
@@ -54,6 +61,9 @@ describe("odds.run job (§11.1)", () => {
     vi.stubGlobal("fetch", fetch);
     await seedLeague(db, { currentWeek: 3 });
     await db.insert(matchups).values({ week: 3, homeTeamId: ids[0]!, awayTeamId: ids[1]! });
+    // A week needs projections before it gets odds (§11.1).
+    await makePlayer(db, { playerId: "p-proj" });
+    await db.insert(playerWeekProj).values({ playerId: "p-proj", season: 2026, week: 3, projPtsPpr: 10 });
     await runJob(db, clock, "odds.run", { snapshot: "sun" });
     const [run] = await db.select().from(oddsRuns);
     expect(run).toMatchObject({ week: 3, snapshot: "sun", status: "partial" });

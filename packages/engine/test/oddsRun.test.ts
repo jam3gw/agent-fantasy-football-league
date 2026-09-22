@@ -5,7 +5,9 @@ import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { SEASON, makeGame, seedFullRoster, seedLeague, seedTeams, setLineupEntry } from "./helpers/factories.ts";
 import { health, matchupOdds, matchups, oddsRuns, playerPlayOdds, playerWeekProj, playerWeekStats, players } from "../src/db/schema.ts";
 import type { JevAsk, JevReply, JevRequest } from "../src/odds.ts";
-import { jevSpend, latestWeekOdds, loadOddsMatchups, oddsScoreboard, playedFromStats, runMatchupOdds } from "../src/oddsRun.ts";
+import { jevSpend, latestWeekOdds, loadOddsMatchups, matchupOutcome, oddsScoreboard, playedFromStats, runMatchupOdds } from "../src/oddsRun.ts";
+import { lineupEntries, nflGames, teams } from "../src/db/schema.ts";
+import { makePlayer, rosterPlayer } from "./helpers/factories.ts";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -88,6 +90,25 @@ describe("loadOddsMatchups (§11.1 inputs)", () => {
     const rb1 = home.starters.find((s) => s.slot === "RB1")!;
     expect(rb1).toMatchObject({ injuryStatus: "Questionable", proj: 25, gameState: "not_started", opponent: "BUF" });
   });
+
+  it("handles a ghost starter, an empty slot, a bye, and a final game with points", async () => {
+    // Team 1: the K slot is left empty; the TE is a ghost (traded away, still starting).
+    await db.delete(lineupEntries).where(eq(lineupEntries.playerId, rosters[0]!.k));
+    const ghost = await makePlayer(db, { playerId: "ghost-te", position: "TE", nflTeam: "KC" });
+    await db.delete(lineupEntries).where(eq(lineupEntries.playerId, rosters[0]!.te));
+    await rosterPlayer(db, ids[5]!, ghost);
+    await setLineupEntry(db, ids[0]!, WEEK, ghost, "TE");
+    // Team 2's QB moves to a team with no game (bye); team 3's game is final.
+    await db.update(players).set({ nflTeam: "SEA" }).where(eq(players.playerId, rosters[1]!.qb));
+    await db.update(nflGames).set({ status: "final" }).where(eq(nflGames.home, "DAL"));
+    await db.insert(playerWeekStats).values({ playerId: rosters[2]!.qb, season: SEASON, week: WEEK, stats: { gp: 1 }, ptsPpr: 31.5, final: true });
+
+    const [m1, m2] = await loadOddsMatchups(db, SEASON, WEEK, clock.now());
+    expect(m1!.home.emptySlots).toEqual(["K"]);
+    expect(m1!.home.starters.find((s) => s.slot === "TE")?.playerId).toBe("ghost-te");
+    expect(m1!.away.starters.find((s) => s.slot === "QB")).toMatchObject({ gameState: "none", opponent: null, kickoffAt: null });
+    expect(m2!.home.starters.find((s) => s.slot === "QB")).toMatchObject({ gameState: "final", points: 31.5 });
+  });
 });
 
 describe("runMatchupOdds (§11.1)", () => {
@@ -159,6 +180,40 @@ describe("runMatchupOdds (§11.1)", () => {
     expect(res.jevError).toMatch(/no noul answer/);
   });
 
+  it("rejects a probability outside [0, 1] and still stores baseline and rule", async () => {
+    const jev = fakeJev({ home: 70 }); // a percentage where a probability belongs
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: jev.ask });
+    expect(res.status).toBe("partial");
+    expect(res.jevError).toMatch(/not a probability/);
+    expect(new Set((await db.select().from(matchupOdds)).map((r) => r.method))).toEqual(new Set(["baseline", "rule"]));
+  });
+
+  it("gives up on Jev at the deadline and still stores baseline and rule", async () => {
+    const hang: JevAsk = (_req, opts) =>
+      new Promise((_resolve, reject) => opts?.signal?.addEventListener("abort", () => reject(opts.signal!.reason)));
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: hang, jevDeadlineMs: 20 });
+    expect(res.status).toBe("partial");
+    expect(res.jevError).toMatch(/deadline/);
+    expect(new Set((await db.select().from(matchupOdds)).map((r) => r.method))).toEqual(new Set(["baseline", "rule"]));
+  });
+
+  it("refuses a week with no projections instead of storing coin flips", async () => {
+    await db.delete(playerWeekProj);
+    await expect(runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: null })).rejects.toThrow(/no projections/);
+    expect(await db.select().from(oddsRuns)).toHaveLength(0);
+  });
+
+  it("never sends a team name or a model id to Jev", async () => {
+    const jev = fakeJev();
+    await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: jev.ask });
+    const sent = JSON.stringify(jev.calls);
+    for (const t of await db.select().from(teams)) {
+      expect(sent).not.toContain(`"${t.name}"`);
+      expect(sent).not.toContain(t.modelId);
+      expect(sent).not.toContain(t.modelLabel);
+    }
+  });
+
   it("returns no_matchups for a week with none", async () => {
     const res = await runMatchupOdds(db, clock, { season: SEASON, week: 9, snapshot: "thu", jev: null });
     expect(res.status).toBe("no_matchups");
@@ -189,6 +244,12 @@ describe("oddsScoreboard (§11.1 scoring on read)", () => {
     expect(board.matchups.map((s) => s.method)).toEqual(["baseline", "rule", "jev_composite", "jev_direct"]);
     expect(board.players).toEqual([{ snapshot: "thu", n: 1, ruleBrier: expect.closeTo(0.04, 6), jevBrier: expect.closeTo(0.01, 6) }]);
     expect(board.weeks).toEqual([WEEK]);
+  });
+
+  it("scores a tie on points as 0.5, even a playoff tie that has a winner", () => {
+    expect(matchupOutcome({ homeTeamId: 1, homePoints: 100, awayPoints: 100, winnerTeamId: 1 })).toBe(0.5);
+    expect(matchupOutcome({ homeTeamId: 1, homePoints: 90, awayPoints: 100, winnerTeamId: 2 })).toBe(0);
+    expect(matchupOutcome({ homeTeamId: 1, homePoints: null, awayPoints: null, winnerTeamId: 1 })).toBe(1);
   });
 
   it("playedFromStats reads gp, then gms_active", () => {

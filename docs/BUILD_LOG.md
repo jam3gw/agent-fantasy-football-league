@@ -36,6 +36,25 @@ so it cannot be the reporter; it now feeds the reporter instead.
   session does not hold; the first preview-deploy run is the check (see
   `docs/VERIFIED.md`).
 - **Merge held** until Jake says so (his instruction on the PR request).
+- **Review round 1** (fresh-context reviewer, 12 findings, 0 high). Fixed:
+  a bye starter now scores 0 with no backup in every method (the spec's
+  rule; the code had given it a backup); long-form statuses (`Injured
+  Reserve` with no injury tag) now get a play call; Jev answers outside
+  [0, 1] fail the Jev phase instead of overflowing `numeric(6,5)` and taking
+  the whole run down; after a failure no new Jev call starts and in-flight
+  ones are awaited, so their cost is recorded; the Jev phase has a
+  five-minute deadline so a slow Jev can never push the step past 800 s; a
+  week with no projections fails the job instead of storing coin flips;
+  ties score 0.5 on points (a seeded playoff tie included); the played check
+  needs a final stats row; `jev_direct` now gets the whole bench. Spec
+  amended to match the code where the code was the better rule: a missing
+  key sets no health row, an in-progress starter scores `max(points, proj)`,
+  backups must be healthy. New tests for each.
+  Not fixed, by choice: two runs of the same snapshot at once would both call
+  Jev, and the loser's cost is not recorded. The tick claims each job row
+  once, so this needs a hand-booked run in the same minute as the scheduled
+  one; a few hundredths of a cent at most. No render test for `/odds`; its
+  data functions are tested and the page follows `/report`'s guarded pattern.
 
 ## 2026-09-22 — Operational sweep: all green, no code change
 

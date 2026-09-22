@@ -39,6 +39,12 @@ import { STARTING_SLOTS } from "./roster.ts";
 
 /** How many Jev requests are in flight at once (the API allows 1,200 a minute). */
 const JEV_CONCURRENCY = 4;
+/**
+ * The whole Jev phase must finish inside this, well short of a workflow
+ * step's 800 s, so a slow Jev can never stop the baseline and the rule from
+ * being stored (§11.1). Running out of time is a Jev failure.
+ */
+export const JEV_PHASE_DEADLINE_MS = 300_000;
 
 /** Load the week's matchups with everything the four methods read (§11.1 inputs). */
 export async function loadOddsMatchups(
@@ -190,18 +196,37 @@ async function teamForms(db: EngineDb, week: number, teamIds: number[]): Promise
   return out;
 }
 
-/** Run `fn` over `items` with at most `limit` in flight; the first rejection rejects the whole. */
+/**
+ * Run `fn` over `items` with at most `limit` in flight. After the first
+ * failure no new item starts, and the calls already in flight are waited for
+ * before the failure is thrown, so every billed call has landed (and been
+ * counted) by the time the caller writes the run.
+ */
 async function mapLimited<T, R>(items: T[], limit: number, fn: (x: T) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
+  let failure: { error: unknown } | null = null;
   const worker = async () => {
-    while (next < items.length) {
+    while (failure === null && next < items.length) {
       const i = next++;
-      out[i] = await fn(items[i]!);
+      try {
+        out[i] = await fn(items[i]!);
+      } catch (error) {
+        failure ??= { error };
+      }
     }
   };
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  if (failure !== null) throw (failure as { error: unknown }).error;
   return out;
+}
+
+/** A Jev probability must be a number in [0, 1]; anything else fails the Jev phase. */
+function prob01(x: unknown, what: string): number {
+  if (typeof x !== "number" || !Number.isFinite(x) || x < 0 || x > 1) {
+    throw new Error(`jev: ${what} is not a probability in [0, 1]: ${String(x)}`);
+  }
+  return x;
 }
 
 export interface OddsRunResult {
@@ -221,7 +246,7 @@ export interface OddsRunResult {
 export async function runMatchupOdds(
   db: EngineDb,
   clock: Clock,
-  args: { season: number; week: number; snapshot: OddsSnapshot; jev: JevAsk | null },
+  args: { season: number; week: number; snapshot: OddsSnapshot; jev: JevAsk | null; jevDeadlineMs?: number },
 ): Promise<OddsRunResult> {
   const { season, week, snapshot } = args;
   const existing = await db
@@ -238,6 +263,18 @@ export async function runMatchupOdds(
     return { runId: null, existed: false, status: "no_matchups", jevError: null, matchups: 0 };
   }
 
+  // No projections for the week would store a week of coin flips that a
+  // repeat run could never replace. Fail the job instead; it can be re-booked
+  // once `ingest.projections` has run.
+  const anyProj = await db
+    .select({ playerId: playerWeekProj.playerId })
+    .from(playerWeekProj)
+    .where(and(eq(playerWeekProj.season, season), eq(playerWeekProj.week, week)))
+    .limit(1);
+  if (anyProj.length === 0) {
+    throw new Error(`odds.run: no projections loaded for week ${week}; run ingest.projections, then book odds.run again`);
+  }
+
   const doubtful: OddsStarter[] = weekMatchups.flatMap((m) => [...m.home.starters, ...m.away.starters].filter(needsPlayCall));
 
   let jevError: string | null = args.jev ? null : "no_key: AI_GATEWAY_API_KEY is not set";
@@ -246,13 +283,19 @@ export async function runMatchupOdds(
   let jevCost = 0;
   const jevPlay = new Map<string, number>();
   const jevPlayRequests = new Map<string, unknown>();
-  const jevDirect = new Map<number, { homeWinProb: number; confidence: number; state: unknown }>();
+  const jevDirect = new Map<number, { homeWinProb: number; confidence: number | null; state: unknown }>();
   if (args.jev) {
     // Count tokens as each reply lands: a later failure still leaves the calls
     // that succeeded billed, and the run records what was spent (§11.1).
     const inner = args.jev;
+    const deadline = new AbortController();
+    const timer = setTimeout(
+      () => deadline.abort(new Error("jev: the Jev phase ran past its deadline")),
+      args.jevDeadlineMs ?? JEV_PHASE_DEADLINE_MS,
+    );
     const jev: JevAsk = async (req) => {
-      const reply = await inner(req);
+      if (deadline.signal.aborted) throw deadline.signal.reason;
+      const reply = await inner(req, { signal: deadline.signal });
       jevTokens += reply.inputTokens;
       jevCost += reply.costUsd ?? (reply.inputTokens * JEV_USD_PER_M_INPUT) / 1_000_000;
       jevModel = reply.model;
@@ -263,17 +306,15 @@ export async function runMatchupOdds(
         const req = jevPlayRequest(s, now);
         const reply = await jev(req);
         const a = reply.answers.plays;
-        if (a?.type !== "noul" || !Number.isFinite(a.noul)) throw new Error(`jev: no noul answer for ${s.playerId}`);
-        return { s, req, reply, p: a.noul };
+        if (a?.type !== "noul") throw new Error(`jev: no noul answer for ${s.playerId}`);
+        return { s, req, reply, p: prob01(a.noul, `the play call for ${s.playerId}`) };
       });
       const directs = await mapLimited(weekMatchups, JEV_CONCURRENCY, async (m) => {
         const req = jevMatchupRequest(m, now);
         const reply = await jev(req);
         const a = reply.answers.winner;
-        const p = a?.type === "choice" ? a.probabilities.home : undefined;
-        if (a?.type !== "choice" || p === undefined || !Number.isFinite(p)) {
-          throw new Error(`jev: no choice answer for matchup ${m.matchupId}`);
-        }
+        if (a?.type !== "choice") throw new Error(`jev: no choice answer for matchup ${m.matchupId}`);
+        const p = prob01(a.probabilities.home, `the home probability for matchup ${m.matchupId}`);
         return { m, req, reply, p, confidence: a.confidence };
       });
       for (const x of plays) {
@@ -287,6 +328,8 @@ export async function runMatchupOdds(
       jevError = String(err instanceof Error ? err.message : err).slice(0, 500);
       jevPlay.clear();
       jevDirect.clear();
+    } finally {
+      clearTimeout(timer);
     }
   }
   const withJev = jevError === null;
@@ -485,12 +528,17 @@ export interface OddsScoreboard {
   weeks: number[];
 }
 
-/** 1 home won, 0 away won, 0.5 tie (§11.1). */
-function matchupOutcome(m: { homePoints: number | null; awayPoints: number | null; winnerTeamId: number | null; homeTeamId: number }): number {
+/**
+ * 1 home scored more, 0 away scored more, 0.5 tie (§11.1). Points decide,
+ * not `winner_team_id`: a playoff tie has a winner (the higher seed) but the
+ * question every method answers is who scores more.
+ */
+export function matchupOutcome(m: { homePoints: number | null; awayPoints: number | null; winnerTeamId: number | null; homeTeamId: number }): number {
+  if (m.homePoints !== null && m.awayPoints !== null) {
+    return m.homePoints > m.awayPoints ? 1 : m.homePoints < m.awayPoints ? 0 : 0.5;
+  }
   if (m.winnerTeamId !== null) return m.winnerTeamId === m.homeTeamId ? 1 : 0;
-  const h = m.homePoints ?? 0;
-  const a = m.awayPoints ?? 0;
-  return h > a ? 1 : h < a ? 0 : 0.5;
+  return 0.5;
 }
 
 /** Did he play? `gp`, else `gms_active`; a final week with no row is "no". */
@@ -540,11 +588,12 @@ export async function oddsScoreboard(db: EngineDb, season: number): Promise<Odds
   const statKeys = [...new Set(scoredCalls.map((c) => c.playerId))];
   const stats = statKeys.length
     ? await db
-        .select({ playerId: playerWeekStats.playerId, week: playerWeekStats.week, stats: playerWeekStats.stats })
+        .select({ playerId: playerWeekStats.playerId, week: playerWeekStats.week, stats: playerWeekStats.stats, final: playerWeekStats.final })
         .from(playerWeekStats)
         .where(and(eq(playerWeekStats.season, season), inArray(playerWeekStats.playerId, statKeys)))
     : [];
-  const statOf = new Map(stats.map((s) => [`${s.playerId}|${s.week}`, s.stats]));
+  // Only a final row counts (§11.1); a week whose matchups are all final has final rows.
+  const statOf = new Map(stats.filter((s) => s.final).map((s) => [`${s.playerId}|${s.week}`, s.stats]));
   const playerBuckets = new Map<OddsSnapshot, { rule: Array<{ p: number; outcome: number }>; jev: Array<{ p: number; outcome: number }> }>();
   for (const c of scoredCalls) {
     // Rule and Jev are compared over the same players: only calls Jev made.

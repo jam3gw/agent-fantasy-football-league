@@ -119,12 +119,13 @@ export function rulePlayProb(injuryStatus: string | null, status: string | null)
 }
 
 /**
- * A starter whose playing is still in doubt: he has an injury tag and his
- * game has not started. These are the players the rule and Jev disagree on;
- * everyone else plays with p = 1 (or 0 on a bye) in every method.
+ * A starter whose playing is still in doubt: his game has not started and he
+ * carries an injury tag, or a roster status the rule counts as out (a null
+ * `injury_status` with `status` "Injured Reserve" or "Suspended"). These are
+ * the players the rule and Jev disagree on; everyone else plays with p = 1.
  */
 export function needsPlayCall(s: OddsPlayer): boolean {
-  return s.gameState === "not_started" && !!s.injuryStatus;
+  return s.gameState === "not_started" && (!!s.injuryStatus || rulePlayProb(null, s.status) < 1);
 }
 
 function cv(position: string | null): number {
@@ -184,10 +185,11 @@ export function teamExpectation(
         variance: sigma ** 2,
         backupPlayerId: null,
       };
+    } else if (s.gameState === "none") {
+      // No game (bye, no team) scores 0 in every method, with no backup (§11.1).
+      row = { playerId: s.playerId, slot: s.slot, p: 0, expected: 0, variance: 0, backupPlayerId: null };
     } else {
-      // No game (bye, no team) is a certain zero; the rule and Jev methods
-      // still let the manager swap in a backup, the baseline does not.
-      const p = s.gameState === "none" ? 0 : needsPlayCall(s) ? clamp01(playProb(s)) : 1;
+      const p = needsPlayCall(s) ? clamp01(playProb(s)) : 1;
       let backup: OddsPlayer | undefined;
       if (opts.backups && p < 1) {
         backup = pool.find((b) => !usedBackups.has(b.playerId) && eligibleForSlot(s.slot, b.fantasyPositions));
@@ -195,8 +197,8 @@ export function teamExpectation(
       }
       const bProj = backup ? Math.max(0, backup.proj) : 0;
       const bSigma = backup ? cv(backup.position) * bProj : 0;
-      const proj = s.gameState === "none" ? 0 : Math.max(0, s.proj);
-      const pEff = opts.backups ? p : s.gameState === "none" ? 0 : 1;
+      const proj = Math.max(0, s.proj);
+      const pEff = opts.backups ? p : 1;
       row = {
         playerId: s.playerId,
         slot: s.slot,
@@ -287,7 +289,7 @@ export interface JevRequest {
 
 export type JevAnswer =
   | { type: "noul"; noul: number }
-  | { type: "choice"; choice: string; probabilities: Record<string, number>; confidence: number };
+  | { type: "choice"; choice: string; probabilities: Record<string, number>; confidence: number | null };
 
 export interface JevReply {
   model: string;
@@ -297,8 +299,11 @@ export interface JevReply {
   costUsd: number | null;
 }
 
-/** The engine's view of Jev: one request in, one reply out. `packages/data` implements it. */
-export type JevAsk = (req: JevRequest) => Promise<JevReply>;
+/**
+ * The engine's view of Jev: one request in, one reply out. `packages/data`
+ * implements it. `signal` aborts the call and any retry still to come.
+ */
+export type JevAsk = (req: JevRequest, opts?: { signal?: AbortSignal }) => Promise<JevReply>;
 
 /** Design B: one yes/no question about one injured starter, with only his facts as state. */
 export function jevPlayRequest(s: OddsStarter, now: Date): JevRequest {
@@ -345,12 +350,6 @@ function teamState(team: OddsTeam, now: Date) {
   const atRisk = team.starters
     .filter((s) => s.gameState === "none" || (s.gameState === "not_started" && rulePlayProb(s.injuryStatus, s.status) < 0.5))
     .reduce((sum, s) => sum + Math.max(0, s.proj), 0);
-  // The best healthy bench player at each position: who could step in.
-  const bestBench = new Map<string, OddsPlayer>();
-  for (const b of [...team.bench].sort((a, c) => c.proj - a.proj)) {
-    const pos = b.position ?? "?";
-    if (!bestBench.has(pos)) bestBench.set(pos, b);
-  }
   return {
     record: `${f.wins}-${f.losses}-${f.ties}`,
     average_points: f.avgPoints === null ? null : round1(f.avgPoints),
@@ -377,13 +376,16 @@ function teamState(team: OddsTeam, now: Date) {
         injury_body_part: s.injuryBodyPart,
         average_points_last_3_weeks: s.avgLast3 === null ? null : round1(s.avgLast3),
       })),
-    best_bench: [...bestBench.values()].map((b) => ({
-      name: b.name,
-      position: b.position,
-      projected_points: round1(b.proj),
-      injury_status: b.injuryStatus,
-      game: gameText(b),
-    })),
+    // The whole bench (§11.1): who could step in, and whether his game is still ahead.
+    bench: [...team.bench]
+      .sort((a, c) => c.proj - a.proj || a.playerId.localeCompare(c.playerId))
+      .map((b) => ({
+        name: b.name,
+        position: b.position,
+        projected_points: round1(b.proj),
+        injury_status: b.injuryStatus,
+        game: gameText(b),
+      })),
   };
 }
 

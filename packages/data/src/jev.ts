@@ -48,7 +48,7 @@ function parseReply(body: unknown): JevReply {
         type: "choice",
         choice: a.choice,
         probabilities: a.probabilities as Record<string, number>,
-        confidence: typeof a.confidence === "number" ? a.confidence : NaN,
+        confidence: typeof a.confidence === "number" && Number.isFinite(a.confidence) ? a.confidence : null,
       };
     }
     // Other answer types (score) are not asked for; an answer out of shape is
@@ -70,16 +70,18 @@ export function jevClient(opts: JevClientOptions): JevAsk {
     backoffMs = RETRY_POLICY.backoffMs,
     fetchImpl = fetch,
   } = opts;
-  return async (req: JevRequest): Promise<JevReply> => {
+  return async (req: JevRequest, callOpts: { signal?: AbortSignal } = {}): Promise<JevReply> => {
+    const outer = callOpts.signal;
     let lastError: unknown;
     for (let attempt = 0; attempt <= retries; attempt++) {
+      if (outer?.aborted) break;
       let wait = backoffMs * 2 ** attempt;
       try {
         const res = await fetchImpl(JEV_URL, {
           method: "POST",
           headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
           body: JSON.stringify({ model, state: req.state, questions: req.questions }),
-          signal: AbortSignal.timeout(timeoutMs),
+          signal: outer ? AbortSignal.any([AbortSignal.timeout(timeoutMs), outer]) : AbortSignal.timeout(timeoutMs),
         });
         if (!res.ok) {
           // The body names the offending field on a 422; it never echoes the key.
@@ -93,9 +95,11 @@ export function jevClient(opts: JevClientOptions): JevAsk {
         lastError = err;
         if (err instanceof HttpError && !retryable(err.status)) break;
         if (err instanceof Error && err.message.startsWith("jev: ")) break; // a malformed reply will not fix itself
+        if (outer?.aborted) break; // the caller's deadline: no more retries
         if (attempt < retries) await new Promise((r) => setTimeout(r, wait));
       }
     }
+    if (lastError === undefined && outer?.aborted) lastError = outer.reason ?? new Error("jev: aborted");
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   };
 }

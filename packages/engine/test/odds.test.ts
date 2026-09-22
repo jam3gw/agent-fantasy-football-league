@@ -109,9 +109,18 @@ describe("teamExpectation", () => {
     expect(e.starters.every((s) => s.backupPlayerId === null)).toBe(true);
   });
 
-  it("the rule and Jev methods cover a bye starter with a backup", () => {
-    const t = team(1, [starter("bye", "RB1", { gameState: "none", kickoffAt: null, proj: 0 })], [player("b1", { proj: 7 })]);
-    expect(teamExpectation(t, () => 1, { backups: true }).expected).toBeCloseTo(7);
+  it("a bye starter scores 0 in every method and takes no backup (§11.1)", () => {
+    const t = team(
+      1,
+      [starter("bye", "RB1", { gameState: "none", kickoffAt: null, proj: 12 }), starter("hurt", "RB2", { injuryStatus: "Out", proj: 10 })],
+      [player("b1", { proj: 7 })],
+    );
+    const e = teamExpectation(t, () => 0, { backups: true });
+    expect(e.starters.find((s) => s.playerId === "bye")).toMatchObject({ expected: 0, variance: 0, backupPlayerId: null });
+    // The one bench player goes to the injured starter, not the bye.
+    expect(e.starters.find((s) => s.playerId === "hurt")?.backupPlayerId).toBe("b1");
+    expect(e.expected).toBeCloseTo(7);
+    expect(teamExpectation(t, () => 1, { backups: false }).expected).toBeCloseTo(10);
   });
 
   it("uses final points with no variance, and in-progress players at max(points, proj)", () => {
@@ -162,6 +171,9 @@ describe("win probability", () => {
 describe("Jev requests", () => {
   it("needsPlayCall: tagged and not started only", () => {
     expect(needsPlayCall(player("a", { injuryStatus: "Questionable" }))).toBe(true);
+    // A long-form roster status with no injury tag still counts (§11.1 rule table).
+    expect(needsPlayCall(player("a", { status: "Injured Reserve" }))).toBe(true);
+    expect(needsPlayCall(player("a", { status: "Active" }))).toBe(false);
     expect(needsPlayCall(player("a"))).toBe(false);
     expect(needsPlayCall(player("a", { injuryStatus: "Questionable", gameState: "in_progress" }))).toBe(false);
   });

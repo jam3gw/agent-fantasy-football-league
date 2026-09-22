@@ -74,6 +74,19 @@ describe("jevClient (§11.1)", () => {
     expect(String(err)).not.toContain("sk-secret");
   });
 
+  it("stops retrying once the caller's signal aborts", async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(async () => {
+      controller.abort(new Error("jev: the Jev phase ran past its deadline"));
+      return json(529, { error: "overloaded" });
+    });
+    const err = await jevClient({ apiKey: "k", fetchImpl: fetchImpl as typeof fetch, backoffMs: 0, retries: 3 })(req, {
+      signal: controller.signal,
+    }).catch((e: Error) => e);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(String(err)).toMatch(/529/);
+  });
+
   it("fails fast on a malformed reply", async () => {
     const fetchImpl = vi.fn(async () => json(200, { answers: {} }));
     await expect(jevClient({ apiKey: "k", fetchImpl: fetchImpl as typeof fetch, backoffMs: 0 })(req)).rejects.toThrow("jev: response has no model");

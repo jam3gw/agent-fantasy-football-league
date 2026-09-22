@@ -114,6 +114,22 @@ describe("get_matchup_odds (§11.1)", () => {
     });
   });
 
+  it("on a partial run, says Jev was unavailable and lists only the methods stored", async () => {
+    const [m] = await db.insert(matchups).values({ week: 1, homeTeamId: ids[0]!, awayTeamId: ids[1]! }).returning();
+    const [run] = await db
+      .insert(oddsRuns)
+      .values({ season: SEASON, week: 1, snapshot: "sun", status: "partial", jevError: "jev: HTTP 529", weights: {} })
+      .returning();
+    await db.insert(matchupOdds).values([
+      { runId: run!.id, matchupId: m!.id, method: "baseline", homeWinProb: 0.6, homeExpected: 110, awayExpected: 104 },
+      { runId: run!.id, matchupId: m!.id, method: "rule", homeWinProb: 0.55, homeExpected: 107, awayExpected: 104 },
+    ]);
+    const out = (await getMatchupOdds.execute({}, ctxFor({ kind: "reporter_preview" as SessionKind }))) as Record<string, unknown>;
+    expect(out).toMatchObject({ snapshot: "sun", jev_included: false, jev_note: expect.stringMatching(/not available/) });
+    expect(Object.keys(out.methods as object).sort()).toEqual(["baseline", "rule"]);
+    expect(JSON.stringify(out)).not.toContain("529"); // the raw error stays on the admin pages
+  });
+
   it("is only for the reporter", async () => {
     const out = await getMatchupOdds.execute({}, ctxFor({ teamId: ids[0]! }));
     expect(out).toMatchObject({ ok: false, error: "wrong_session_kind" });
