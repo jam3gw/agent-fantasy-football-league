@@ -35,6 +35,9 @@ import {
 } from "@league/data";
 import { reporterModelId } from "@league/engine";
 
+/** §11.1: how many times `odds.run` re-books itself, 30 minutes apart, while a week has no projections. */
+const ODDS_RETRIES = 6;
+
 /**
  * §4.3 job gating: `waivers.run`, every `sessions.*` job, the `reporter.*`
  * jobs and lineup-check booking run only once the season is under way. Ingest
@@ -189,17 +192,39 @@ export async function runJob(
     case "odds.run": {
       if (!inSeason(settings)) return; // §4.3 job gating, like the reporter
       const snapshot = payload.snapshot === "sun" ? "sun" : "thu";
-      const { runMatchupOdds } = await import("@league/engine");
+      const { NoProjectionsError, runMatchupOdds } = await import("@league/engine");
       const { jevClient } = await import("@league/data");
       const { env } = await import("./env");
       // Jev runs through the AI Gateway on the key every model call uses.
       const key = env.aiGatewayApiKey;
-      const result = await runMatchupOdds(db, clock, {
-        season,
-        week: Number(payload.week ?? settings.currentWeek),
-        snapshot,
-        jev: key ? jevClient({ apiKey: key }) : null,
-      });
+      const week = Number(payload.week ?? settings.currentWeek);
+      const attempt = Number(payload.attempt ?? 0);
+      let result;
+      try {
+        result = await runMatchupOdds(db, clock, { season, week, snapshot, jev: key ? jevClient({ apiKey: key }) : null });
+      } catch (err) {
+        // §11.1: no projections yet. Book the same snapshot again in 30
+        // minutes rather than lose it; after ODDS_RETRIES tries (three hours)
+        // the job fails and /admin/health shows why.
+        if (!(err instanceof NoProjectionsError)) throw err;
+        const now = clock.now();
+        const set = { lastError: err.message, lastErrorAt: now };
+        await db.insert(health).values({ key: "odds", ...set }).onConflictDoUpdate({ target: health.key, set });
+        if (attempt >= ODDS_RETRIES) throw err;
+        const next = attempt + 1;
+        await bookJob(
+          db,
+          "odds.run",
+          new Date(now.getTime() + 30 * 60_000),
+          { snapshot, week, attempt: next },
+          `odds.run:${season}:${week}:${snapshot}:retry${next}`,
+        );
+        return;
+      }
+      if (!result.existed && result.status !== "no_matchups") {
+        const set = { lastSuccessAt: clock.now() };
+        await db.insert(health).values({ key: "odds", ...set }).onConflictDoUpdate({ target: health.key, set });
+      }
       // A Jev outage is on /admin/health (key `jev`); the job itself succeeds,
       // because the baseline and rule rows are stored either way (§11.1).
       if (result.jevError && key) console.warn(`odds.run: Jev left out of this run: ${result.jevError}`);

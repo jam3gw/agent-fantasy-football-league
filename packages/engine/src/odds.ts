@@ -13,8 +13,9 @@ import { STARTING_SLOTS, eligibleForSlot } from "./roster.ts";
 
 /**
  * Jev through the Vercel AI Gateway (§11.1). The gateway offers only this id,
- * which follows TypeSafe's newest release; the version that answered is
- * stored per run when the reply names one.
+ * which follows TypeSafe's newest release, and its reply echoes the same id,
+ * so a run cannot tell which Jev release answered; each run stores the id and
+ * the time, which is as close as the gateway lets us get.
  */
 export const JEV_MODEL = "typesafe-ai/jev";
 /**
@@ -297,6 +298,30 @@ export interface JevReply {
   inputTokens: number;
   /** The gateway's own cost for the call, when it reports one. */
   costUsd: number | null;
+}
+
+/**
+ * A Jev call that the gateway answered (and so may have billed) but whose
+ * reply could not be used. It carries whatever usage the body reported, so
+ * the run still records what was spent (§11.1).
+ */
+export class JevCallError extends Error {
+  constructor(
+    message: string,
+    public readonly inputTokens: number,
+    public readonly costUsd: number | null,
+  ) {
+    super(message);
+    this.name = "JevCallError";
+  }
+}
+
+/** `odds.run` found no projections for the week; the job books a retry (§11.1). */
+export class NoProjectionsError extends Error {
+  constructor(public readonly week: number) {
+    super(`odds.run: no projections loaded for week ${week}; run ingest.projections, then book odds.run again`);
+    this.name = "NoProjectionsError";
+  }
 }
 
 /**

@@ -55,6 +55,18 @@ so it cannot be the reporter; it now feeds the reporter instead.
   once, so this needs a hand-booked run in the same minute as the scheduled
   one; a few hundredths of a cent at most. No render test for `/odds`; its
   data functions are tested and the page follows `/report`'s guarded pattern.
+- **Review round 2** (6 findings, 0 high). Fixed: a week with no projections
+  now re-books the same snapshot every 30 minutes for three hours instead of
+  failing once and losing it; a reply the gateway answered but that cannot
+  be used (malformed, not JSON) still has its tokens and cost counted; a
+  null, empty or negative gateway cost falls back to the price table instead
+  of recording $0; the retry sleep ends at the deadline and the error names
+  the deadline, not the 529 it cut short; spec and code comments now say the
+  gateway reply cannot name the Jev release. New tests: the stop-and-await
+  behaviour under a failure, an abort mid-call, a billed unusable reply,
+  cost parsing, a reserve-list starter with no tag, and the job's retry.
+  Accepted: calls cut off at the five-minute deadline may be billed and not
+  recorded (spec says so).
 
 ## 2026-09-22 — Operational sweep: all green, no code change
 

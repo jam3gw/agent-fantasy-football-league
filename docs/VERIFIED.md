@@ -18,7 +18,7 @@ Read `https://docs.typesafe.ai/api.md`, `https://docs.typesafe.ai/models.md`, Ve
 | Errors | 401 bad key, 422 bad body, 429 rate limit, 529 overloaded (retry with backoff) |
 | Known weak spots (`/model-jaggedness/jev-1.13.md`) | counting and arithmetic, dates read as text, long irrelevant state, P(yes) and 1 − P(no) not complementary. The league does all sums and time differences in code and asks each question one way only |
 
-Not checked: a live call. No call was made from this session. The first live `odds.run` on the preview deploy should be read end to end (answers, `usage`, the gateway cost, and the `model` field) and recorded here.
+Not checked: a live call. No call was made from this session. The first live `odds.run` on the preview deploy should be read end to end (answers, `usage`, the gateway cost, the `model` field, and whether anything in the reply or its headers names the Jev release) and recorded here.
 
 ## 2026-09-08 — Gateway cost field and the ledger, checked on session 2598 (§8.7 verify)
 

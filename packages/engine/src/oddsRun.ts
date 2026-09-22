@@ -25,6 +25,8 @@ import {
 } from "./db/schema.ts";
 import type { GameState, JevAsk, OddsMatchup, OddsPlayer, OddsStarter, OddsTeam, TeamForm } from "./odds.ts";
 import {
+  JevCallError,
+  NoProjectionsError,
   JEV_USD_PER_M_INPUT,
   ODDS_WEIGHTS,
   brier,
@@ -272,7 +274,7 @@ export async function runMatchupOdds(
     .where(and(eq(playerWeekProj.season, season), eq(playerWeekProj.week, week)))
     .limit(1);
   if (anyProj.length === 0) {
-    throw new Error(`odds.run: no projections loaded for week ${week}; run ingest.projections, then book odds.run again`);
+    throw new NoProjectionsError(week);
   }
 
   const doubtful: OddsStarter[] = weekMatchups.flatMap((m) => [...m.home.starters, ...m.away.starters].filter(needsPlayCall));
@@ -295,11 +297,20 @@ export async function runMatchupOdds(
     );
     const jev: JevAsk = async (req) => {
       if (deadline.signal.aborted) throw deadline.signal.reason;
-      const reply = await inner(req, { signal: deadline.signal });
-      jevTokens += reply.inputTokens;
-      jevCost += reply.costUsd ?? (reply.inputTokens * JEV_USD_PER_M_INPUT) / 1_000_000;
-      jevModel = reply.model;
-      return reply;
+      const bill = (tokens: number, cost: number | null) => {
+        jevTokens += tokens;
+        jevCost += cost ?? (tokens * JEV_USD_PER_M_INPUT) / 1_000_000;
+      };
+      try {
+        const reply = await inner(req, { signal: deadline.signal });
+        bill(reply.inputTokens, reply.costUsd);
+        jevModel = reply.model;
+        return reply;
+      } catch (err) {
+        // Answered but unusable: the gateway may have billed it all the same.
+        if (err instanceof JevCallError) bill(err.inputTokens, err.costUsd);
+        throw err;
+      }
     };
     try {
       const plays = await mapLimited(doubtful, JEV_CONCURRENCY, async (s) => {

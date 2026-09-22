@@ -5,6 +5,7 @@ import { createTestDb, type TestDb } from "./helpers/db.ts";
 import { SEASON, makeGame, seedFullRoster, seedLeague, seedTeams, setLineupEntry } from "./helpers/factories.ts";
 import { health, matchupOdds, matchups, oddsRuns, playerPlayOdds, playerWeekProj, playerWeekStats, players } from "../src/db/schema.ts";
 import type { JevAsk, JevReply, JevRequest } from "../src/odds.ts";
+import { JevCallError } from "../src/odds.ts";
 import { jevSpend, latestWeekOdds, loadOddsMatchups, matchupOutcome, oddsScoreboard, playedFromStats, runMatchupOdds } from "../src/oddsRun.ts";
 import { lineupEntries, nflGames, teams } from "../src/db/schema.ts";
 import { makePlayer, rosterPlayer } from "./helpers/factories.ts";
@@ -195,6 +196,46 @@ describe("runMatchupOdds (§11.1)", () => {
     expect(res.status).toBe("partial");
     expect(res.jevError).toMatch(/deadline/);
     expect(new Set((await db.select().from(matchupOdds)).map((r) => r.method))).toEqual(new Set(["baseline", "rule"]));
+  });
+
+  it("after one Jev failure starts no new call, awaits the ones in flight, and bills them", async () => {
+    // Five injured starters on team 1: the first four calls start together.
+    const r = rosters[0]!;
+    for (const pid of [r.rb2, r.wr1, r.wr2, r.te]) {
+      await db.update(players).set({ injuryStatus: "Questionable" }).where(eq(players.playerId, pid));
+    }
+    const started: string[] = [];
+    const ask: JevAsk = async (req): Promise<JevReply> => {
+      const name = String((req.state.player as { name: string }).name);
+      started.push(name);
+      if (name.endsWith("rb1")) throw new Error("HTTP 529 from Jev via AI Gateway");
+      await new Promise((ok) => setTimeout(ok, 20));
+      return { model: "typesafe-ai/jev", answers: { plays: { type: "noul", noul: 0.5 } }, inputTokens: 300, costUsd: null };
+    };
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: ask });
+    expect(res.status).toBe("partial");
+    expect(started).toHaveLength(4); // the fifth never started
+    const run = (await db.select().from(oddsRuns))[0]!;
+    expect(run.jevInputTokens).toBe(900); // the three in flight landed and were counted
+  });
+
+  it("counts a billed but unusable Jev reply toward the run's cost", async () => {
+    const ask: JevAsk = async () => {
+      throw new JevCallError("jev: response has no answers", 400, 0.00005);
+    };
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: ask });
+    expect(res.status).toBe("partial");
+    const run = (await db.select().from(oddsRuns))[0]!;
+    expect(run).toMatchObject({ jevInputTokens: 400 });
+    expect(run.jevCostUsd).toBeCloseTo(0.00005, 6);
+  });
+
+  it("asks Jev about a starter on a reserve list with no injury tag", async () => {
+    await db.update(players).set({ injuryStatus: null, status: "Injured Reserve" }).where(eq(players.playerId, rosters[1]!.wr1));
+    const jev = fakeJev();
+    await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: jev.ask });
+    const call = (await db.select().from(playerPlayOdds)).find((c) => c.playerId === rosters[1]!.wr1);
+    expect(call).toMatchObject({ ruleProb: 0, jevProb: 0.9, injuryStatus: null });
   });
 
   it("refuses a week with no projections instead of storing coin flips", async () => {

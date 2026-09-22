@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { JevRequest } from "@league/engine";
-import { JEV_URL, jevClient } from "../src/jev.ts";
+import { JevCallError } from "@league/engine";
+import { JEV_URL, jevClient, parseGatewayCost } from "../src/jev.ts";
 
 const req: JevRequest = {
   state: { player: { name: "A" } },
@@ -84,7 +85,38 @@ describe("jevClient (§11.1)", () => {
       signal: controller.signal,
     }).catch((e: Error) => e);
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(String(err)).toMatch(/529/);
+    // The caller's deadline is the reason, not the 529 it cut short.
+    expect(String(err)).toMatch(/deadline/);
+  });
+
+  it("aborts a call in flight when the caller's signal fires", async () => {
+    const controller = new AbortController();
+    const fetchImpl = vi.fn(
+      (_url: string | URL | Request, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => init?.signal?.addEventListener("abort", () => reject(init.signal!.reason))),
+    );
+    const pending = jevClient({ apiKey: "k", fetchImpl: fetchImpl as typeof fetch, backoffMs: 0, retries: 3 })(req, {
+      signal: controller.signal,
+    }).catch((e: Error) => e);
+    controller.abort(new Error("jev: the Jev phase ran past its deadline"));
+    expect(String(await pending)).toMatch(/deadline/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("an answered but unusable reply carries its usage and cost", async () => {
+    const fetchImpl = vi.fn(async () =>
+      json(200, { model: "typesafe-ai/jev", usage: { input_tokens: 500 }, provider_metadata: { gateway: { cost: "0.00002" } } }),
+    );
+    const err = await jevClient({ apiKey: "k", fetchImpl: fetchImpl as typeof fetch, backoffMs: 0 })(req).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(JevCallError);
+    expect(err).toMatchObject({ message: "jev: response has no answers", inputTokens: 500, costUsd: 0.00002 });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("parseGatewayCost accepts only a non-negative number or numeric string", () => {
+    expect(parseGatewayCost("0.00001155")).toBeCloseTo(0.00001155);
+    expect(parseGatewayCost(0.5)).toBe(0.5);
+    for (const bad of [null, undefined, "", "  ", "abc", "-1", -1, true, {}]) expect(parseGatewayCost(bad), String(bad)).toBeNull();
   });
 
   it("fails fast on a malformed reply", async () => {

@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { FixedClock } from "@league/shared";
-import { matchupOdds, matchups, oddsRuns, playerWeekProj, scheduledJobs } from "@league/engine";
+import { health, matchupOdds, matchups, oddsRuns, playerWeekProj, scheduledJobs } from "@league/engine";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
 import { makePlayer, seedLeague, seedTeams } from "../../../packages/engine/test/helpers/factories";
 import { bookRecurringJobs, runJob } from "../lib/jobs";
@@ -42,11 +42,19 @@ describe("odds.run booking (§9.1)", () => {
 });
 
 describe("odds.run job (§11.1)", () => {
-  it("fails the job for a week with no projections, storing nothing", async () => {
+  it("with no projections, stores nothing and books the same snapshot 30 minutes later", async () => {
     await seedLeague(db, { currentWeek: 3 });
     await db.insert(matchups).values({ week: 3, homeTeamId: ids[0]!, awayTeamId: ids[1]! });
-    await expect(runJob(db, clock, "odds.run", { snapshot: "thu" })).rejects.toThrow(/no projections/);
+    await runJob(db, clock, "odds.run", { snapshot: "sun" });
     expect(await db.select().from(oddsRuns)).toHaveLength(0);
+    const retry = await db.select().from(scheduledJobs).where(eq(scheduledJobs.type, "odds.run"));
+    expect(retry).toHaveLength(1);
+    expect(retry[0]!.dueAt.toISOString()).toBe("2026-09-22T18:30:00.000Z");
+    expect(retry[0]!.payload).toEqual({ snapshot: "sun", week: 3, attempt: 1 });
+    const h = (await db.select().from(health).where(eq(health.key, "odds")))[0];
+    expect(h?.lastError).toMatch(/no projections/);
+    // After the last retry the job fails, so /admin/jobs shows it.
+    await expect(runJob(db, clock, "odds.run", { snapshot: "sun", week: 3, attempt: 6 })).rejects.toThrow(/no projections/);
   });
 
   it("is gated before the season starts", async () => {

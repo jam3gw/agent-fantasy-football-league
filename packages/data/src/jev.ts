@@ -9,7 +9,7 @@
  * a log line, or a stored row.
  */
 import type { JevAnswer, JevAsk, JevReply, JevRequest } from "@league/engine";
-import { JEV_MODEL } from "@league/engine";
+import { JEV_MODEL, JevCallError } from "@league/engine";
 import { HttpError, RETRY_POLICY } from "./http.ts";
 
 export const JEV_URL = "https://ai-gateway.vercel.sh/typesafe/v1/systemone";
@@ -28,16 +28,38 @@ function retryable(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
-function parseReply(body: unknown): JevReply {
-  if (!body || typeof body !== "object") throw new Error("jev: response is not an object");
-  const b = body as {
-    model?: unknown;
-    answers?: unknown;
-    usage?: { input_tokens?: unknown };
-    provider_metadata?: { gateway?: { cost?: unknown } };
+type ReplyBody = {
+  model?: unknown;
+  answers?: unknown;
+  usage?: { input_tokens?: unknown };
+  provider_metadata?: { gateway?: { cost?: unknown } };
+};
+
+/** The gateway reports cost as a decimal string ("0.00001155"); anything else is no cost. */
+export function parseGatewayCost(c: unknown): number | null {
+  const ok = (typeof c === "string" && c.trim() !== "") || typeof c === "number";
+  if (!ok) return null;
+  const n = Number(c);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** What a 200 body says was spent, read before the body is validated. */
+function usageOf(body: unknown): { inputTokens: number; costUsd: number | null } {
+  const b = (body && typeof body === "object" ? body : {}) as ReplyBody;
+  const t = b.usage?.input_tokens;
+  return {
+    inputTokens: typeof t === "number" && Number.isFinite(t) && t >= 0 ? t : 0,
+    costUsd: parseGatewayCost(b.provider_metadata?.gateway?.cost),
   };
-  if (typeof b.model !== "string") throw new Error("jev: response has no model");
-  if (!b.answers || typeof b.answers !== "object") throw new Error("jev: response has no answers");
+}
+
+function parseReply(body: unknown): JevReply {
+  const { inputTokens, costUsd } = usageOf(body);
+  const bad = (msg: string) => new JevCallError(msg, inputTokens, costUsd);
+  if (!body || typeof body !== "object") throw bad("jev: response is not an object");
+  const b = body as ReplyBody;
+  if (typeof b.model !== "string") throw bad("jev: response has no model");
+  if (!b.answers || typeof b.answers !== "object") throw bad("jev: response has no answers");
   const answers: Record<string, JevAnswer> = {};
   for (const [key, raw] of Object.entries(b.answers as Record<string, unknown>)) {
     const a = raw as Record<string, unknown>;
@@ -54,11 +76,24 @@ function parseReply(body: unknown): JevReply {
     // Other answer types (score) are not asked for; an answer out of shape is
     // left out, and the caller fails on the missing key.
   }
-  const inputTokens = typeof b.usage?.input_tokens === "number" ? b.usage.input_tokens : 0;
-  // The gateway reports cost as a decimal string ("0.00001155").
-  const rawCost = Number(b.provider_metadata?.gateway?.cost);
-  const costUsd = b.provider_metadata?.gateway?.cost !== undefined && Number.isFinite(rawCost) ? rawCost : null;
   return { model: b.model, answers, inputTokens, costUsd };
+}
+
+/** Sleep that ends early when `signal` aborts. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal?.aborted) return resolve();
+    const done = () => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      done();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export function jevClient(opts: JevClientOptions): JevAsk {
@@ -90,16 +125,23 @@ export function jevClient(opts: JevClientOptions): JevAsk {
           if (Number.isFinite(retryAfter) && retryAfter > 0) wait = Math.min(30_000, retryAfter * 1000);
           throw new HttpError(JEV_URL, res.status, `HTTP ${res.status} from Jev via AI Gateway${detail ? `: ${detail}` : ""}`);
         }
-        return parseReply(await res.json());
+        let body: unknown;
+        try {
+          body = await res.json();
+        } catch {
+          throw new JevCallError("jev: response is not JSON", 0, null);
+        }
+        return parseReply(body);
       } catch (err) {
         lastError = err;
         if (err instanceof HttpError && !retryable(err.status)) break;
         if (err instanceof Error && err.message.startsWith("jev: ")) break; // a malformed reply will not fix itself
         if (outer?.aborted) break; // the caller's deadline: no more retries
-        if (attempt < retries) await new Promise((r) => setTimeout(r, wait));
+        if (attempt < retries) await sleep(wait, outer);
       }
     }
-    if (lastError === undefined && outer?.aborted) lastError = outer.reason ?? new Error("jev: aborted");
+    // Stopped by the caller's deadline: say so, not the retry that was cut short.
+    if (outer?.aborted) lastError = outer.reason ?? new Error("jev: aborted");
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
   };
 }
