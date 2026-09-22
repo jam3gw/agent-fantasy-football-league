@@ -186,6 +186,24 @@ export async function runJob(
       await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek), job);
       return;
     }
+    case "odds.run": {
+      if (!inSeason(settings)) return; // §4.3 job gating, like the reporter
+      const snapshot = payload.snapshot === "sun" ? "sun" : "thu";
+      const { runMatchupOdds } = await import("@league/engine");
+      const { jevClient } = await import("@league/data");
+      const { env } = await import("./env");
+      const key = env.jevApiKey;
+      const result = await runMatchupOdds(db, clock, {
+        season,
+        week: Number(payload.week ?? settings.currentWeek),
+        snapshot,
+        jev: key ? jevClient({ apiKey: key }) : null,
+      });
+      // A Jev outage is on /admin/health (key `jev`); the job itself succeeds,
+      // because the baseline and rule rows are stored either way (§11.1).
+      if (result.jevError && key) console.warn(`odds.run: Jev left out of this run: ${result.jevError}`);
+      return;
+    }
     case "ingest.rankings": {
       const { ingestRankings } = await import("@league/data");
       // Sleeper's projection feed needs no key and no quota, so the only way
@@ -317,6 +335,9 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
   await book("reporter.run", nextEtWeekdayTime(now, 2, 11, 0), { kind: "reporter_recap" });
   await book("digest.weekly", nextEtWeekdayTime(now, 2, 11, 30));
   await book("sessions.book", nextEtWeekdayTime(now, 3, 9, 0), { kind: "post_waivers" });
+  // §11.1: odds before the preview (which cites them), and again before the Sunday slate.
+  await book("odds.run", nextEtWeekdayTime(now, 4, 9, 30), { snapshot: "thu" });
+  await book("odds.run", nextEtWeekdayTime(now, 0, 11, 30), { snapshot: "sun" });
   await book("reporter.run", nextEtWeekdayTime(now, 4, 10, 0), { kind: "reporter_preview" });
   // No scheduled trade window (§2, 2026-09-05): an agent that wants to shop
   // books a check-in for it (§8.10). Offers still trigger `trade_response`.

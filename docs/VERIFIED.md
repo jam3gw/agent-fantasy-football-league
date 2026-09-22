@@ -2,6 +2,22 @@
 
 Each entry: date, the request made, what came back. Items marked **verify** in SPEC.md land here.
 
+## 2026-09-22 — TypeSafe Jev API and price (§11.1 verify)
+
+Read `https://docs.typesafe.ai/api.md` and `https://docs.typesafe.ai/models.md` (no key needed for the docs).
+
+| Item | Result |
+|---|---|
+| Endpoint | `POST https://api.typesafe.ai/v1/systemone`, `Authorization: Bearer <key>`, JSON body `{ state, model, questions }` |
+| Question types | `noul` (yes/no, answer `noul` 0–1), `choice` (answer `choice`, `probabilities` summing to 1, `confidence`), `score` |
+| Model | `jev-1.13.0`; aliases `jev-latest` and `jev-preview` both point to it today. The league pins `jev-1.13.0` |
+| Price | $0.042 per million input tokens; output tokens free |
+| Limits | 1,200 requests/min, 250k tokens/s (docs say limits move without notice); 32k tokens for `state` plus the longest question |
+| Errors | 401 bad key, 422 bad body, 429 rate limit, 529 overloaded (retry with backoff) |
+| Known weak spots (`/model-jaggedness/jev-1.13.md`) | counting and arithmetic, dates read as text, long irrelevant state, P(yes) and 1 − P(no) not complementary. The league does all sums and time differences in code and asks each question one way only |
+
+Not checked: a live call. No `JEV_API_KEY` exists yet (Jev is in limited early access); `odds.run` stores the two non-Jev methods until one is set. The first live run should be read end to end and recorded here.
+
 ## 2026-09-08 — Gateway cost field and the ledger, checked on session 2598 (§8.7 verify)
 
 Jake asked whether cost tracking works for `/sessions/2598` (Five Alarm

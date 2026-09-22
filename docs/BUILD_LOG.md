@@ -2,6 +2,41 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-22 — Matchup odds with Jev (§11.1), at the commissioner's request
+
+Jake asked to bring in Jev (TypeSafe AI's System One model) and to store two
+designs and compare them later. Jev returns typed probabilities, not text,
+so it cannot be the reporter; it now feeds the reporter instead.
+
+- **What runs.** `odds.run` Thursday 9:30 AM ET (before the preview) and
+  Sunday 11:30 AM ET. Four methods per matchup, all stored: `baseline`
+  (projections), `rule` (fixed status table), `jev_composite` (Design B: Jev
+  judges each injured starter's chance to play, our math does the rest) and
+  `jev_direct` (Design A: Jev picks the winner from both lineups). Scored on
+  read with Brier and hit rate; the injured-starter calls are scored rule
+  versus Jev against `gp` in the stats feed.
+- **Where it shows.** `/odds` (footer, sitemap, llms.txt), a line on
+  `/spend`, and the reporter's new `get_matchup_odds` tool; the preview brief
+  mentions it. No team agent can read the odds (tested), so the "same
+  information for all twelve" rule holds.
+- **Choices made without asking** (closest to the spec): Jev pinned to
+  `jev-1.13.0`, not the alias, so a mid-season release cannot change what the
+  scoreboard compares; team names and model ids are never sent to Jev; a
+  failed Jev call drops both Jev methods for the whole snapshot rather than
+  storing a half week; Jev's cost lives on `odds_runs` and one `/spend` line,
+  not in `spend_ledger` (which needs a session); the rule table (Q 80%, D 20%)
+  and the per-position spread are first guesses, stored with each run so a
+  later change never re-scores old runs.
+- **Migration 0008** adds three new tables only; no existing table changes.
+- **Not done: a live Jev call.** There is no `JEV_API_KEY` (limited early
+  access). Until one is set in Vercel, every snapshot is `partial`: baseline
+  and rule only. Recorded in `docs/VERIFIED.md`.
+
+### Questions for Jake
+
+- Do you have a TypeSafe early-access key? Add it as `JEV_API_KEY` in the
+  Vercel project (Production and Preview). Nothing else is needed.
+
 ## 2026-09-22 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.

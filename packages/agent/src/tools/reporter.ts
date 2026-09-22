@@ -10,6 +10,7 @@ import {
   decisionLogs,
   getSettings,
   latestPowerRankings,
+  latestWeekOdds,
   publishPowerRankings,
   rankingMovement,
   reporterPosts,
@@ -249,6 +250,64 @@ export const getPowerRankings = defineTool({
   },
 });
 
+const ODDS_METHOD_NOTES = {
+  baseline: "projections only; every starter plays",
+  rule: "a fixed injury rule: Questionable 80%, Doubtful 20%, Out 0%, with the best healthy bench player as the backup",
+  jev_composite: "Jev judges each injured starter's chance to play; the league's math does the rest",
+  jev_direct: "Jev picks the winner from both lineups, benches and form; confidence is Jev's own",
+} as const;
+
+export const getMatchupOdds = defineTool({
+  name: "get_matchup_odds",
+  description:
+    "This week's (or another week's) win probabilities per matchup from four methods — a projection baseline, a fixed injury rule, and two from Jev, TypeSafe AI's decision model — with expected points and each injured starter's chance to play. The newest snapshot for the week (Thursday or Sunday).",
+  schema: z.object({ week: z.number().int().min(1).optional() }),
+  async execute(args, ctx) {
+    const denied = requireReporter(ctx);
+    if (denied) return denied;
+    const settings = await getSettings(ctx.db);
+    const week = args.week ?? settings.currentWeek;
+    const odds = await latestWeekOdds(ctx.db, settings.season, week);
+    if (!odds) return toolFailure("not_found", `No matchup odds have been computed for week ${week} yet.`);
+    const allTeams = await ctx.db.select().from(teams);
+    const name = (id: number) => allTeams.find((t) => t.id === id)?.name ?? null;
+    const pct = (p: number) => Math.round(p * 1000) / 10;
+    return {
+      week,
+      snapshot: odds.run.snapshot,
+      computed_at: formatEt(odds.run.createdAt),
+      jev_included: odds.run.status === "succeeded",
+      ...(odds.run.jevError ? { jev_note: "Jev was not available for this snapshot; only the baseline and the rule are shown." } : {}),
+      methods: Object.fromEntries(
+        Object.entries(ODDS_METHOD_NOTES).filter(([m]) => odds.run.status === "succeeded" || !m.startsWith("jev")),
+      ),
+      matchups: odds.matchups.map((m) => ({
+        home_team_id: m.homeTeamId,
+        home: name(m.homeTeamId),
+        away_team_id: m.awayTeamId,
+        away: name(m.awayTeamId),
+        home_win_pct: Object.fromEntries(Object.entries(m.methods).map(([k, v]) => [k, pct(v.homeWinProb)])),
+        expected_points: Object.fromEntries(
+          Object.entries(m.methods)
+            .filter(([, v]) => v.homeExpected !== null)
+            .map(([k, v]) => [k, { home: v.homeExpected, away: v.awayExpected }]),
+        ),
+        jev_direct_confidence: m.methods.jev_direct?.confidence ?? null,
+        injured_starters: odds.players
+          .filter((p) => p.matchupId === m.matchupId)
+          .map((p) => ({
+            player_id: p.playerId,
+            name: p.name,
+            team: name(p.teamId),
+            injury_status: p.injuryStatus,
+            play_pct_rule: pct(p.ruleProb),
+            play_pct_jev: p.jevProb === null ? null : pct(p.jevProb),
+          })),
+      })),
+    };
+  },
+});
+
 export const publishPowerRankingsTool = defineTool({
   name: "publish_power_rankings",
   description:
@@ -286,6 +345,7 @@ export const REPORTER_TOOLS: LeagueTool[] = [
   listSessions,
   getSessionTranscript,
   getPowerRankings,
+  getMatchupOdds,
   publishReport,
   publishPowerRankingsTool,
 ];

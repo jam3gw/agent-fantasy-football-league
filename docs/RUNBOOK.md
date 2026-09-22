@@ -79,6 +79,8 @@ You cannot start a `self_check_in` by hand — it is not in the "Run a session n
 - **A trade window for every active team at once**: book `sessions.book` with kind `trade_window` and a window label (the label keys the sessions, so the same label booked twice books once); an optional note is appended to every team's brief. The league schedules no trade windows (§2); a `sessions.book` row for one without a label books nothing. The last league-wide window ran 2026-09-08 with a note that agents book a check-in to shop from then on.
 - **A fresh power-rankings edition on demand**: book `reporter.run` with kind `reporter_power_rankings`. The reporter ranks all twelve teams with a reason each; the home page and `/report` switch to the new edition on the next revalidation, with movement measured against the edition before. A session that publishes nothing fails with `no_report` and the old edition stays up.
 
+- **Matchup odds** (§11.1): `odds.run` runs Thursday 9:30 AM and Sunday 11:30 AM ET. One run per week and snapshot; booking it again for a snapshot that already ran does nothing. A hand-booked row runs the Thursday snapshot for the current week. Without `JEV_API_KEY` (Vercel project env) the run stores only the baseline and the injury rule and `/odds` says Jev was unavailable; that is expected, not an error. With a key, a Jev failure shows on `/admin/health` under `jev` and the run still stores the two non-Jev methods. To turn Jev on, add `JEV_API_KEY` in Vercel for Production and Preview and redeploy; the next snapshot uses it.
+
 Jobs are idempotent by design; running one twice is safe.
 
 ---

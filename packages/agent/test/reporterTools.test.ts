@@ -5,12 +5,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FixedClock } from "@league/shared";
 import type { EngineDb, SessionKind } from "@league/engine";
-import { powerRankings } from "@league/engine";
+import { matchupOdds, matchups, oddsRuns, playerPlayOdds, powerRankings } from "@league/engine";
 import type { ToolContext } from "../src/tools/types.ts";
-import { getPowerRankings, publishPowerRankingsTool } from "../src/tools/reporter.ts";
+import { getMatchupOdds, getPowerRankings, publishPowerRankingsTool } from "../src/tools/reporter.ts";
 import { createTestDb } from "./helpers/db.ts";
 import type { TestDb } from "./helpers/db.ts";
-import { SEASON, seedLeague, seedTeams } from "../../engine/test/helpers/factories.ts";
+import { SEASON, makePlayer, seedLeague, seedTeams } from "../../engine/test/helpers/factories.ts";
 
 let db: TestDb;
 let close: () => Promise<void>;
@@ -79,5 +79,43 @@ describe("publish_power_rankings", () => {
     expect(out.rankings[1]).toMatchObject({ rank: 2, team_id: ids[0], moved: -1 });
     expect(out.rankings[2]).toMatchObject({ rank: 3, moved: 0 });
     expect(out.rankings[0]!.team).not.toBeNull();
+  });
+});
+
+describe("get_matchup_odds (§11.1)", () => {
+  it("returns not_found before any run, then the newest snapshot with team names", async () => {
+    const ctx = ctxFor({ kind: "reporter_preview" as SessionKind });
+    expect(await getMatchupOdds.execute({}, ctx)).toMatchObject({ ok: false, error: "not_found" });
+
+    const [m] = await db.insert(matchups).values({ week: 1, homeTeamId: ids[0]!, awayTeamId: ids[1]! }).returning();
+    const [run] = await db
+      .insert(oddsRuns)
+      .values({ season: SEASON, week: 1, snapshot: "thu", status: "succeeded", jevModel: "jev-1.13.0", weights: {} })
+      .returning();
+    await db.insert(matchupOdds).values([
+      { runId: run!.id, matchupId: m!.id, method: "baseline", homeWinProb: 0.61234, homeExpected: 110, awayExpected: 104 },
+      { runId: run!.id, matchupId: m!.id, method: "rule", homeWinProb: 0.55, homeExpected: 107, awayExpected: 104 },
+      { runId: run!.id, matchupId: m!.id, method: "jev_composite", homeWinProb: 0.58, homeExpected: 108, awayExpected: 104 },
+      { runId: run!.id, matchupId: m!.id, method: "jev_direct", homeWinProb: 0.7, detail: { confidence: 0.4 } },
+    ]);
+    await makePlayer(db, { playerId: "hurt", fullName: "Hurt Guy" });
+    await db.insert(playerPlayOdds).values({ runId: run!.id, playerId: "hurt", teamId: ids[0]!, matchupId: m!.id, injuryStatus: "Questionable", ruleProb: 0.8, jevProb: 0.65 });
+
+    const out = (await getMatchupOdds.execute({}, ctx)) as Record<string, unknown>;
+    expect(out).toMatchObject({ week: 1, snapshot: "thu", jev_included: true });
+    const row = (out.matchups as Array<Record<string, unknown>>)[0]!;
+    expect(row).toMatchObject({
+      home: "Team 1",
+      away: "Team 2",
+      home_win_pct: { baseline: 61.2, rule: 55, jev_composite: 58, jev_direct: 70 },
+      expected_points: { baseline: { home: 110, away: 104 } },
+      jev_direct_confidence: 0.4,
+      injured_starters: [{ name: "Hurt Guy", team: "Team 1", play_pct_rule: 80, play_pct_jev: 65 }],
+    });
+  });
+
+  it("is only for the reporter", async () => {
+    const out = await getMatchupOdds.execute({}, ctxFor({ teamId: ids[0]! }));
+    expect(out).toMatchObject({ ok: false, error: "wrong_session_kind" });
   });
 });

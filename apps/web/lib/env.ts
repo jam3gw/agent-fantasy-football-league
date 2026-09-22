@@ -73,6 +73,10 @@ export const env = {
   get aiGatewayApiKey(): string | undefined {
     return process.env.AI_GATEWAY_API_KEY;
   },
+  /** TypeSafe AI key for the Jev matchup odds (§11.1). Unset, `odds.run` stores only the non-Jev methods. */
+  get jevApiKey(): string | undefined {
+    return process.env.JEV_API_KEY || undefined;
+  },
   /** Tool config handed to the agent runner; keys never leave the server. */
   get toolConfig() {
     return {
