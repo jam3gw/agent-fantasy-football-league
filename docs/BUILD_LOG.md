@@ -2,6 +2,51 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-23 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: hit directly at `https://league.jake-moses.com/api/healthz`
+  → `{"ok":true,"lastTickAt":"2026-09-23T13:12:31.870Z"}`, well under a
+  minute old at request time.
+- **`health` table**: `cron.tick`/`sessions.sweep` seconds old. The same
+  tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades`
+  still carry the since-fixed 2026-08-29 `last_error` under a current
+  `last_success_at`; `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, unchanged since 2026-09-01, non-blocking per
+  §13.4 (Sleeper primary healthy — `sleeper.stats` last succeeded
+  2026-09-22T08:00, the Tuesday finalization run). `current_week` is 3,
+  advanced 2026-09-22T08:00:37 — that Tuesday's finalization ran on
+  schedule, no `stats.finalize` watchdog error. `email.send` last
+  succeeded 2026-09-22T15:30 (no digest needed since). No new `last_error`
+  on any key.
+- **`scheduled_jobs`**: 197 `due`, 1816 `done`, the same 6 `failed` rows
+  from 2026-08-29/30 unchanged; none `due`/`claimed` past `due_at` by 15+
+  minutes.
+- **Sessions**: none queued past `due_at` by 15+ minutes, none
+  `failed`/`timed_out` since the last sweep. Three `running` (teams 4, 10,
+  11, all `post_waivers`, started seconds before the check) — freshly
+  started by the tick, not stalled.
+- **Session logs (96 h sample)**: no session with 3+ identical `error`
+  events (stuck-loop check), no duration outlier past a `kind`'s normal
+  range (`lineup_check` max 7.19 min, `board_reply` max 7.25 min,
+  `weekly_review` max 11.75 min, others all under 8 min).
+  `invalid_tool_calls`/`tool_calls` ratios topped out at 0.50 on a
+  2-tool-call `board_reply` (session 4410) — small session, not a stall;
+  nothing resembling a repeated-failure loop.
+- **Vercel**: production deployment `dpl_6oyVqKxLbQVrtA1LNyedwadxKkAQ`
+  READY on `main`@`615217d` (#62) — every commit after it (#61 was already
+  built; #63/#64/#66 etc. are docs-only) correctly shows `CANCELED` from
+  the ignore-build rule, matching the repo's `main` at check time.
+  `get_runtime_errors` (24 h) shows only the same known-benign items seen
+  in every prior sweep: the `meta/muse-spark-1.2-contributor`
+  reasoning-part warning, the AI SDK Warning System notice, and one
+  isolated retryable `AI_StreamProviderError` ("servers are currently
+  overloaded") from 2026-09-22T13:40, a single occurrence.
+
+No code change. No questions for Jake.
+
 ## 2026-09-23 — Discount scan: nothing to take
 
 Sixth scheduled re-run of Jake's "any of the twelve models (or the reporter)
