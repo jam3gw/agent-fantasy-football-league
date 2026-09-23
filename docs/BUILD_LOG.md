@@ -2,6 +2,79 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-23 — Discount scan: nothing to take
+
+Sixth scheduled re-run of Jake's "any of the twelve models (or the reporter)
+cheaper to run at the same weights" question, after 2026-09-05, 09-16, 09-19,
+09-20, 09-21, 09-22. Pulled the live catalog directly
+(`GET https://ai-gateway.vercel.sh/v1/models`, 386 entries, up from 380 on
+09-22) and diffed it against both `MODEL_PRICE_SEED` and the current
+`LEAGUE_MODELS`/`REPORTER_MODEL` ids in `packages/agent/src/models.ts`. Also
+searched the open web (Jake's prompt again asked for a "deep dive on the
+internet") for price-cut announcements on each seated model family.
+
+**Nothing to change.** All twelve league models plus the reporter price
+exactly as stored: Fable 5 10/50, Mistral Large 3 0.5/1.5, Sonnet 5 2/10
+(team and reporter), GPT-5.6 Terra 2/12, Gemini 3.1 Pro 2/12, Grok 4.6 2/6,
+DeepSeek V4-Pro 0.66/1.98, Kimi K3 3/15, Qwen 3.8-Max 2/6, Muse Spark 1.2
+Contributor 0.1/0.2, GLM-5.3 1.4/4.4. Same one exception as the last four
+scans, still not a discount: `openai/gpt-5.6-sol` lists at 4/20, double
+`MODEL_PRICE_SEED`'s 2/10 — the open web (finout.io, cloudzero, BenchLM)
+confirms the promo runs "through at least November 21, 2026" off an
+undiscounted higher rate, not a path back toward our stored 2/10. Already
+carried into `model_prices` by the weekly `prices.sync` job; nothing for
+this check to act on either way. Also confirmed by the web search: Sonnet
+5's 2/10 rate was made permanent on 2026-08-11 (the previously scheduled
+2026-09-01 increase to 3/15 was cancelled) — matches what we already store,
+not a new change.
+
+Catalog-wide grep for `promo`/`discount`/`-off`/`free`/`contributor` across
+all 386 entries: same non-matches as 09-22 —
+`meta/muse-spark-1.3-contributor` (version bump of the tier slot 11 already
+runs, same $0.10/$0.20), `inclusionai/ling-3.0-flash-*-free` and
+`poolside/laguna-s-2.1-free` (models nobody is seated on). No new `-promo`
+entry appeared; `zai/glm-5.3-promo-50` is still absent, and the open web
+confirms why — Vercel's own changelog and model page both give the promo's
+end date as 2026-09-07/08, so its disappearance from the catalog since
+2026-09-09 remains an expired promo, not a new problem.
+
+Same-prefix sibling check, same method as prior scans — every new or
+existing sibling is a newer/older version or a different-weights model, not
+a discount on a seated id: `anthropic/claude-opus-5.5` (4/20, cheaper than
+`claude-opus-5`'s 5/25, but slot 2 hasn't run Opus 5 since 2026-08-29 —
+irrelevant to the seated `mistral/mistral-large-3`) and
+`claude-opus-4.8-fast`/`claude-opus-5-fast`/`claude-opus-5.5-fast` (all
+pricier, a speed tier); `claude-sonnet-4`/`4.5`/`4.6` all still 3/15, pricier
+than the seated Sonnet 5; `openai/gpt-5.6-luna`/`luna-fast` (cheaper, but
+Luna not Sol/Terra — different weights, already out of scope);
+`spacexai/grok-4.7` — press now agrees with itself for once: xAI's own docs
+and multiple outlets (xenospectrum, neoteo, kingy.ai) confirm standard
+pricing of $2/$6, identical to the seated Grok 4.6, resolving the
+gateway/press mismatch flagged as a follow-up on 09-22 (the gateway's
+1.2/3.6 listing is stale or a launch-window rate, not what xAI actually
+bills) — a newer version at the same price either way, not a discount;
+`grok-4.20-*`/`grok-4.3`/`grok-4.5` unchanged from 09-22, still newer/older
+versions not Grok 4.6 discounted; `deepseek/deepseek-v4.1-flash` and
+`deepseek-v4-flash*` unchanged (Flash tier, not the seated Pro tier);
+`alibaba/qwen3.8-max-0902`/`qwen3.8-2.4t-a95b` unchanged, same 2/6 as the
+seated id; `moonshotai/kimi-k2*`/`kimi-k3-fast` unchanged, older or
+speed-tier siblings, none matching Kimi K3's weights at a lower price;
+`zai/glm-5.2`/`glm-5.3-flash`/`glm-5.3-flashx`/`glm-5.3-fast` unchanged,
+older generation or different weights, none a same-weights discount on
+GLM-5.3.
+
+One outside-scope item worth naming: a CNBC-sourced piece (via a general
+web search, not the gateway) claims DeepSeek V4 Pro trades at $0.435/$0.87
+on OpenRouter under "a standing 75% promotional discount." That is a
+different platform's price, not the AI Gateway's — irrelevant under the
+commissioner's 2026-08-28 decision that every league call bills the AI
+Gateway (§8.9), and the gateway's own DeepSeek V4-Pro entry still lists
+0.66/1.98 today with no such discount. Noted here only so a future scan
+doesn't waste time rediscovering it as new.
+
+No code change. No questions for Jake beyond the standing `prices.sync`
+watch item (unchanged).
+
 ## 2026-09-22 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
