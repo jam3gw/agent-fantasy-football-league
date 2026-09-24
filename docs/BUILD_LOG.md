@@ -80,6 +80,50 @@ noise, not a discount to chase, absent a matching gateway catalog id.
 No code change. No questions for Jake beyond the standing `prices.sync`
 watch item (unchanged).
 
+## 2026-09-24 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: hit directly at `https://league.jake-moses.com/api/healthz`
+  → `{"ok":true,"lastTickAt":"2026-09-24T13:12:31.654Z"}`, well under a
+  minute old at request time.
+- **`health` table**: `cron.tick`/`sessions.sweep` seconds old. The same
+  tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades`
+  still carry the since-fixed 2026-08-29 `last_error` under a current
+  `last_success_at`; `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, unchanged since 2026-09-01, non-blocking per
+  §13.4 (Sleeper primary healthy — `sleeper.stats` last succeeded
+  2026-09-24T12:45). `current_week` is 3, advanced 2026-09-22T08:00:37 —
+  that Tuesday's finalization ran on schedule, no `stats.finalize`
+  watchdog error since. `email.send` last succeeded 2026-09-22T15:30 (no
+  digest needed since). No new `last_error` on any key.
+- **`scheduled_jobs`**: 248 `due`, 1868 `done`, the same 6 `failed` rows
+  from 2026-08-29/30 unchanged (retired `ingest.fp_*` and the
+  `digest.weekly` `toFixed` bug); none `due`/`claimed` past `due_at` by
+  15+ minutes.
+- **Sessions**: none queued past `due_at` by 15+ minutes, none `running`,
+  none `failed`/`timed_out` since the last sweep (13:11 today) — the most
+  recent failure (session 4533, team 9 `board_reply`, a retryable
+  `AI_StreamProviderError`) is from 2026-09-23T13:38, already recorded.
+- **Session logs (96 h sample)**: no session with 3+ identical `error`
+  events (stuck-loop check — none found at all), no duration outlier past
+  a `kind`'s normal range (`weekly_review` max 11.75 min, `trade_response`
+  max 7.77 min, everything else under 7.3 min).
+  `invalid_tool_calls`/`tool_calls` ratios topped out at 1.50 on a
+  2-tool-call `board_reply` (session 4535, already recorded, small
+  session, not a stall).
+- **Vercel**: production deployment `dpl_6oyVqKxLbQVrtA1LNyedwadxKkAQ`
+  READY on `main`@`615217d` (#62) — every commit after it, including
+  today's `main`@`a8bea74` (#68, docs-only), correctly shows `CANCELED`
+  from the ignore-build rule, matching the repo's `main` at check time.
+  `get_runtime_errors` (24 h) shows only the same known-benign items seen
+  in every prior sweep: the `meta/muse-spark-1.2-contributor`
+  reasoning-part warning, the AI SDK Warning System notice, and the same
+  two isolated retryable errors from 2026-09-23 already recorded.
+
+No code change. No questions for Jake.
+
 ## 2026-09-23 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
