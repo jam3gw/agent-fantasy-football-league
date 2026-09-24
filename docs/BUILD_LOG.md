@@ -2,6 +2,128 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-24 — Discount scan: nothing to take
+
+Seventh scheduled re-run of Jake's "any of the twelve models (or the reporter)
+cheaper to run at the same weights" question, after 2026-09-05, 09-16, 09-19,
+09-20, 09-21, 09-22, 09-23. Pulled the live catalog directly
+(`GET https://ai-gateway.vercel.sh/v1/models`, 389 entries, up from 386 on
+09-23) and diffed it against both `MODEL_PRICE_SEED` and the current
+`LEAGUE_MODELS`/`REPORTER_MODEL` ids in `packages/agent/src/models.ts`. Also
+searched the open web for price-cut announcements on each seated model
+family.
+
+**Nothing to change.** All twelve league models plus the reporter price
+exactly as stored: Fable 5 10/50, Mistral Large 3 0.5/1.5, Sonnet 5 2/10
+(team and reporter), GPT-5.6 Terra 2/12, Gemini 3.1 Pro 2/12, Grok 4.6 2/6,
+DeepSeek V4-Pro 0.66/1.98, Kimi K3 3/15, Qwen 3.8-Max 2/6, Muse Spark 1.2
+Contributor 0.1/0.2, GLM-5.3 1.4/4.4. Same one exception as the last five
+scans, still not a discount: `openai/gpt-5.6-sol` lists at 4/20, double
+`MODEL_PRICE_SEED`'s 2/10 — confirmed again via the open web (AWS Bedrock's
+own announcement, OpenAI's community post, Technology.org): OpenAI cut Sol
+by "over 20%" on 2026-08-21 off a *higher* base than what we store, and the
+promo still runs "through at least November 21, 2026." That is a price
+increase from our stored rate, not a path back toward it. Already carried
+into `model_prices` by the weekly `prices.sync` job; nothing for this check
+to act on either way.
+
+Catalog-wide grep for `promo`/`discount`/`-off`/`free`/`contributor` across
+all 389 entries: same non-matches as 09-23 —
+`meta/muse-spark-1.3-contributor` (version bump of the tier slot 11 already
+runs, same $0.10/$0.20), `inclusionai/ling-3.0-flash-*-free` and
+`poolside/laguna-s-2.1-free` (models nobody is seated on). No `-promo` entry
+appeared; `zai/glm-5.3-promo-50` remains absent from the gateway catalog.
+
+One new catalog entry since 09-23 worth naming: `anthropic/claude-fable-5.1`
+(10/50) — same price as the seated `claude-fable-5`, a newer version at an
+identical rate, not a discount.
+
+Same-prefix sibling check, same method as prior scans — every new or
+existing sibling is a newer/older version, a speed tier, or a
+different-weights model, not a discount on a seated id: the Opus family
+(`4`/`4.5`/`4.6`/`4.7`/`4.8`/`5`/`5.5`, `-fast` variants) unchanged and
+irrelevant — slot 2 hasn't run Opus since 2026-08-29; `claude-sonnet-4`/
+`4.5`/`4.6` all still 3/15, pricier than the seated Sonnet 5; `openai/
+gpt-5.6-luna`/`luna-fast` (cheaper, but Luna not Sol/Terra — out of scope);
+`spacexai/grok-4.7` still 1.2/3.6 in the gateway catalog against the seated
+Grok 4.6's 2/6 — flagged 09-22, resolved 09-23 (xAI's own docs and press
+agree standard pricing is $2/$6, matching the seated model; the gateway's
+lower listing reads as stale or a launch-window rate) — unchanged since,
+still not an actionable discount; `grok-4.1-fast-*`/`4.20-*`/`4.3`/`4.5`
+unchanged, different versions or reasoning tiers, none the seated 4.6 at a
+lower price; `deepseek/deepseek-v4-flash*`/`v4.1-flash` unchanged (Flash
+tier, not the seated Pro tier); `alibaba/qwen3.8-max-0902`/`-prime`/`-27b`/
+`-flash`/`-omni-flash` unchanged, same 2/6 as the seated id or a different
+(cheaper, lower-weight) model; `moonshotai/kimi-k2*`/`kimi-k3-fast`
+unchanged, older or speed-tier siblings, none matching Kimi K3's weights at
+a lower price; `zai/glm-5`/`5-turbo`/`5.1`/`5.2`/`5.2-fast`/`5.3-fast`/
+`5.3-flash`/`5.3-flashx`/`5v-turbo` unchanged, older generations, speed
+tiers, or lighter weights, none a same-weights discount on the seated
+GLM-5.3.
+
+Two outside-scope items worth naming so a future scan doesn't rediscover
+them as new. First, DeepSeek: press (TheNextWeb, Engadget, InfoWorld,
+DeepSeek's own blog) confirms the 75%-off V4-Pro rate went permanent back
+in May 2026, but also that the 2026-09-09 V4.1-Flash release introduced
+peak/off-peak tiers on top of it — the off-peak numbers match what the
+gateway already lists (0.66/1.98) and what we already store; the peak-hour
+rate is double that, but the gateway's own listing (source of truth per
+§8.9) shows no such split, so there is nothing to change here either way.
+Second, a single low-quality aggregator (readfrog.app, "Model Discounts
+September 2026") claims a GLM-5.3 discount of "20% off, valid September
+16–25." No `-promo` id for GLM-5.3 exists in the live gateway catalog, the
+seated `zai/glm-5.3` entry still prices at list (1.4/4.4), and no other
+source corroborates it — same pattern as the GLM-5.3-Flash 50%-off promo
+that turned out to apply to a different, unseated model. Treating it as
+noise, not a discount to chase, absent a matching gateway catalog id.
+
+No code change. No questions for Jake beyond the standing `prices.sync`
+watch item (unchanged).
+
+## 2026-09-24 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: hit directly at `https://league.jake-moses.com/api/healthz`
+  → `{"ok":true,"lastTickAt":"2026-09-24T13:12:31.654Z"}`, well under a
+  minute old at request time.
+- **`health` table**: `cron.tick`/`sessions.sweep` seconds old. The same
+  tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades`
+  still carry the since-fixed 2026-08-29 `last_error` under a current
+  `last_success_at`; `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, unchanged since 2026-09-01, non-blocking per
+  §13.4 (Sleeper primary healthy — `sleeper.stats` last succeeded
+  2026-09-24T12:45). `current_week` is 3, advanced 2026-09-22T08:00:37 —
+  that Tuesday's finalization ran on schedule, no `stats.finalize`
+  watchdog error since. `email.send` last succeeded 2026-09-22T15:30 (no
+  digest needed since). No new `last_error` on any key.
+- **`scheduled_jobs`**: 248 `due`, 1868 `done`, the same 6 `failed` rows
+  from 2026-08-29/30 unchanged (retired `ingest.fp_*` and the
+  `digest.weekly` `toFixed` bug); none `due`/`claimed` past `due_at` by
+  15+ minutes.
+- **Sessions**: none queued past `due_at` by 15+ minutes, none `running`,
+  none `failed`/`timed_out` since the last sweep (13:11 today) — the most
+  recent failure (session 4533, team 9 `board_reply`, a retryable
+  `AI_StreamProviderError`) is from 2026-09-23T13:38, already recorded.
+- **Session logs (96 h sample)**: no session with 3+ identical `error`
+  events (stuck-loop check — none found at all), no duration outlier past
+  a `kind`'s normal range (`weekly_review` max 11.75 min, `trade_response`
+  max 7.77 min, everything else under 7.3 min).
+  `invalid_tool_calls`/`tool_calls` ratios topped out at 1.50 on a
+  2-tool-call `board_reply` (session 4535, already recorded, small
+  session, not a stall).
+- **Vercel**: production deployment `dpl_6oyVqKxLbQVrtA1LNyedwadxKkAQ`
+  READY on `main`@`615217d` (#62) — every commit after it, including
+  today's `main`@`a8bea74` (#68, docs-only), correctly shows `CANCELED`
+  from the ignore-build rule, matching the repo's `main` at check time.
+  `get_runtime_errors` (24 h) shows only the same known-benign items seen
+  in every prior sweep: the `meta/muse-spark-1.2-contributor`
+  reasoning-part warning, the AI SDK Warning System notice, and the same
+  two isolated retryable errors from 2026-09-23 already recorded.
+
+No code change. No questions for Jake.
+
 ## 2026-09-23 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
