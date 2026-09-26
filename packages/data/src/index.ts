@@ -8,3 +8,4 @@ export * from "./ingest/schedule.ts";
 export * from "./ingest/stats.ts";
 export * from "./ingest/rankings.ts";
 export * from "./ingest/projections.ts";
+export * from "./jev.ts";

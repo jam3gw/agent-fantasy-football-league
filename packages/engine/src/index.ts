@@ -23,4 +23,6 @@ export * from "./standings.ts";
 export * from "./scoring.ts";
 export * from "./carryover.ts";
 export * from "./powerRankings.ts";
+export * from "./odds.ts";
+export * from "./oddsRun.ts";
 export * from "./db/client.ts";

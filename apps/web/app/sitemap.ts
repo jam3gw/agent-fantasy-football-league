@@ -10,7 +10,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const teams = await safe(allTeams, []);
   const lastModified = new Date();
 
-  const pages = ["", "/about", "/benchmark", "/standings", "/board", "/trades", "/transactions", "/waivers", "/report", "/spend", "/draft", "/sessions", "/teams"];
+  const pages = ["", "/about", "/benchmark", "/standings", "/board", "/trades", "/transactions", "/waivers", "/report", "/odds", "/spend", "/draft", "/sessions", "/teams"];
   const weeks = Array.from({ length: league?.currentWeek ?? 1 }, (_, i) => `/matchups/${i + 1}`);
   const teamPages = teams.map((t) => `/teams/${t.slug}`);
 

@@ -395,6 +395,88 @@ doesn't waste time rediscovering it as new.
 No code change. No questions for Jake beyond the standing `prices.sync`
 watch item (unchanged).
 
+## 2026-09-22 — Matchup odds with Jev (§11.1), at the commissioner's request
+
+Jake asked to bring in Jev (TypeSafe AI's System One model) and to store two
+designs and compare them later. Jev returns typed probabilities, not text,
+so it cannot be the reporter; it now feeds the reporter instead.
+
+- **What runs.** `odds.run` Thursday 9:30 AM ET (before the preview) and
+  Sunday 11:30 AM ET. Four methods per matchup, all stored: `baseline`
+  (projections), `rule` (fixed status table), `jev_composite` (Design B: Jev
+  judges each injured starter's chance to play, our math does the rest) and
+  `jev_direct` (Design A: Jev picks the winner from both lineups). Scored on
+  read with Brier and hit rate; the injured-starter calls are scored rule
+  versus Jev against `gp` in the stats feed.
+- **Where it shows.** `/odds` (footer, sitemap, llms.txt), a line on
+  `/spend`, and the reporter's new `get_matchup_odds` tool; the preview brief
+  mentions it. No team agent can read the odds (tested), so the "same
+  information for all twelve" rule holds.
+- **Jev through the AI Gateway** (Jake, 2026-09-22: "assume we will be able
+  to use this model through Vercel's AI Gateway"). The catalog already lists
+  `typesafe-ai/jev`; the league calls the gateway's TypeSafe-compatible
+  endpoint on `AI_GATEWAY_API_KEY`, so there is no separate key, and records
+  the gateway's own cost per call. The gateway offers no pinned version, so
+  each run stores the model id the reply names.
+- **Choices made without asking** (closest to the spec): team names and model ids are never sent to Jev; a
+  failed Jev call drops both Jev methods for the whole snapshot rather than
+  storing a half week; Jev's cost lives on `odds_runs` and one `/spend` line,
+  not in `spend_ledger` (which needs a session); the rule table (Q 80%, D 20%)
+  and the per-position spread are first guesses, stored with each run so a
+  later change never re-scores old runs.
+- **Migration 0008** adds three new tables only; no existing table changes.
+- **Not done: a live Jev call.** It needs the gateway key, which this
+  session does not hold; the first preview-deploy run is the check (see
+  `docs/VERIFIED.md`).
+- **Merge held** until Jake says so (his instruction on the PR request).
+- **Review round 1** (fresh-context reviewer, 12 findings, 0 high). Fixed:
+  a bye starter now scores 0 with no backup in every method (the spec's
+  rule; the code had given it a backup); long-form statuses (`Injured
+  Reserve` with no injury tag) now get a play call; Jev answers outside
+  [0, 1] fail the Jev phase instead of overflowing `numeric(6,5)` and taking
+  the whole run down; after a failure no new Jev call starts and in-flight
+  ones are awaited, so their cost is recorded; the Jev phase has a
+  five-minute deadline so a slow Jev can never push the step past 800 s; a
+  week with no projections fails the job instead of storing coin flips;
+  ties score 0.5 on points (a seeded playoff tie included); the played check
+  needs a final stats row; `jev_direct` now gets the whole bench. Spec
+  amended to match the code where the code was the better rule: a missing
+  key sets no health row, an in-progress starter scores `max(points, proj)`,
+  backups must be healthy. New tests for each.
+  Not fixed, by choice: two runs of the same snapshot at once would both call
+  Jev, and the loser's cost is not recorded. The tick claims each job row
+  once, so this needs a hand-booked run in the same minute as the scheduled
+  one; a few hundredths of a cent at most. No render test for `/odds`; its
+  data functions are tested and the page follows `/report`'s guarded pattern.
+- **Review round 2** (6 findings, 0 high). Fixed: a week with no projections
+  now re-books the same snapshot every 30 minutes for three hours instead of
+  failing once and losing it; a reply the gateway answered but that cannot
+  be used (malformed, not JSON) still has its tokens and cost counted; a
+  null, empty or negative gateway cost falls back to the price table instead
+  of recording $0; the retry sleep ends at the deadline and the error names
+  the deadline, not the 529 it cut short; spec and code comments now say the
+  gateway reply cannot name the Jev release. New tests: the stop-and-await
+  behaviour under a failure, an abort mid-call, a billed unusable reply,
+  cost parsing, a reserve-list starter with no tag, and the job's retry.
+  Accepted: calls cut off at the five-minute deadline may be billed and not
+  recorded (spec says so).
+- **Review round 3** (4 findings, 0 high). Fixed: retry keys now carry the
+  chain's start time, so a hand-booked re-run after a finished chain books
+  its own retries instead of silently doing nothing; a timeout or reset
+  while a reply body streams is retried again (only a body that is not JSON
+  is a bad reply); retries stop before the snapshot's first kickoff, so a
+  late Sunday run cannot score an easier mid-game call; tests for a retry
+  that succeeds and clears the health error.
+- **Review round 4** (4 findings, all low). Fixed: no retry into a week
+  whose games have all kicked off; a test that a Sunday chain measures from
+  its own start (Thursday's game does not stop it, the 1 PM slate does);
+  spec now says calls cut off by a timeout or a dropped connection may be
+  billed and not recorded. Accepted: two overlapping first attempts for the
+  same snapshot (the 9:30 job plus a hand-booked run minutes later) start
+  two retry chains; both may call Jev once projections land and the loser's
+  spend is not recorded — fractions of a cent, nothing stored twice.
+
+
 ## 2026-09-22 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.

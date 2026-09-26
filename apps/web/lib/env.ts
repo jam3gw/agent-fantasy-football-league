@@ -69,7 +69,10 @@ export const env = {
   get alertWebhookUrl(): string | undefined {
     return process.env.ALERT_WEBHOOK_URL;
   },
-  /** Read by the capacity watchdog for the credits balance; the AI SDK reads it on its own for model calls. */
+  /**
+   * Read by the capacity watchdog for the credits balance and by `odds.run`
+   * for Jev (§11.1); the AI SDK reads it on its own for model calls.
+   */
   get aiGatewayApiKey(): string | undefined {
     return process.env.AI_GATEWAY_API_KEY;
   },

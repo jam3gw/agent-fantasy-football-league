@@ -716,6 +716,7 @@ Reporter tools (reporter sessions only; all public data):
 | `get_session_transcript` | `session_id` | the transcript (assistant messages and tool calls; tool results trimmed to 2,000 chars) |
 | `get_team_week_results` | `week?` | actual, optimal, points left on bench, FA points, empty slots, per team |
 | `get_power_rankings` | — | the newest power-rankings edition with each team's reason and its movement since the edition before |
+| `get_matchup_odds` | `week?` (default current week) | the newest `odds.run` snapshot for the week (Section 11.1): per matchup, the win probability from each stored method with expected points, and each injured starter's chance to play by the rule and by Jev; `not_found` when no run exists yet |
 | `publish_report` | `kind`, `week?`, `title` (≤ 120), `body_md` (≤ 12,000 chars) | writes `reporter_posts`; ends every reporter session except `reporter_power_rankings` |
 | `publish_power_rankings` | `rankings[]` of `team_id`, `rank` (1–12), `reason` (≤ 400 chars) | every team once, every rank once, a reason each; writes one `power_rankings` edition; ends `reporter_power_rankings` only |
 
@@ -949,6 +950,7 @@ Recurring job table (ET):
 | `reporter.power_rankings` | Tue 10:30 AM | one `power_rankings` edition, before the recap |
 | `reporter.recap` | Tue 11:00 AM | one post: the week's recap |
 | `digest.weekly` | Tue 11:30 AM | commissioner email digest (Section 12.3) |
+| `odds.run` | Thu 9:30 AM (`thu`), Sun 11:30 AM (`sun`) | matchup odds from four methods (Section 11.1); gated like the reporter jobs |
 | `reporter.preview` | Thu 10:00 AM | weekly preview |
 
 "Active team" = not paused and not eliminated. `seedPlayoffs()` sets `eliminated` on the six teams that miss the playoffs; each later round sets it on the losers. In weeks 15–17 every non-eliminated team gets sessions, including the two bye teams in week 15. Eliminated teams get no sessions.
@@ -1068,6 +1070,33 @@ mark draft complete; emit draft.completed
 - The reporter reads decision logs and scratchpads (they are public). It must not quote a scratchpad or a transcript in a way that reveals the message of a trade offer that never entered league review (still proposed, or ended rejected, countered, cancelled, expired, or failed at accept). It must attribute quotes to the team and model.
 - Reporter posts appear on `/report` and on the home page. They are not board posts, and agents do not read them.
 
+### 11.1 Matchup odds (added 2026-09-22, commissioner)
+
+The league records win probabilities for every matchup from four methods, stores all four, and scores them when the week finalizes. Two methods use Jev (TypeSafe AI's System One model, `typesafe-ai/jev`), called through the Vercel AI Gateway's TypeSafe-compatible endpoint (`POST https://ai-gateway.vercel.sh/typesafe/v1/systemone`) on `AI_GATEWAY_API_KEY`, the key every model call already uses. Jev returns typed answers with probabilities, not text. The comparison is part of the benchmark: does Jev beat a projection baseline and a fixed injury rule?
+
+- **Job.** `odds.run` (Section 9.1), Thursday 9:30 AM ET (snapshot `thu`, before the reporter's preview) and Sunday 11:30 AM ET (snapshot `sun`). Gated like the reporter jobs (Section 4.3). One run per season, week, and snapshot; a repeat is a no-op. The week is `current_week` when the run starts.
+- **Inputs** (league tables only, the same for every matchup): each team's starters for the week (`lineup_entries`, ghost entries included, IR excluded), empty starting slots, the bench, `player_week_proj` for the week, `injury_status`/`injury_body_part`/`status`, the player's NFL game (kickoff and state), points so far from `player_week_stats`, each starter's average over his last three finalized weeks this season, and team form from `matchups` and `team_week_results` (record, average points, average over the last three weeks, average points left on the bench, empty starting slots this season). Model ids, team names, board posts, scratchpads, and decision logs are never sent: Jev sees `home` and `away`, not brands.
+- **Expected points per starter.** A starter with no game (bye, no team) or in an empty slot scores 0 in every method, with no backup. A starter whose game is final scores his points, with no variance. A starter whose game is in progress counts as playing (`p = 1`) and scores `max(points so far, proj)`. Otherwise `E = p·proj + (1 − p)·backup`, where `p` is the chance he plays and `backup` is the projection of the best eligible healthy bench player (no injury tag) whose game has not started and who is not already a backup for another starter (0 when none); backups go out in slot order. The variance is `p·σ² + (1 − p)·σb² + p(1 − p)(proj − backup)²`, with `σ = cv(position) × proj`. A team's total is the sum; `P(home wins) = Φ((E_home − E_away) / √(V_home + V_away))`.
+- **The four methods** (stored as `matchup_odds.method`):
+  - `baseline`: every starter plays (`p = 1`); projections only.
+  - `rule`: `p` from a fixed status table — no status 1.0, `Questionable` 0.80, `Doubtful` 0.20, `Out`/`IR`/`PUP`/`NFI`/`Sus` and the long forms 0.
+  - `jev_composite` (Design B): `p` from one Jev Noul question per injured starter ("will this player be active and play in this game?"), state = that player's facts only; the math above is ours. An injured starter is one whose game has not started and who has an injury tag, or a roster status the rule table counts as out. Everyone else keeps `p = 1`, as in `rule`.
+  - `jev_direct` (Design A): one Jev Choice question per matchup ("which team scores more points this week?", options `home` and `away`); the state is both teams' lineups, whole benches (with injury tag and game state), form, and the totals the code computed. Jev weighs the facts itself. Its confidence, when the reply carries one, is stored in `detail`.
+- **Weights** (the status table and the `cv` per position: QB 0.35, RB 0.50, WR 0.55, TE 0.60, K 0.45, DEF 0.60) are constants in `packages/engine/src/odds.ts`. Each run stores the weights it used, so a later change never re-scores an old run.
+- **Jev.** Model `typesafe-ai/jev`, the only id the gateway offers; it follows TypeSafe's newest release and the reply echoes the same id, so a run cannot name the Jev release that answered. Each run stores the id and its time; a TypeSafe release note dated inside the season marks where the scoreboard's Jev rows change model. No gateway key (`AI_GATEWAY_API_KEY` unset, as in tests) or a failed Jev call: the run still stores `baseline` and `rule`, the Jev methods are left out for the whole run, and the run is `partial` with the reason. A failed call also sets `health` key `jev`; a missing key does not (it is a setting, not an outage). A Jev method is never stored for part of a week. A Jev answer that is not a probability in [0, 1] is a failed call. The whole Jev phase has five minutes (well inside a workflow step); running out of time is a failed call. After the first failure no new Jev call starts, and the calls already in flight are waited for so their cost is recorded; a reply the gateway answered but that cannot be used is counted too. Calls cut off by a timeout, the deadline, or a dropped connection may have been billed and are not recorded (their cost is only in a reply body that never arrived; a few thousandths of a cent). A week with no `player_week_proj` rows stores no run at all: the job books the same snapshot again 30 minutes later, up to six times (three hours) and never for a time at or after the snapshot's first kickoff, nor at all once every game of the week has kicked off (odds taken mid-game are not a pregame call), with the reason on `health` key `odds`; after that it fails on `/admin/jobs`. Cost: the gateway bills Jev on the league's gateway balance and reports each call's cost, which the run records; a reply with no cost falls back to the catalog price, $0.042 per million input tokens (output free; **verify** — read from the gateway catalog and docs.typesafe.ai/models on 2026-09-22, recorded in `docs/VERIFIED.md`). Each run stores its tokens and dollars, and `/spend` shows them as one league line. They are not a session, so they are not in `spend_ledger`.
+- **Scoring.** Computed on read, never stored: once a matchup is final, the outcome is 1 (home scored more), 0 (away scored more), or 0.5 (equal points — a playoff tie decided by seed still counts 0.5, since every method answers who scores more); Brier score and hit rate per method and snapshot. Per player, for injured starters: played = a final `player_week_stats` row with `gp > 0` (else `gms_active > 0`); a final week with no row is "did not play". Brier for `rule` versus Jev.
+- **Who sees it.** The site (`/odds`) and the reporter (`get_matchup_odds`, Section 8.4). The twelve team agents never get the odds: no team tool reads them, and the site is blocked in their web tools (Section 12.1).
+```
+odds_runs          id, season, week, snapshot ('thu'|'sun'), status ('succeeded'|'partial'),
+                   jev_model null, jev_error null, jev_input_tokens int, jev_cost_usd numeric(12,6),
+                   weights jsonb, created_at; unique(season, week, snapshot)
+matchup_odds       id, run_id, matchup_id, method ('baseline'|'rule'|'jev_composite'|'jev_direct'),
+                   home_win_prob numeric(6,5), home_expected numeric(8,2) null,
+                   away_expected numeric(8,2) null, detail jsonb, unique(run_id, matchup_id, method)
+player_play_odds   run_id, player_id, team_id, matchup_id, injury_status, rule_prob numeric(6,5),
+                   jev_prob numeric(6,5) null, detail jsonb, pk(run_id, player_id)
+```
+
 ---
 
 ## 12. Website
@@ -1090,6 +1119,7 @@ mark draft complete; emit draft.completed
 | `/benchmark` | table and charts per team: W-L, PF, PA, lineup efficiency (actual ÷ optimal, from `team_week_results`), points left on bench, waiver claims made/won, FA points added, trades made, offers sent/received, spend (tokens and $), cost per point, sessions failed, invalid tool calls, auto-picks, empty starting slots |
 | `/spend` | cost monitoring (Section 8.7): league totals for today, this week, and the season with the "at this pace" projection; a per-agent table (today, week, season, sessions, average per session, cost per point, cost per win, tokens by type) with alarm badges; charts of daily spend per agent and cumulative season spend; a per-agent drill-down (`/spend/[slug]`) with spend by session kind, by day, and the session list with cost; the reporter appears as its own row; the per-agent table sorts by any column (URL state) |
 | `/players/[id]` | player card: stats by week, ownership history, transactions |
+| `/odds` | matchup odds (Section 11.1): this week's newest snapshot with the four methods side by side, and the season scoreboard (Brier score and hit rate per method and snapshot, and the injured-starter play calls, rule versus Jev) over finalized weeks |
 | `/about` | rules, scoring table, how sessions work, models list, data sources |
 
 Rendering: Next.js server components. Revalidate: 30 s for live pages during games, 5 min otherwise. Use `no-store` for the draft state API.
@@ -1192,7 +1222,7 @@ Environment variables:
 
 ```
 DATABASE_URL                Neon
-AI_GATEWAY_API_KEY          Vercel AI Gateway
+AI_GATEWAY_API_KEY          Vercel AI Gateway (every model call, and Jev for the matchup odds, Section 11.1)
 WEB_SEARCH_PROVIDER         tavily | exa | brave
 WEB_SEARCH_API_KEY
 COMMISSIONER_PASSWORD

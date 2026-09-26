@@ -744,6 +744,66 @@ export const powerRankings = pgTable(
   ],
 );
 
+export type OddsSnapshot = "thu" | "sun";
+export type OddsMethod = "baseline" | "rule" | "jev_composite" | "jev_direct";
+
+/**
+ * Matchup odds (§11.1). One run per season, week and snapshot; every method's
+ * probabilities for that run hang off it. Scoring is computed on read from
+ * `matchups` and `player_week_stats`, never stored.
+ */
+export const oddsRuns = pgTable(
+  "odds_runs",
+  {
+    id: serial("id").primaryKey(),
+    season: integer("season").notNull(),
+    week: integer("week").notNull(),
+    snapshot: text("snapshot").$type<OddsSnapshot>().notNull(),
+    status: text("status").$type<"succeeded" | "partial">().notNull(),
+    /** The versioned id Jev answered with; null when Jev was not called. */
+    jevModel: text("jev_model"),
+    jevError: text("jev_error"),
+    jevInputTokens: integer("jev_input_tokens").notNull().default(0),
+    jevCostUsd: numeric("jev_cost_usd", { precision: 12, scale: 6, mode: "number" }).notNull().default(0),
+    /** The status table and variance weights this run used. */
+    weights: jsonb("weights").$type<Record<string, unknown>>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("odds_runs_season_week_snapshot_uq").on(t.season, t.week, t.snapshot)],
+);
+
+export const matchupOdds = pgTable(
+  "matchup_odds",
+  {
+    id: serial("id").primaryKey(),
+    runId: integer("run_id").notNull(),
+    matchupId: integer("matchup_id").notNull(),
+    method: text("method").$type<OddsMethod>().notNull(),
+    homeWinProb: numeric("home_win_prob", { precision: 6, scale: 5, mode: "number" }).notNull(),
+    homeExpected: numeric("home_expected", { precision: 8, scale: 2, mode: "number" }),
+    awayExpected: numeric("away_expected", { precision: 8, scale: 2, mode: "number" }),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("matchup_odds_run_matchup_method_uq").on(t.runId, t.matchupId, t.method)],
+);
+
+export const playerPlayOdds = pgTable(
+  "player_play_odds",
+  {
+    runId: integer("run_id").notNull(),
+    playerId: text("player_id").notNull(),
+    teamId: integer("team_id").notNull(),
+    matchupId: integer("matchup_id").notNull(),
+    injuryStatus: text("injury_status"),
+    ruleProb: numeric("rule_prob", { precision: 6, scale: 5, mode: "number" }).notNull(),
+    jevProb: numeric("jev_prob", { precision: 6, scale: 5, mode: "number" }),
+    detail: jsonb("detail").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+  },
+  (t) => [primaryKey({ columns: [t.runId, t.playerId] })],
+);
+
 export const commissionerActions = pgTable("commissioner_actions", {
   id: serial("id").primaryKey(),
   action: text("action").notNull(),

@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { isNull, sql } from "drizzle-orm";
 import { etDay } from "@league/shared";
 import { isContributorTier } from "@league/agent";
@@ -6,6 +7,7 @@ import {
   computeStandings,
   costAlarms,
   getSettings,
+  jevSpend,
   sessions,
   spendLedger,
   spendRollups,
@@ -90,6 +92,9 @@ export default async function SpendPage() {
         .groupBy(sessions.teamId)
         .catch(() => []),
     ]);
+
+  // §11.1: Jev is not a session, so its cost is not in the ledger above; one league line of its own.
+  const jev = settings ? await jevSpend(database, settings.season).catch(() => null) : null;
 
   const weekKey = `W${settings?.currentWeek ?? 1}`;
   const weekOf = (scopeKey: string) =>
@@ -316,6 +321,24 @@ export default async function SpendPage() {
           )}
         </Card>
       </div>
+
+      {jev && jev.runs > 0 ? (
+        <div className="mt-4">
+          <Card title="Matchup odds (Jev)">
+            <Table head={["Snapshots", "Input tokens", "Cost"]}>
+              <Row>
+                <Cell align="right">{jev.runs}</Cell>
+                <Cell align="right">{jev.inputTokens.toLocaleString("en-US")}</Cell>
+                <Cell align="right">${jev.costUsd.toFixed(4)}</Cell>
+              </Row>
+            </Table>
+            <p className="mt-3 text-xs text-muted">
+              TypeSafe AI bills Jev per input token. The <Link href="/odds" className="underline hover:text-accent">odds</Link> are
+              not an agent and not a session, so this cost is not in the totals above.
+            </p>
+          </Card>
+        </div>
+      ) : null}
     </>
   );
 }
