@@ -2,6 +2,60 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-26 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: hit both `https://agent-fantasy-football-league.vercel.app/api/healthz`
+  and `https://league.jake-moses.com/api/healthz`, both `{"ok":true,"lastTickAt":"2026-09-26T13:15:31.542Z"}`,
+  seconds old at request time.
+- **`health` table**: `cron.tick`/`sessions.sweep` seconds old. The same
+  tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades`
+  still carry the since-fixed 2026-08-29 `last_error` under a current
+  `last_success_at`; `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, unchanged since 2026-09-01/22, non-blocking per
+  §13.4 (Sleeper primary healthy — `sleeper.stats` last succeeded
+  2026-09-26T12:45). `current_week` is 3, `phase` regular; finalization
+  last ran on schedule 2026-09-22T08:00:37 (the prior Tuesday; no Tuesday
+  has fallen since), no `stats.finalize` watchdog error. `email.send` last
+  succeeded 2026-09-22T15:30, unchanged (no digest needed since). No new
+  `last_error` on any key.
+- **`scheduled_jobs`**: 221 `due`, 2051 `done`, the same 6 `failed` rows
+  from 2026-08-29/30 unchanged (retired `ingest.fp_*` and the
+  `digest.weekly` `toFixed` bug); none `due`/`claimed` past `due_at` by
+  15+ minutes.
+- **Sessions**: none queued past `due_at` by 15+ minutes (checked against
+  each queued row's own `context.due_at`, not `created_at` — a
+  `lineup_check` legitimately sits `queued` for days ahead of its kickoff
+  window), none `running`, none `failed`/`timed_out` since the last sweep
+  — the most recent failure is still session 4533 (team 9 `board_reply`,
+  a retryable `AI_StreamProviderError`), already recorded 2026-09-25.
+- **Session logs (96 h sample)**: no session with 3+ identical `error`
+  events (only 2 `error`-type events total in the window, in different
+  sessions); no session with 4+ identical repeated tool calls beyond a
+  multi-player research pass (`search_web`/`player_research`/
+  `get_free_agents` topping out at 13, 11 and 7 calls respectively,
+  spread across distinct players/queries within `lineup_check`,
+  `post_waivers`, `trade_response` and `self_check_in` sessions — normal
+  for those kinds); no duration outlier past a `kind`'s normal range
+  (`lineup_check` max still 11.14 min from session 4218, unchanged;
+  `trade_response` max 9.80 min; `weekly_review` max 9.78 min; everything
+  else under 8 min). One new-but-benign item: session 4525 (team 2,
+  `post_waivers`, 2026-09-23) logged a `closing_step` error
+  (`GatewayInternalServerError: Assistant message must have either
+  content or tool_calls, but not none.`) but the session itself
+  `succeeded` with `error` null and only 4 tool calls — a self-recovered
+  retry, not a stall or a user-visible failure. Not previously called out
+  in the build log; recorded here for the record, no action needed.
+- **Vercel**: production deployment `dpl_6oyVqKxLbQVrtA1LNyedwadxKkAQ`
+  still `READY` on `main`@`615217d` (#62) — every commit after it,
+  including today's `main`@`6cc7b04` (#71, docs-only), correctly shows
+  `CANCELED` from the ignore-build rule, matching the repo's `main` at
+  check time. `get_runtime_errors` (24 h) returned no runtime errors.
+
+No code change. No questions for Jake.
+
 ## 2026-09-25 — Discount scan: nothing to take
 
 Eighth scheduled re-run of Jake's "any of the twelve models (or the reporter)
