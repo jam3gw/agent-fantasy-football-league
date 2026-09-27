@@ -2,6 +2,73 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-27 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: hit both `https://agent-fantasy-football-league.vercel.app/api/healthz`
+  and `https://league.jake-moses.com/api/healthz`, both `{"ok":true,"lastTickAt":"2026-09-27T13:12:31.331Z"}`,
+  seconds old at request time.
+- **`health` table**: `cron.tick`/`sessions.sweep` seconds old. The same
+  tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades`
+  still carry the since-fixed 2026-08-29 `last_error` under a current
+  `last_success_at`; `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, unchanged since 2026-09-01/22, non-blocking per
+  §13.4 (Sleeper primary healthy — `sleeper.stats` last succeeded
+  2026-09-27T12:45). `current_week` is 3, `phase` regular; finalization
+  last ran on schedule 2026-09-22T08:00:37 (the prior Tuesday; no Tuesday
+  has fallen since), no `stats.finalize` watchdog error. `email.send` last
+  succeeded 2026-09-22T15:30, unchanged (no digest needed since). No new
+  `last_error` on any key.
+- **`scheduled_jobs`**: 154 `due`, 2153 `done`, the same 6 `failed` rows
+  from 2026-08-29/30 unchanged (retired `ingest.fp_*` and the
+  `digest.weekly` `toFixed` bug); none `due`/`claimed` past `due_at` by
+  15+ minutes.
+- **Sessions**: none queued past `due_at` by 15+ minutes (checked against
+  each queued row's own `context.due_at`, not `created_at`), none
+  `running`, none `failed`/`timed_out` in the last 96 h — the most recent
+  failure is still session 4533 (team 9 `board_reply`, a retryable
+  `AI_StreamProviderError`, self-recovered as its requeue, session 4535),
+  already recorded 2026-09-25. Informational only: the most recent session
+  start in the whole table is 2026-09-25T22:20:31Z (id 4771) — a ~39 h
+  quiet stretch with zero new sessions, longer than the intra-day cadence
+  seen 9/23–9/25. Session kinds here are event-triggered (board replies,
+  trades, lineup checks) rather than continuous and the next scheduled
+  `waivers.run` isn't due until 2026-09-29T08:30Z, so this reads as a
+  quiet stretch, not a stall; no queued/failed/stuck row correlates with
+  it. Flagged for the record, no action taken.
+- **Session logs (96 h sample)**: no session with 3+ identical `error`
+  events anywhere in the window; no session with a tool called 3+ times
+  with identical arguments (the max same-tool-different-args count was 13,
+  session 4216, `search_web` across distinct players in a `lineup_check` —
+  at the documented normal ceiling, not a loop). Duration outliers were
+  all explained by legitimate multi-step work, not stalls: session 4218
+  (`lineup_check`, team 10, 668 s) ran five distinct injury-status
+  searches before `set_lineup`; session 4743 (`trade_response`, team 10,
+  588 s) retried `write_decision_log` three times against its 800-char
+  limit, shortening the text each time until it fit; session 4524
+  (`post_waivers`, team 9, 362 s, 26 tool calls) was a broad but
+  non-repeating claims/trade/research pass.
+- **Vercel `[workflow]` queue-handler retry**: `get_runtime_errors` (24 h)
+  showed one new but benign item — a queue-handler retry ("fetch failed",
+  "stream timeout after 30000") on `/.well-known/workflow/v1/flow`, two
+  occurrences at 2026-09-27T06:15:31Z and 06:20:36Z, same message id,
+  self-retried per its own log line. Checked against the session table:
+  nothing was running anywhere near that window (consistent with the 39 h
+  quiet stretch above), so nothing could have failed or timed out because
+  of it. Same benign, self-healing pattern as prior sweeps' `[workflow]`
+  entries (ThrottleError, 800 s step timeouts) — recorded, not actioned.
+- **Vercel**: production deployment `dpl_6oyVqKxLbQVrtA1LNyedwadxKkAQ`
+  still `READY` on `main`@`615217d` (#62) — every commit after it,
+  including today's `main`@`aa83495` (#72, docs-only), correctly shows
+  `CANCELED` from the ignore-build rule, matching the repo's `main` at
+  check time. No `BLOCKED`/`ERROR` deployment newer than the ones already
+  on record. One open PR, #65 (`feat: matchup odds from four methods`),
+  not part of this sweep and left untouched.
+
+No code change. No questions for Jake.
+
 ## 2026-09-26 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
