@@ -69,6 +69,62 @@ Scheduled production health check against the full runbook checklist.
 
 No code change. No questions for Jake.
 
+## 2026-09-27 — Discount scan: nothing to take
+
+Ninth scheduled re-run of Jake's "any of the twelve models (or the reporter)
+cheaper to run at the same weights" question, after 2026-09-05, 09-16, 09-19,
+09-20, 09-21, 09-22, 09-23, 09-24, 09-25. Pulled the live catalog directly
+(`GET https://ai-gateway.vercel.sh/v1/models`, 391 entries, up from 390 on
+09-25) and diffed it against both `MODEL_PRICE_SEED` and the current
+`LEAGUE_MODELS`/`REPORTER_MODEL` ids in `packages/agent/src/models.ts`. Also
+searched the open web for price-cut announcements on each seated model
+family.
+
+**Nothing to change.** All twelve league models plus the reporter price
+exactly as stored: Fable 5 10/50, Mistral Large 3 0.5/1.5, Sonnet 5 2/10
+(team and reporter), GPT-5.6 Terra 2/12, Gemini 3.1 Pro 2/12, Grok 4.6 2/6,
+DeepSeek V4-Pro 0.66/1.98, Kimi K3 3/15, Qwen 3.8-Max 2/6, Muse Spark 1.2
+Contributor 0.1/0.2, GLM-5.3 1.4/4.4. Same one exception as every prior scan,
+still not a discount: `openai/gpt-5.6-sol` lists at 4/20, double
+`MODEL_PRICE_SEED`'s 2/10. The open web now gives the full story via OpenAI's
+own community post: Sol's list price is $5/$30, and the 4/20 rate is a
+promotional "20% input / 33% output" cut off that list price running through
+at least November 21, 2026 — a real discount, but off a higher undiscounted
+rate than what we store, so it moves the wrong direction relative to our
+seated 2/10 and isn't a path back toward it. Already carried into
+`model_prices` by the weekly `prices.sync` job; nothing for this check to act
+on.
+
+Catalog-wide grep for `promo`/`discount`/`-off`/`free`/`contributor` across
+all 391 entries: the same four non-matches as 09-24/09-25 —
+`meta/muse-spark-1.3-contributor` (version bump of the tier slot 11 already
+runs, same $0.10/$0.20 — confirmed again below, still not a discount),
+`inclusionai/ling-3.0-flash-sante-free` and `poolside/laguna-s-2.1-free`
+(models nobody is seated on). No `-promo` entry appeared; `zai/glm-5.3-promo-50`
+remains absent. The 390→391 delta is elsewhere in the catalog, unrelated to
+any seated model or discount keyword.
+
+Same-prefix sibling check, same method as prior scans — every sibling is a
+newer/older version, a speed tier, or a different-weights model, not a
+discount on a seated id. One item resolved further this time: `spacexai/grok-4.7`
+still lists at 1.2/3.6 in the gateway catalog against the seated 4.6's 2/6 (the
+mismatch flagged 09-22 and called stale/launch-window pricing on 09-23) — this
+scan's web search adds a direct confirmation from an xAI-pricing tracking site
+that Grok 4.7 "keeps Grok 4.6's rates at both context tiers," i.e. official
+billing is 2/6 for both, same as the seated model. So 4.7 would be a
+same-price version upgrade for slot 7, not a cheaper one — worth a note for
+whenever Jake next touches that seat, but out of scope for a *discount* scan
+by his own framing. `openai/gpt-5.6-luna` (0.20/1.20) is still Luna, not the
+seated Sol/Terra — different weights, already out of scope. The readfrog.app
+promo claim from 09-24/09-25 (GLM-5.3 20% off, DeepSeek 30% off) is now
+confirmed expired by a fresh search: the deal window was September 16–25,
+already closed before today's scan, consistent with it never having a
+matching gateway catalog id.
+
+No code change. No questions for Jake beyond the standing `prices.sync` watch
+item (unchanged) and the Grok 4.7 same-price-upgrade note above (informational
+only, not a cost question).
+
 ## 2026-09-26 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
