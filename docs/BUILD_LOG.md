@@ -2,6 +2,129 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-27 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: hit both `https://agent-fantasy-football-league.vercel.app/api/healthz`
+  and `https://league.jake-moses.com/api/healthz`, both `{"ok":true,"lastTickAt":"2026-09-27T13:12:31.331Z"}`,
+  seconds old at request time.
+- **`health` table**: `cron.tick`/`sessions.sweep` seconds old. The same
+  tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades`
+  still carry the since-fixed 2026-08-29 `last_error` under a current
+  `last_success_at`; `nflverse.player_stats`/`stats.audit` still 404 on
+  `player_stats_2026.csv`, unchanged since 2026-09-01/22, non-blocking per
+  §13.4 (Sleeper primary healthy — `sleeper.stats` last succeeded
+  2026-09-27T12:45). `current_week` is 3, `phase` regular; finalization
+  last ran on schedule 2026-09-22T08:00:37 (the prior Tuesday; no Tuesday
+  has fallen since), no `stats.finalize` watchdog error. `email.send` last
+  succeeded 2026-09-22T15:30, unchanged (no digest needed since). No new
+  `last_error` on any key.
+- **`scheduled_jobs`**: 154 `due`, 2153 `done`, the same 6 `failed` rows
+  from 2026-08-29/30 unchanged (retired `ingest.fp_*` and the
+  `digest.weekly` `toFixed` bug); none `due`/`claimed` past `due_at` by
+  15+ minutes.
+- **Sessions**: none queued past `due_at` by 15+ minutes (checked against
+  each queued row's own `context.due_at`, not `created_at`), none
+  `running`, none `failed`/`timed_out` in the last 96 h — the most recent
+  failure is still session 4533 (team 9 `board_reply`, a retryable
+  `AI_StreamProviderError`, self-recovered as its requeue, session 4535),
+  already recorded 2026-09-25. Informational only: the most recent session
+  start in the whole table is 2026-09-25T22:20:31Z (id 4771) — a ~39 h
+  quiet stretch with zero new sessions, longer than the intra-day cadence
+  seen 9/23–9/25. Session kinds here are event-triggered (board replies,
+  trades, lineup checks) rather than continuous and the next scheduled
+  `waivers.run` isn't due until 2026-09-29T08:30Z, so this reads as a
+  quiet stretch, not a stall; no queued/failed/stuck row correlates with
+  it. Flagged for the record, no action taken.
+- **Session logs (96 h sample)**: no session with 3+ identical `error`
+  events anywhere in the window; no session with a tool called 3+ times
+  with identical arguments (the max same-tool-different-args count was 13,
+  session 4216, `search_web` across distinct players in a `lineup_check` —
+  at the documented normal ceiling, not a loop). Duration outliers were
+  all explained by legitimate multi-step work, not stalls: session 4218
+  (`lineup_check`, team 10, 668 s) ran five distinct injury-status
+  searches before `set_lineup`; session 4743 (`trade_response`, team 10,
+  588 s) retried `write_decision_log` three times against its 800-char
+  limit, shortening the text each time until it fit; session 4524
+  (`post_waivers`, team 9, 362 s, 26 tool calls) was a broad but
+  non-repeating claims/trade/research pass.
+- **Vercel `[workflow]` queue-handler retry**: `get_runtime_errors` (24 h)
+  showed one new but benign item — a queue-handler retry ("fetch failed",
+  "stream timeout after 30000") on `/.well-known/workflow/v1/flow`, two
+  occurrences at 2026-09-27T06:15:31Z and 06:20:36Z, same message id,
+  self-retried per its own log line. Checked against the session table:
+  nothing was running anywhere near that window (consistent with the 39 h
+  quiet stretch above), so nothing could have failed or timed out because
+  of it. Same benign, self-healing pattern as prior sweeps' `[workflow]`
+  entries (ThrottleError, 800 s step timeouts) — recorded, not actioned.
+- **Vercel**: production deployment `dpl_6oyVqKxLbQVrtA1LNyedwadxKkAQ`
+  still `READY` on `main`@`615217d` (#62) — every commit after it,
+  including today's `main`@`aa83495` (#72, docs-only), correctly shows
+  `CANCELED` from the ignore-build rule, matching the repo's `main` at
+  check time. No `BLOCKED`/`ERROR` deployment newer than the ones already
+  on record. One open PR, #65 (`feat: matchup odds from four methods`),
+  not part of this sweep and left untouched.
+
+No code change. No questions for Jake.
+
+## 2026-09-27 — Discount scan: nothing to take
+
+Ninth scheduled re-run of Jake's "any of the twelve models (or the reporter)
+cheaper to run at the same weights" question, after 2026-09-05, 09-16, 09-19,
+09-20, 09-21, 09-22, 09-23, 09-24, 09-25. Pulled the live catalog directly
+(`GET https://ai-gateway.vercel.sh/v1/models`, 391 entries, up from 390 on
+09-25) and diffed it against both `MODEL_PRICE_SEED` and the current
+`LEAGUE_MODELS`/`REPORTER_MODEL` ids in `packages/agent/src/models.ts`. Also
+searched the open web for price-cut announcements on each seated model
+family.
+
+**Nothing to change.** All twelve league models plus the reporter price
+exactly as stored: Fable 5 10/50, Mistral Large 3 0.5/1.5, Sonnet 5 2/10
+(team and reporter), GPT-5.6 Terra 2/12, Gemini 3.1 Pro 2/12, Grok 4.6 2/6,
+DeepSeek V4-Pro 0.66/1.98, Kimi K3 3/15, Qwen 3.8-Max 2/6, Muse Spark 1.2
+Contributor 0.1/0.2, GLM-5.3 1.4/4.4. Same one exception as every prior scan,
+still not a discount: `openai/gpt-5.6-sol` lists at 4/20, double
+`MODEL_PRICE_SEED`'s 2/10. The open web now gives the full story via OpenAI's
+own community post: Sol's list price is $5/$30, and the 4/20 rate is a
+promotional "20% input / 33% output" cut off that list price running through
+at least November 21, 2026 — a real discount, but off a higher undiscounted
+rate than what we store, so it moves the wrong direction relative to our
+seated 2/10 and isn't a path back toward it. Already carried into
+`model_prices` by the weekly `prices.sync` job; nothing for this check to act
+on.
+
+Catalog-wide grep for `promo`/`discount`/`-off`/`free`/`contributor` across
+all 391 entries: the same four non-matches as 09-24/09-25 —
+`meta/muse-spark-1.3-contributor` (version bump of the tier slot 11 already
+runs, same $0.10/$0.20 — confirmed again below, still not a discount),
+`inclusionai/ling-3.0-flash-sante-free` and `poolside/laguna-s-2.1-free`
+(models nobody is seated on). No `-promo` entry appeared; `zai/glm-5.3-promo-50`
+remains absent. The 390→391 delta is elsewhere in the catalog, unrelated to
+any seated model or discount keyword.
+
+Same-prefix sibling check, same method as prior scans — every sibling is a
+newer/older version, a speed tier, or a different-weights model, not a
+discount on a seated id. One item resolved further this time: `spacexai/grok-4.7`
+still lists at 1.2/3.6 in the gateway catalog against the seated 4.6's 2/6 (the
+mismatch flagged 09-22 and called stale/launch-window pricing on 09-23) — this
+scan's web search adds a direct confirmation from an xAI-pricing tracking site
+that Grok 4.7 "keeps Grok 4.6's rates at both context tiers," i.e. official
+billing is 2/6 for both, same as the seated model. So 4.7 would be a
+same-price version upgrade for slot 7, not a cheaper one — worth a note for
+whenever Jake next touches that seat, but out of scope for a *discount* scan
+by his own framing. `openai/gpt-5.6-luna` (0.20/1.20) is still Luna, not the
+seated Sol/Terra — different weights, already out of scope. The readfrog.app
+promo claim from 09-24/09-25 (GLM-5.3 20% off, DeepSeek 30% off) is now
+confirmed expired by a fresh search: the deal window was September 16–25,
+already closed before today's scan, consistent with it never having a
+matching gateway catalog id.
+
+No code change. No questions for Jake beyond the standing `prices.sync` watch
+item (unchanged) and the Grok 4.7 same-price-upgrade note above (informational
+only, not a cost question).
+
 ## 2026-09-26 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
