@@ -2,54 +2,87 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
-## 2026-09-28 — Model discount sweep (§8.1/§8.7): one actionable find
+## 2026-09-28 — Discount scan: nothing to take (correcting an earlier draft of this entry)
 
-Scheduled routine ("Daily Model Discount Searches"). Pulled the live catalog
-(`GET https://ai-gateway.vercel.sh/v1/models`, no auth, 369+ models) and
-compared every one of the 12 running model IDs plus each provider's newest
-releases against `MODEL_PRICE_SEED` (`packages/agent/src/models.ts`).
+Tenth scheduled re-run of Jake's "any of the twelve models (or the reporter)
+cheaper to run at the same weights" question, after 2026-09-05, 09-16,
+09-19–09-27. Pulled the live catalog directly
+(`GET https://ai-gateway.vercel.sh/v1/models`, 391 entries, same count as
+09-27) and diffed it against `MODEL_PRICE_SEED` and the current
+`LEAGUE_MODELS`/`REPORTER_MODEL` ids in `packages/agent/src/models.ts`.
 
-- **Base prices for all 12 current model IDs are unchanged** from the
-  2026-08-28 capture already in `model_prices` — `prices.sync` has nothing to
-  correct.
-- **Slot 7 (Grok 4.6, team 7) has a cheaper same-tier successor**:
-  `spacexai/grok-4.7`, released 2026-09-21 (one week old), same 500k context,
-  priced $1.20 / $3.60 per 1M in/out vs. the running $2.00 / $6.00 — 40% off
-  input, 40% off output. Same naming lineage as the 4.3→4.5→4.6 progression
-  already in the model's own history, not a distilled/mini variant, so this
-  reads as a genuine successor rather than a capability step-down. Not
-  swapped — a mid-season model change changes what team 7's agent actually
-  is, which is a commissioner call (§8.1, admin swap tool), and no smoke
-  test has run against 4.7 yet. Recommend running the smoke test against
-  `spacexai/grok-4.7` and swapping if it passes.
-- **Lower-confidence, not recommended without evaluation**: `zai/glm-5.3-flashx`
-  ($0.37/$1.25, released 2026-09-18) is far cheaper than the running
-  `zai/glm-5.3` ($1.40/$4.40), and `deepseek/deepseek-v4.1-flash`
-  ($0.30/$1.20) undercuts `deepseek/deepseek-v4-pro` ($0.66/$1.98), but both
-  are named "flash" variants (smaller/faster class), not confirmed
-  equivalents of the pro/full-size models they'd replace — same shape of
-  risk as the glm-5.3-promo-50 entry that got pulled from the catalog
-  2026-09-09 (see 2026-09-09 entry). Worth a smoke-test comparison, not a
-  blind swap.
-- **No swap needed, parity only**: `anthropic/claude-fable-5.1` and
-  `openai/gpt-6-sol` are newer generations priced identically to the fable-5
-  and gpt-5.6-sol seats already running — an upgrade opportunity, not a cost
-  discount.
-- **Not model swaps, but available today at no model change**: OpenAI
-  (`gpt-5.6-sol`/`gpt-5.6-terra`) and Google (`gemini-3.1-pro-preview`) both
-  expose a gateway `flex` service tier at roughly half the standard price on
-  the *same* model ID, trading response latency for cost. Not applicable to
-  draft-clock or other time-boxed sessions; could be worth it for
-  non-time-critical kinds (scratchpad, board replies, reporter posts) if the
-  AI SDK gateway provider supports selecting it. Not implemented — needs a
-  decision on which session kinds can tolerate the latency trade-off before
-  touching `packages/agent`.
+**Nothing to change.** All twelve league models plus the reporter price
+exactly as stored, matching every scan back to 09-05.
 
-### Questions for Jake
+This entry replaces a first draft (opened as PR #76) that read the gateway
+catalog's `spacexai/grok-4.7` listing — still 1.2/3.6 today, unchanged from
+09-21 — at face value and flagged it as a genuine 40%-cheaper successor to
+the seated `grok-4.6` (team 7). That draft skipped the web-search half of
+this routine and so missed what the 09-22/09-23/09-27 scans already
+established: the catalog figure is stale/non-billing, and 4.7's real price
+is $2/$6, identical to 4.6's. Re-confirmed today by two independent sources
+(xAI's own pricing docs via eesel.ai's summary, and a second tracker,
+aigrow.gg, both showing Grok 4.7 at $2/$6) — so 4.7 remains a same-price
+version upgrade for slot 7, not a discount, exactly as recorded 09-27. A
+notification already went to Jake citing the draft's 40%-off claim before
+this correction was caught; told him directly it was wrong. Apologies for
+the noise.
+Also re-confirmed: the readfrog.app GLM-5.3/DeepSeek promo (Sept 16–25)
+is still expired, and no new `-promo`/`-off`/`free`/`contributor` id has
+appeared for any seated model's provider.
 
-- **Swap team 7 (Grok 4.6 → Grok 4.7)?** 40% cheaper, same context window,
-  looks like a straight successor. I can run the smoke test and swap via
-  `/admin/teams` if you'd like — say the word, or I'll leave it as-is.
+No code change. No open questions for Jake beyond the standing
+`prices.sync` watch item.
+
+## 2026-09-28 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: hit both `https://agent-fantasy-football-league.vercel.app/api/healthz`
+  and `https://league.jake-moses.com/api/healthz`, both `{"ok":true,"lastTickAt":"2026-09-28T13:19:31.356Z"}`,
+  seconds old at request time.
+- **`health` table**: `cron.tick`/`sessions.sweep`/`db.size`/`gateway.credits` seconds
+  old. The same tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades` still carry
+  the since-fixed 2026-08-29 `last_error` under a current `last_success_at`;
+  `nflverse.player_stats`/`stats.audit` still 404 on `player_stats_2026.csv`,
+  unchanged since 2026-09-01/22, non-blocking per §13.4 (Sleeper primary healthy —
+  `sleeper.stats` last succeeded 2026-09-28T04:50). `current_week` is 3, `phase`
+  regular, `league_settings.updated_at` unchanged since 2026-09-22T08:00:37.
+  `email.send` last succeeded 2026-09-22T15:30, unchanged (no digest needed
+  since). No new `last_error` on any key; no new `cost_alarms` row since the
+  last sweep.
+- **`scheduled_jobs`**: 103 `due`, 2238 `done`, the same 6 `failed` rows (ids 59,
+  60, 164, 166, 167, 449 — the retired `ingest.fp_*` rows and the `digest.weekly`
+  `toFixed` bug) unchanged since 2026-08-29/30; none `due`/`claimed` past `due_at`
+  by 15+ minutes.
+- **Sessions**: none queued past their own `context.due_at` by 15+ minutes, none
+  `running`, none `failed`/`timed_out` since the last sweep. Only two sessions
+  ran in the window (`self_check_in` for teams 10 and 12, 149 s/9 tool calls and
+  37 s/6 tool calls, both `succeeded` via `ending_tool`) — the most recent start
+  before that is still 2026-09-25T22:20:31Z, so the ~39 h quiet stretch flagged
+  09-27 continued a bit further before those two ran. The eleven other rows
+  still sitting `queued` (nine `lineup_check` from the 2026-09-22 week-3 batch,
+  one more from 2026-09-23, and two `self_check_in`, ids 4255–4263, 4508, 4526,
+  4527) were checked individually against their `context.due_at`/`deadline_at`:
+  every one is a legitimately future-dated slot (soonest is team 10's
+  `self_check_in`, due 2026-09-28T13:30Z, ~11 minutes after this sweep ran),
+  not a stall — matching the batch-scheduling pattern already on record.
+- **Session logs**: the two sessions that ran this window had zero error events
+  and no repeated identical tool call, well inside the normal ceiling — nothing
+  to flag.
+- **Vercel**: production deployment `dpl_6oyVqKxLbQVrtA1LNyedwadxKkAQ` still
+  `READY` on `main`@`615217d` (#62); today's `main`@`0363fe7` (#74, docs-only)
+  correctly shows `CANCELED` from the ignore-build rule. No `BLOCKED`/`ERROR`
+  deployment newer than the ones already on record. `get_runtime_errors` (24 h)
+  showed only the same two known-benign AI SDK warning groups (non-OpenAI
+  reasoning parts skipped for `meta/muse-spark-1.2-contributor`; the "turn off
+  warning logging" notice), both on `/.well-known/workflow/v1/step`, unchanged
+  in pattern from prior sweeps. One open PR, #65 (`feat: matchup odds from four
+  methods`), explicitly held for Jake ("Do not merge until Jake says so") and
+  not part of this sweep — left untouched.
+
+No code change. No questions for Jake.
 
 ## 2026-09-27 — Operational sweep: all green, no code change
 
