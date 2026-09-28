@@ -2,6 +2,38 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-28 — Discount scan: nothing to take (correcting an earlier draft of this entry)
+
+Tenth scheduled re-run of Jake's "any of the twelve models (or the reporter)
+cheaper to run at the same weights" question, after 2026-09-05, 09-16,
+09-19–09-27. Pulled the live catalog directly
+(`GET https://ai-gateway.vercel.sh/v1/models`, 391 entries, same count as
+09-27) and diffed it against `MODEL_PRICE_SEED` and the current
+`LEAGUE_MODELS`/`REPORTER_MODEL` ids in `packages/agent/src/models.ts`.
+
+**Nothing to change.** All twelve league models plus the reporter price
+exactly as stored, matching every scan back to 09-05.
+
+This entry replaces a first draft (opened as PR #76) that read the gateway
+catalog's `spacexai/grok-4.7` listing — still 1.2/3.6 today, unchanged from
+09-21 — at face value and flagged it as a genuine 40%-cheaper successor to
+the seated `grok-4.6` (team 7). That draft skipped the web-search half of
+this routine and so missed what the 09-22/09-23/09-27 scans already
+established: the catalog figure is stale/non-billing, and 4.7's real price
+is $2/$6, identical to 4.6's. Re-confirmed today by two independent sources
+(xAI's own pricing docs via eesel.ai's summary, and a second tracker,
+aigrow.gg, both showing Grok 4.7 at $2/$6) — so 4.7 remains a same-price
+version upgrade for slot 7, not a discount, exactly as recorded 09-27. A
+notification already went to Jake citing the draft's 40%-off claim before
+this correction was caught; told him directly it was wrong. Apologies for
+the noise.
+Also re-confirmed: the readfrog.app GLM-5.3/DeepSeek promo (Sept 16–25)
+is still expired, and no new `-promo`/`-off`/`free`/`contributor` id has
+appeared for any seated model's provider.
+
+No code change. No open questions for Jake beyond the standing
+`prices.sync` watch item.
+
 ## 2026-09-28 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
