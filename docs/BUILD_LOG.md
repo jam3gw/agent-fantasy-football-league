@@ -2,6 +2,56 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-28 — Operational sweep: all green, no code change
+
+Scheduled production health check against the full runbook checklist.
+
+- **`/api/healthz`**: hit both `https://agent-fantasy-football-league.vercel.app/api/healthz`
+  and `https://league.jake-moses.com/api/healthz`, both `{"ok":true,"lastTickAt":"2026-09-28T13:19:31.356Z"}`,
+  seconds old at request time.
+- **`health` table**: `cron.tick`/`sessions.sweep`/`db.size`/`gateway.credits` seconds
+  old. The same tracked, non-blocking conditions persist unchanged: `tick.games`/
+  `tick.live_scores`/`tick.retries`/`tick.stall_watchdog`/`tick.trades` still carry
+  the since-fixed 2026-08-29 `last_error` under a current `last_success_at`;
+  `nflverse.player_stats`/`stats.audit` still 404 on `player_stats_2026.csv`,
+  unchanged since 2026-09-01/22, non-blocking per §13.4 (Sleeper primary healthy —
+  `sleeper.stats` last succeeded 2026-09-28T04:50). `current_week` is 3, `phase`
+  regular, `league_settings.updated_at` unchanged since 2026-09-22T08:00:37.
+  `email.send` last succeeded 2026-09-22T15:30, unchanged (no digest needed
+  since). No new `last_error` on any key; no new `cost_alarms` row since the
+  last sweep.
+- **`scheduled_jobs`**: 103 `due`, 2238 `done`, the same 6 `failed` rows (ids 59,
+  60, 164, 166, 167, 449 — the retired `ingest.fp_*` rows and the `digest.weekly`
+  `toFixed` bug) unchanged since 2026-08-29/30; none `due`/`claimed` past `due_at`
+  by 15+ minutes.
+- **Sessions**: none queued past their own `context.due_at` by 15+ minutes, none
+  `running`, none `failed`/`timed_out` since the last sweep. Only two sessions
+  ran in the window (`self_check_in` for teams 10 and 12, 149 s/9 tool calls and
+  37 s/6 tool calls, both `succeeded` via `ending_tool`) — the most recent start
+  before that is still 2026-09-25T22:20:31Z, so the ~39 h quiet stretch flagged
+  09-27 continued a bit further before those two ran. The eleven other rows
+  still sitting `queued` (nine `lineup_check` from the 2026-09-22 week-3 batch,
+  one more from 2026-09-23, and two `self_check_in`, ids 4255–4263, 4508, 4526,
+  4527) were checked individually against their `context.due_at`/`deadline_at`:
+  every one is a legitimately future-dated slot (soonest is team 10's
+  `self_check_in`, due 2026-09-28T13:30Z, ~11 minutes after this sweep ran),
+  not a stall — matching the batch-scheduling pattern already on record.
+- **Session logs**: the two sessions that ran this window had zero error events
+  and no repeated identical tool call, well inside the normal ceiling — nothing
+  to flag.
+- **Vercel**: production deployment `dpl_6oyVqKxLbQVrtA1LNyedwadxKkAQ` still
+  `READY` on `main`@`615217d` (#62); today's `main`@`0363fe7` (#74, docs-only)
+  correctly shows `CANCELED` from the ignore-build rule. No `BLOCKED`/`ERROR`
+  deployment newer than the ones already on record. `get_runtime_errors` (24 h)
+  showed only the same two known-benign AI SDK warning groups (non-OpenAI
+  reasoning parts skipped for `meta/muse-spark-1.2-contributor`; the "turn off
+  warning logging" notice), both on `/.well-known/workflow/v1/step`, unchanged
+  in pattern from prior sweeps. One open PR, #65 (`feat: matchup odds from four
+  methods`), explicitly held for Jake ("Do not merge until Jake says so") and
+  not part of this sweep — left untouched.
+
+No code change. No questions for Jake.
+
 ## 2026-09-27 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
