@@ -2,6 +2,55 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-09-28 — Model discount sweep (§8.1/§8.7): one actionable find
+
+Scheduled routine ("Daily Model Discount Searches"). Pulled the live catalog
+(`GET https://ai-gateway.vercel.sh/v1/models`, no auth, 369+ models) and
+compared every one of the 12 running model IDs plus each provider's newest
+releases against `MODEL_PRICE_SEED` (`packages/agent/src/models.ts`).
+
+- **Base prices for all 12 current model IDs are unchanged** from the
+  2026-08-28 capture already in `model_prices` — `prices.sync` has nothing to
+  correct.
+- **Slot 7 (Grok 4.6, team 7) has a cheaper same-tier successor**:
+  `spacexai/grok-4.7`, released 2026-09-21 (one week old), same 500k context,
+  priced $1.20 / $3.60 per 1M in/out vs. the running $2.00 / $6.00 — 40% off
+  input, 40% off output. Same naming lineage as the 4.3→4.5→4.6 progression
+  already in the model's own history, not a distilled/mini variant, so this
+  reads as a genuine successor rather than a capability step-down. Not
+  swapped — a mid-season model change changes what team 7's agent actually
+  is, which is a commissioner call (§8.1, admin swap tool), and no smoke
+  test has run against 4.7 yet. Recommend running the smoke test against
+  `spacexai/grok-4.7` and swapping if it passes.
+- **Lower-confidence, not recommended without evaluation**: `zai/glm-5.3-flashx`
+  ($0.37/$1.25, released 2026-09-18) is far cheaper than the running
+  `zai/glm-5.3` ($1.40/$4.40), and `deepseek/deepseek-v4.1-flash`
+  ($0.30/$1.20) undercuts `deepseek/deepseek-v4-pro` ($0.66/$1.98), but both
+  are named "flash" variants (smaller/faster class), not confirmed
+  equivalents of the pro/full-size models they'd replace — same shape of
+  risk as the glm-5.3-promo-50 entry that got pulled from the catalog
+  2026-09-09 (see 2026-09-09 entry). Worth a smoke-test comparison, not a
+  blind swap.
+- **No swap needed, parity only**: `anthropic/claude-fable-5.1` and
+  `openai/gpt-6-sol` are newer generations priced identically to the fable-5
+  and gpt-5.6-sol seats already running — an upgrade opportunity, not a cost
+  discount.
+- **Not model swaps, but available today at no model change**: OpenAI
+  (`gpt-5.6-sol`/`gpt-5.6-terra`) and Google (`gemini-3.1-pro-preview`) both
+  expose a gateway `flex` service tier at roughly half the standard price on
+  the *same* model ID, trading response latency for cost. Not applicable to
+  draft-clock or other time-boxed sessions; could be worth it for
+  non-time-critical kinds (scratchpad, board replies, reporter posts) if the
+  AI SDK gateway provider supports selecting it. Not implemented — needs a
+  decision on which session kinds can tolerate the latency trade-off before
+  touching `packages/agent`.
+
+### Questions for Jake
+
+- **Swap team 7 (Grok 4.6 → Grok 4.7)?** 40% cheaper, same context window,
+  looks like a straight successor. I can run the smoke test and swap via
+  `/admin/teams` if you'd like — say the word, or I'll leave it as-is.
+
 ## 2026-09-27 — Operational sweep: all green, no code change
 
 Scheduled production health check against the full runbook checklist.
