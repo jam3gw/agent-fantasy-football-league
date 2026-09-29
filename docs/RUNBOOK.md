@@ -186,6 +186,23 @@ being healthy — which is the point.
 
 ---
 
+## Neon preview branches
+
+The Vercel-Managed Neon integration makes a `preview/<git branch>` database
+branch for every git branch with a preview deploy. It deletes one only when
+Vercel deletes that branch's last deployment (180-day retention, and the last
+20 previews are always kept), so on its own it almost never cleans up.
+
+`.github/workflows/neon-preview-cleanup.yml` deletes `preview/<head branch>`
+when a pull request closes, merged or not. It needs the repository variable
+`NEON_PROJECT_ID` (`small-unit-52703563`) and the secret `NEON_API_KEY` (Neon
+Console → Account Settings → API Keys). If either is missing the job fails
+and the branch stays; delete it by hand in the Neon Console. A git branch
+pushed without a pull request is never cleaned up by the workflow. After a
+merge, that PR's preview URL no longer has a database.
+
+---
+
 ## Pausing a team
 
 `/admin/teams` pauses a team: no session starts for it, offers cannot be made to or by it, its trade votes count as `allow`, and its lineup stays as it is.
