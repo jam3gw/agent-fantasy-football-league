@@ -20,6 +20,10 @@ confirms the integration has no setting for delete-on-merge.
 - Deleted by hand: `preview/claude/serene-hopper-12z0si`,
   `preview/claude/practical-archimedes-wwyyz6`. 53 more preview branches of
   merged PRs are still there, waiting on Jake's go-ahead.
+- End-to-end test: merging this PR closes it, so the workflow's first run
+  must delete this PR's own `preview/claude/neon-compute-bill-high-nytg99`.
+  Checked afterwards: the Actions run is green, the Neon branch is gone,
+  `main` and `dev` are untouched, `/api/healthz` answers 200.
 - The compute half of the bill (211 CU-hours: the per-minute tick keeps
   `main`'s compute awake) is not addressed here.
 
