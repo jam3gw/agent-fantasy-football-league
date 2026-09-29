@@ -6,7 +6,7 @@
 # previews. The daily routines open a new git branch each day, so branches
 # piled up and billed as extra branch-months.
 #
-# Needs repository variable NEON_PROJECT_ID and secret NEON_API_KEY.
+# Needs repository secrets NEON_PROJECT_ID and NEON_API_KEY.
 name: Cleanup Neon preview branch
 
 on:
@@ -23,6 +23,6 @@ jobs:
     steps:
       - uses: neondatabase/delete-branch-action@v3
         with:
-          project_id: ${{ vars.NEON_PROJECT_ID }}
+          project_id: ${{ secrets.NEON_PROJECT_ID }}
           branch: preview/${{ github.head_ref }}
           api_key: ${{ secrets.NEON_API_KEY }}

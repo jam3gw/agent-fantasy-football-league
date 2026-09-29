@@ -14,8 +14,8 @@ confirms the integration has no setting for delete-on-merge.
 - Added `.github/workflows/neon-preview-cleanup.yml`: on `pull_request`
   `closed`, `neondatabase/delete-branch-action@v3` deletes
   `preview/<head ref>`. `permissions: {}`; skipped for fork PRs. Free on a
-  public repo. Needs `vars.NEON_PROJECT_ID` and `secrets.NEON_API_KEY`, which
-  only Jake can add.
+  public repo. Reads `secrets.NEON_PROJECT_ID` and `secrets.NEON_API_KEY`;
+  Jake added both on 2026-09-29.
 - RUNBOOK: new "Neon preview branches" section.
 - Deleted by hand: `preview/claude/serene-hopper-12z0si`,
   `preview/claude/practical-archimedes-wwyyz6`. 53 more preview branches of
