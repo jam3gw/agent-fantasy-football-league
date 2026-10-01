@@ -7289,3 +7289,16 @@ past the scores. The anchor is now on the hero band. A source-level test
 two: nothing new.
 
 Checks: web lint, typecheck, and 513 web tests green.
+
+## 2026-10-01 — Production health sweep
+
+healthz 200 (last tick 13:07Z), production deploy READY, no failed or
+timed-out sessions in 24h, no queued session overdue (59 queued, earliest
+due 15:00Z), no running sessions, no failed jobs since the last sweep.
+Known and unchanged: `nflverse.player_stats` / `stats.audit` 404 on
+`player_stats_2026.csv`.
+
+Needs attention: `gateway.credits` reads $14.89, under the $15 alarm line
+(the alarm email already went out 04:14Z). Jake: the balance auto-tops-up
+to $25 once it falls under $8, so no manual top-up is needed; the $15 alarm
+is expected to keep firing until the balance crosses that threshold.
