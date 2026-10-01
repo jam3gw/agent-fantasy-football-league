@@ -7299,5 +7299,6 @@ Known and unchanged: `nflverse.player_stats` / `stats.audit` 404 on
 `player_stats_2026.csv`.
 
 Needs attention: `gateway.credits` reads $14.89, under the $15 alarm line
-(the alarm email already went out 04:14Z). At $0 every session fails; top
-up the AI Gateway balance.
+(the alarm email already went out 04:14Z). Jake: the balance auto-tops-up
+to $25 once it falls under $8, so no manual top-up is needed; the $15 alarm
+is expected to keep firing until the balance crosses that threshold.
