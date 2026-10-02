@@ -66,7 +66,7 @@ export const REPORTER_MODEL: LeagueModel = {
   provider: "anthropic",
 };
 
-/** Catalog list prices ($ per 1M tokens) captured 2026-08-28 — seeds `model_prices`. */
+/** Catalog list prices ($ per 1M tokens) refreshed 2026-10-02 from the live catalog — seeds `model_prices`. */
 export const MODEL_PRICE_SEED: Record<
   string,
   { input: number; output: number; cachedInput?: number; contextWindow: number }
@@ -78,7 +78,7 @@ export const MODEL_PRICE_SEED: Record<
   // fresh database.
   "mistral/mistral-large-3": { input: 0.5, output: 1.5, contextWindow: 256_000 },
   "anthropic/claude-sonnet-5": { input: 2, output: 10, cachedInput: 0.2, contextWindow: 1_000_000 },
-  "openai/gpt-5.6-sol": { input: 2, output: 10, cachedInput: 0.2, contextWindow: 1_050_000 },
+  "openai/gpt-5.6-sol": { input: 4, output: 20, cachedInput: 0.4, contextWindow: 1_050_000 },
   "openai/gpt-5.6-terra": { input: 2, output: 12, cachedInput: 0.2, contextWindow: 1_050_000 },
   "google/gemini-3.1-pro-preview": { input: 2, output: 12, cachedInput: 0.2, contextWindow: 1_000_000 },
   "spacexai/grok-4.6": { input: 2, output: 6, cachedInput: 0.5, contextWindow: 500_000 },
