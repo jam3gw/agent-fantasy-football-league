@@ -7289,3 +7289,19 @@ past the scores. The anchor is now on the hero band. A source-level test
 two: nothing new.
 
 Checks: web lint, typecheck, and 513 web tests green.
+
+## 2026-10-02 — Price check against the live catalog
+
+Pulled `GET https://ai-gateway.vercel.sh/v1/models` and compared all 12 seats
+plus the reporter with production `model_prices` (Neon `main`, last
+`prices.sync` 2026-09-28). Every row matches the catalog; nothing in the
+table needed updating. Kimi K3 is still 3/15 (a page-scrape reading of
+0.66/9 earlier today was wrong, the catalog is authoritative). No seated id
+is discounted: `openai/gpt-5.6-sol` is still 4/20 (the promotional rate
+noted in earlier scans).
+
+One repo fix: `MODEL_PRICE_SEED` still carried the 2026-08-28 Sol price
+(2/10/0.2). It only fills a fresh database, so production was never wrong,
+but a re-seed would have under-priced Sol until the next Monday sync. Now
+4/20/0.4. Typecheck and tests were not run in this session (dependencies
+not installed; Node 22 here, repo wants 24).
