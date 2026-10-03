@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
-import { NFLVERSE_STATS_URLS, parseGames, parseNflverseWeeklyStats } from "../src/nflverse.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { NFLVERSE_STATS_URLS, fetchNflverseWeeklyStats, parseGames, parseNflverseWeeklyStats } from "../src/nflverse.ts";
 
 const gamesCsv = readFileSync(
   fileURLToPath(new URL("../../../fixtures/nflverse/games.csv", import.meta.url)),
@@ -74,5 +74,32 @@ describe("nflverse weekly stats URLs (§5.6)", () => {
       "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.csv",
     );
     expect(urls.length).toBeGreaterThan(1);
+  });
+});
+
+describe("fetchNflverseWeeklyStats fallthrough (§5.6)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const csv = "player_id,season,week,passing_yards\n00-0000001,2026,3,250\n";
+  const respond = (byUrl: (u: string) => string | null) =>
+    vi.stubGlobal("fetch", async (u: string | URL | Request) => {
+      const body = byUrl(String(u));
+      return body === null
+        ? new Response("not found", { status: 404 })
+        : new Response(body, { status: 200 });
+    });
+
+  it("falls through a 404 to the next URL", async () => {
+    respond((u) => (u.includes("/stats_player/") ? null : csv));
+    expect((await fetchNflverseWeeklyStats(2026)).length).toBe(1);
+  });
+
+  it("falls through a 200 that parses to zero rows", async () => {
+    respond((u) => (u.includes("/stats_player/") ? "<html></html>" : csv));
+    expect((await fetchNflverseWeeklyStats(2026)).length).toBe(1);
+  });
+
+  it("throws when every URL fails", async () => {
+    respond(() => null);
+    await expect(fetchNflverseWeeklyStats(2026)).rejects.toThrow();
   });
 });

@@ -157,7 +157,9 @@ export async function fetchNflverseWeeklyStats(
         retries: 1,
         healthKey: "nflverse.player_stats",
       })) as string;
-      return parseNflverseWeeklyStats(text, season);
+      const parsed = parseNflverseWeeklyStats(text, season);
+      if (parsed.length === 0) throw new Error(`nflverse weekly stats parsed to zero rows: ${url}`);
+      return parsed;
     } catch (err) {
       lastError = err;
     }
