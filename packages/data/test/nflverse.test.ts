@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { parseGames, parseNflverseWeeklyStats } from "../src/nflverse.ts";
+import { NFLVERSE_STATS_URLS, parseGames, parseNflverseWeeklyStats } from "../src/nflverse.ts";
 
 const gamesCsv = readFileSync(
   fileURLToPath(new URL("../../../fixtures/nflverse/games.csv", import.meta.url)),
@@ -64,5 +64,15 @@ describe("kicking on the nflverse rung (§13.4)", () => {
     ].join("\n");
     const [row] = parseNflverseWeeklyStats(csv, 2026);
     expect(row!.stats).toEqual({});
+  });
+});
+
+describe("nflverse weekly stats URLs (§5.6)", () => {
+  it("tries the stats_player release tag first (the old player_stats tag 404s for 2026)", () => {
+    const urls = NFLVERSE_STATS_URLS(2026);
+    expect(urls[0]).toBe(
+      "https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.csv",
+    );
+    expect(urls.length).toBeGreaterThan(1);
   });
 });
