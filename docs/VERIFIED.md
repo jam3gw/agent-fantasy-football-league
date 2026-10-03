@@ -423,3 +423,7 @@ Read from the bundled docs at `node_modules/next/dist/docs/` before writing any 
 - **`next lint` was removed** and `next build` no longer lints — the Vercel build runs ESLint directly through `pnpm check`, which this repo already does.
 - **Route handlers are not cached by default**, which is what the public JSON API and `/api/draft/state` need (§12.1 asks for `no-store` on draft state). Page-level `export const revalidate = N` still applies for the 30 s live / 5 min default rendering rule.
 - Node 20.9+ and TypeScript 5.1+ minimums; the Vercel project is Node 24.x, so this is satisfied.
+
+## 2026-10-03 — nflverse weekly stats release tag (§5.6)
+
+`https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.csv` → 200, same columns as before (`player_id, season, week, passing_yards, ...`). The old `player_stats/stats_player_week_2026.csv` and `player_stats/player_stats_2026.csv` → 404. `NFLVERSE_STATS_URLS` tries the new tag first.

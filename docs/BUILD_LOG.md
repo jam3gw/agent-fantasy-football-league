@@ -7289,3 +7289,21 @@ past the scores. The anchor is now on the hero band. A source-level test
 two: nothing new.
 
 Checks: web lint, typecheck, and 513 web tests green.
+
+## 2026-10-03 — Operational sweep: nflverse stats URL fixed; gateway credits low
+
+Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
+healthz 200 (tick 60s old); production deploy READY; no failed jobs or
+sessions since 09-28; no running sessions; 47 `queued` sessions are the
+week-4 `lineup_check` plans and one self check-in, all due 10-04 or later —
+by design, not stuck. Runtime errors: only the known AI SDK reasoning-part
+warnings.
+
+- **nflverse weekly stats 404 since 09-29** (`nflverse.player_stats`,
+  `stats.audit` week 3). nflverse moved the 2026 file to the `stats_player`
+  release tag; both configured URLs 404. Scoring was unaffected (Sleeper path
+  finalized week 3) but the audit and the last rung of the §13.4 ladder were
+  dead. `NFLVERSE_STATS_URLS` now tries `stats_player/stats_player_week_<season>.csv`
+  first; the header matches what the parser expects.
+- **Gateway credits $9.19, under the $15 alarm** (`gateway.credits`, daily
+  email already sent). Needs a top-up from Jake; at $0 every session fails.
