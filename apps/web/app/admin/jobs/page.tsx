@@ -21,6 +21,7 @@ const BOOKABLE_JOBS = [
   "waivers.run",
   "stats.finalize",
   "reporter.run",
+  "odds.run",
   "sessions.book",
   "draft.run",
   "week.plan",

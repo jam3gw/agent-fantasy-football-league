@@ -1,0 +1,303 @@
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { eq } from "drizzle-orm";
+import { FixedClock } from "@league/shared";
+import { createTestDb, type TestDb } from "./helpers/db.ts";
+import { SEASON, makeGame, seedFullRoster, seedLeague, seedTeams, setLineupEntry } from "./helpers/factories.ts";
+import { health, matchupOdds, matchups, oddsRuns, playerPlayOdds, playerWeekProj, playerWeekStats, players } from "../src/db/schema.ts";
+import type { JevAsk, JevReply, JevRequest } from "../src/odds.ts";
+import { JevCallError } from "../src/odds.ts";
+import { jevSpend, latestWeekOdds, loadOddsMatchups, matchupOutcome, oddsScoreboard, playedFromStats, runMatchupOdds } from "../src/oddsRun.ts";
+import { lineupEntries, nflGames, teams } from "../src/db/schema.ts";
+import { makePlayer, rosterPlayer } from "./helpers/factories.ts";
+
+let db: TestDb;
+let close: () => Promise<void>;
+let ids: number[];
+let rosters: Awaited<ReturnType<typeof seedFullRoster>>[];
+const WEEK = 3;
+const clock = new FixedClock("2026-09-24T13:30:00Z"); // Thu 9:30 AM ET
+const kickoff = new Date("2026-09-27T17:00:00Z");
+
+async function setStarters(teamId: number, r: Awaited<ReturnType<typeof seedFullRoster>>) {
+  const slots = [
+    [r.qb, "QB"],
+    [r.rb1, "RB1"],
+    [r.rb2, "RB2"],
+    [r.wr1, "WR1"],
+    [r.wr2, "WR2"],
+    [r.te, "TE"],
+    [r.flexRb, "FLEX"],
+    [r.dst, "DST"],
+    [r.k, "K"],
+  ] as const;
+  for (const [pid, slot] of slots) await setLineupEntry(db, teamId, WEEK, pid, slot);
+}
+
+beforeEach(async () => {
+  ({ db, close } = await createTestDb());
+  await seedLeague(db, { currentWeek: WEEK });
+  ids = await seedTeams(db);
+  const nfl = ["KC", "BUF", "DAL", "PHI"];
+  rosters = [];
+  for (let i = 0; i < 4; i++) {
+    const r = await seedFullRoster(db, ids[i]!, { nflTeam: nfl[i] });
+    rosters.push(r);
+    await setStarters(ids[i]!, r);
+    for (const pid of r.all) {
+      await db.insert(playerWeekProj).values({ playerId: pid, season: SEASON, week: WEEK, projPtsPpr: 10 });
+    }
+  }
+  await makeGame(db, { week: WEEK, kickoffAt: kickoff, home: "KC", away: "BUF" });
+  await makeGame(db, { week: WEEK, kickoffAt: kickoff, home: "DAL", away: "PHI" });
+  await db.insert(matchups).values([
+    { week: WEEK, homeTeamId: ids[0]!, awayTeamId: ids[1]! },
+    { week: WEEK, homeTeamId: ids[2]!, awayTeamId: ids[3]! },
+  ]);
+  // Team 1's RB1 is questionable and projected high.
+  await db.update(players).set({ injuryStatus: "Questionable", injuryBodyPart: "Hamstring" }).where(eq(players.playerId, rosters[0]!.rb1));
+  await db.update(playerWeekProj).set({ projPtsPpr: 25 }).where(eq(playerWeekProj.playerId, rosters[0]!.rb1));
+});
+afterEach(async () => {
+  await close();
+});
+
+function fakeJev(opts: { play?: number; home?: number; failOn?: "noul" | "choice" } = {}): { ask: JevAsk; calls: JevRequest[] } {
+  const calls: JevRequest[] = [];
+  const ask: JevAsk = async (req): Promise<JevReply> => {
+    calls.push(req);
+    const q = Object.values(req.questions)[0]!;
+    if (opts.failOn === q.type) throw new Error("HTTP 529 from Jev via AI Gateway");
+    if (q.type === "noul") return { model: "typesafe-ai/jev", answers: { plays: { type: "noul", noul: opts.play ?? 0.9 } }, inputTokens: 300, costUsd: null };
+    const h = opts.home ?? 0.6;
+    return {
+      model: "typesafe-ai/jev",
+      answers: { winner: { type: "choice", choice: h >= 0.5 ? "home" : "away", probabilities: { home: h, away: 1 - h }, confidence: 0.4 } },
+      inputTokens: 2000,
+      // The gateway reports its own cost on this call; the noul above falls back to the price table.
+      costUsd: 0.0001,
+    };
+  };
+  return { ask, calls };
+}
+
+describe("loadOddsMatchups (§11.1 inputs)", () => {
+  it("builds starters, bench, and game state from league tables", async () => {
+    const ms = await loadOddsMatchups(db, SEASON, WEEK, clock.now());
+    expect(ms).toHaveLength(2);
+    const home = ms[0]!.home;
+    expect(home.starters).toHaveLength(9);
+    expect(home.emptySlots).toEqual([]);
+    expect(home.bench).toHaveLength(5);
+    const rb1 = home.starters.find((s) => s.slot === "RB1")!;
+    expect(rb1).toMatchObject({ injuryStatus: "Questionable", proj: 25, gameState: "not_started", opponent: "BUF" });
+  });
+
+  it("handles a ghost starter, an empty slot, a bye, and a final game with points", async () => {
+    // Team 1: the K slot is left empty; the TE is a ghost (traded away, still starting).
+    await db.delete(lineupEntries).where(eq(lineupEntries.playerId, rosters[0]!.k));
+    const ghost = await makePlayer(db, { playerId: "ghost-te", position: "TE", nflTeam: "KC" });
+    await db.delete(lineupEntries).where(eq(lineupEntries.playerId, rosters[0]!.te));
+    await rosterPlayer(db, ids[5]!, ghost);
+    await setLineupEntry(db, ids[0]!, WEEK, ghost, "TE");
+    // Team 2's QB moves to a team with no game (bye); team 3's game is final.
+    await db.update(players).set({ nflTeam: "SEA" }).where(eq(players.playerId, rosters[1]!.qb));
+    await db.update(nflGames).set({ status: "final" }).where(eq(nflGames.home, "DAL"));
+    await db.insert(playerWeekStats).values({ playerId: rosters[2]!.qb, season: SEASON, week: WEEK, stats: { gp: 1 }, ptsPpr: 31.5, final: true });
+
+    const [m1, m2] = await loadOddsMatchups(db, SEASON, WEEK, clock.now());
+    expect(m1!.home.emptySlots).toEqual(["K"]);
+    expect(m1!.home.starters.find((s) => s.slot === "TE")?.playerId).toBe("ghost-te");
+    expect(m1!.away.starters.find((s) => s.slot === "QB")).toMatchObject({ gameState: "none", opponent: null, kickoffAt: null });
+    expect(m2!.home.starters.find((s) => s.slot === "QB")).toMatchObject({ gameState: "final", points: 31.5 });
+  });
+});
+
+describe("runMatchupOdds (§11.1)", () => {
+  it("stores all four methods and the play calls in one run", async () => {
+    const jev = fakeJev({ play: 0.9, home: 0.7 });
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: jev.ask });
+    expect(res).toMatchObject({ existed: false, status: "succeeded", jevError: null, matchups: 2 });
+    // One noul for the one questionable starter, one choice per matchup.
+    expect(jev.calls.map((c) => Object.values(c.questions)[0]!.type).sort()).toEqual(["choice", "choice", "noul"]);
+
+    const rows = await db.select().from(matchupOdds);
+    expect(rows).toHaveLength(8);
+    const run = (await db.select().from(oddsRuns))[0]!;
+    expect(run).toMatchObject({ status: "succeeded", jevModel: "typesafe-ai/jev", jevInputTokens: 4300 });
+    expect(run.jevCostUsd).toBeCloseTo(2 * 0.0001 + (300 * 0.042) / 1e6, 6);
+
+    const calls = await db.select().from(playerPlayOdds);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({ playerId: rosters[0]!.rb1, ruleProb: 0.8, jevProb: 0.9, injuryStatus: "Questionable" });
+
+    const week = await latestWeekOdds(db, SEASON, WEEK);
+    const m1 = week!.matchups[0]!;
+    expect(m1.methods.jev_direct?.homeWinProb).toBeCloseTo(0.7);
+    expect(m1.methods.jev_direct?.confidence).toBeCloseTo(0.4);
+    // The home team's star is at 25 vs 10; the rule's 0.8 drags it below the baseline, Jev's 0.9 less so.
+    expect(m1.methods.baseline!.homeWinProb).toBeGreaterThan(m1.methods.jev_composite!.homeWinProb);
+    expect(m1.methods.jev_composite!.homeWinProb).toBeGreaterThan(m1.methods.rule!.homeWinProb);
+    expect(week!.players[0]!.name).toContain("rb1");
+
+    const again = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: jev.ask });
+    expect(again).toMatchObject({ existed: true, runId: res.runId });
+    expect(await db.select().from(matchupOdds)).toHaveLength(8);
+
+    const h = (await db.select().from(health).where(eq(health.key, "jev")))[0];
+    expect(h?.lastSuccessAt).toBeTruthy();
+    expect(await jevSpend(db, SEASON)).toMatchObject({ runs: 1, inputTokens: 4300 });
+  });
+
+  it("with no key, stores baseline and rule only and marks the run partial", async () => {
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: null });
+    expect(res.status).toBe("partial");
+    expect(res.jevError).toMatch(/no_key/);
+    const methods = new Set((await db.select().from(matchupOdds)).map((r) => r.method));
+    expect([...methods].sort()).toEqual(["baseline", "rule"]);
+    expect((await db.select().from(playerPlayOdds))[0]?.jevProb).toBeNull();
+    // A missing key is a setting, not an outage: no health row.
+    expect(await db.select().from(health).where(eq(health.key, "jev"))).toHaveLength(0);
+  });
+
+  it("drops both Jev methods for the whole run when one Jev call fails", async () => {
+    const jev = fakeJev({ failOn: "choice" });
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: jev.ask });
+    expect(res.status).toBe("partial");
+    expect(res.jevError).toMatch(/529/);
+    const methods = new Set((await db.select().from(matchupOdds)).map((r) => r.method));
+    expect([...methods].sort()).toEqual(["baseline", "rule"]);
+    const run = (await db.select().from(oddsRuns))[0]!;
+    expect(run.jevModel).toBeNull();
+    // The noul call before the failing choice was billed, so it is recorded.
+    expect(run.jevInputTokens).toBe(300);
+    const h = (await db.select().from(health).where(eq(health.key, "jev")))[0];
+    expect(h?.lastError).toMatch(/529/);
+  });
+
+  it("rejects an answer out of shape instead of storing it", async () => {
+    const ask: JevAsk = async () => ({ model: "typesafe-ai/jev", answers: {}, inputTokens: 1, costUsd: null });
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: ask });
+    expect(res.status).toBe("partial");
+    expect(res.jevError).toMatch(/no noul answer/);
+  });
+
+  it("rejects a probability outside [0, 1] and still stores baseline and rule", async () => {
+    const jev = fakeJev({ home: 70 }); // a percentage where a probability belongs
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: jev.ask });
+    expect(res.status).toBe("partial");
+    expect(res.jevError).toMatch(/not a probability/);
+    expect(new Set((await db.select().from(matchupOdds)).map((r) => r.method))).toEqual(new Set(["baseline", "rule"]));
+  });
+
+  it("gives up on Jev at the deadline and still stores baseline and rule", async () => {
+    const hang: JevAsk = (_req, opts) =>
+      new Promise((_resolve, reject) => opts?.signal?.addEventListener("abort", () => reject(opts.signal!.reason)));
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: hang, jevDeadlineMs: 20 });
+    expect(res.status).toBe("partial");
+    expect(res.jevError).toMatch(/deadline/);
+    expect(new Set((await db.select().from(matchupOdds)).map((r) => r.method))).toEqual(new Set(["baseline", "rule"]));
+  });
+
+  it("after one Jev failure starts no new call, awaits the ones in flight, and bills them", async () => {
+    // Five injured starters on team 1: the first four calls start together.
+    const r = rosters[0]!;
+    for (const pid of [r.rb2, r.wr1, r.wr2, r.te]) {
+      await db.update(players).set({ injuryStatus: "Questionable" }).where(eq(players.playerId, pid));
+    }
+    const started: string[] = [];
+    const ask: JevAsk = async (req): Promise<JevReply> => {
+      const name = String((req.state.player as { name: string }).name);
+      started.push(name);
+      if (name.endsWith("rb1")) throw new Error("HTTP 529 from Jev via AI Gateway");
+      await new Promise((ok) => setTimeout(ok, 20));
+      return { model: "typesafe-ai/jev", answers: { plays: { type: "noul", noul: 0.5 } }, inputTokens: 300, costUsd: null };
+    };
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: ask });
+    expect(res.status).toBe("partial");
+    expect(started).toHaveLength(4); // the fifth never started
+    const run = (await db.select().from(oddsRuns))[0]!;
+    expect(run.jevInputTokens).toBe(900); // the three in flight landed and were counted
+  });
+
+  it("counts a billed but unusable Jev reply toward the run's cost", async () => {
+    const ask: JevAsk = async () => {
+      throw new JevCallError("jev: response has no answers", 400, 0.00005);
+    };
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: ask });
+    expect(res.status).toBe("partial");
+    const run = (await db.select().from(oddsRuns))[0]!;
+    expect(run).toMatchObject({ jevInputTokens: 400 });
+    expect(run.jevCostUsd).toBeCloseTo(0.00005, 6);
+  });
+
+  it("asks Jev about a starter on a reserve list with no injury tag", async () => {
+    await db.update(players).set({ injuryStatus: null, status: "Injured Reserve" }).where(eq(players.playerId, rosters[1]!.wr1));
+    const jev = fakeJev();
+    await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: jev.ask });
+    const call = (await db.select().from(playerPlayOdds)).find((c) => c.playerId === rosters[1]!.wr1);
+    expect(call).toMatchObject({ ruleProb: 0, jevProb: 0.9, injuryStatus: null });
+  });
+
+  it("refuses a week with no projections instead of storing coin flips", async () => {
+    await db.delete(playerWeekProj);
+    await expect(runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: null })).rejects.toThrow(/no projections/);
+    expect(await db.select().from(oddsRuns)).toHaveLength(0);
+  });
+
+  it("never sends a team name or a model id to Jev", async () => {
+    const jev = fakeJev();
+    await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: jev.ask });
+    const sent = JSON.stringify(jev.calls);
+    for (const t of await db.select().from(teams)) {
+      expect(sent).not.toContain(`"${t.name}"`);
+      expect(sent).not.toContain(t.modelId);
+      expect(sent).not.toContain(t.modelLabel);
+    }
+  });
+
+  it("returns no_matchups for a week with none", async () => {
+    const res = await runMatchupOdds(db, clock, { season: SEASON, week: 9, snapshot: "thu", jev: null });
+    expect(res.status).toBe("no_matchups");
+    expect(await db.select().from(oddsRuns)).toHaveLength(0);
+  });
+});
+
+describe("oddsScoreboard (§11.1 scoring on read)", () => {
+  it("scores finalized matchups and the play calls per method and snapshot", async () => {
+    const jev = fakeJev({ play: 0.9, home: 0.7 });
+    await runMatchupOdds(db, clock, { season: SEASON, week: WEEK, snapshot: "thu", jev: jev.ask });
+
+    let board = await oddsScoreboard(db, SEASON);
+    expect(board.matchups).toEqual([]); // nothing final yet
+    expect(board.players).toEqual([]);
+
+    // Home wins the first, away wins the second; the questionable back played.
+    const [m1, m2] = await db.select().from(matchups).orderBy(matchups.id);
+    await db.update(matchups).set({ final: true, homePoints: 120, awayPoints: 100, winnerTeamId: m1!.homeTeamId }).where(eq(matchups.id, m1!.id));
+    await db.update(matchups).set({ final: true, homePoints: 90, awayPoints: 95, winnerTeamId: m2!.awayTeamId }).where(eq(matchups.id, m2!.id));
+    await db.insert(playerWeekStats).values({ playerId: rosters[0]!.rb1, season: SEASON, week: WEEK, stats: { gp: 1 }, ptsPpr: 20, final: true });
+
+    board = await oddsScoreboard(db, SEASON);
+    const direct = board.matchups.find((s) => s.method === "jev_direct")!;
+    expect(direct.n).toBe(2);
+    expect(direct.brier).toBeCloseTo(((0.7 - 1) ** 2 + (0.7 - 0) ** 2) / 2);
+    expect(direct.hitRate).toBeCloseTo(0.5);
+    expect(board.matchups.map((s) => s.method)).toEqual(["baseline", "rule", "jev_composite", "jev_direct"]);
+    expect(board.players).toEqual([{ snapshot: "thu", n: 1, ruleBrier: expect.closeTo(0.04, 6), jevBrier: expect.closeTo(0.01, 6) }]);
+    expect(board.weeks).toEqual([WEEK]);
+  });
+
+  it("scores a tie on points as 0.5, even a playoff tie that has a winner", () => {
+    expect(matchupOutcome({ homeTeamId: 1, homePoints: 100, awayPoints: 100, winnerTeamId: 1 })).toBe(0.5);
+    expect(matchupOutcome({ homeTeamId: 1, homePoints: 90, awayPoints: 100, winnerTeamId: 2 })).toBe(0);
+    expect(matchupOutcome({ homeTeamId: 1, homePoints: null, awayPoints: null, winnerTeamId: 1 })).toBe(1);
+  });
+
+  it("playedFromStats reads gp, then gms_active", () => {
+    expect(playedFromStats({ gp: 1 })).toBe(true);
+    expect(playedFromStats({ gp: 0, gms_active: 1 })).toBe(false);
+    expect(playedFromStats({ gms_active: 1 })).toBe(true);
+    expect(playedFromStats({})).toBe(false);
+    expect(playedFromStats(undefined)).toBe(false);
+  });
+});

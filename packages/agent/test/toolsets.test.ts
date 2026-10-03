@@ -187,6 +187,14 @@ describe("§8.10 — check-in tools", () => {
       const enders = names.filter((n) => n.startsWith("publish_"));
       expect(enders, kind).toEqual([kind === "reporter_power_rankings" ? "publish_power_rankings" : "publish_report"]);
       expect(names, kind).toContain("get_power_rankings");
+      expect(names, kind).toContain("get_matchup_odds");
+    }
+  });
+
+  it("no team session can read the matchup odds (§11.1)", () => {
+    for (const kind of Object.keys(SETS) as SessionKind[]) {
+      if (kind.startsWith("reporter_")) continue;
+      expect(toolsForKind(kind).map((t) => t.name), kind).not.toContain("get_matchup_odds");
     }
   });
 });
