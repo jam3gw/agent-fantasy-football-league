@@ -59,9 +59,11 @@ export async function fetchSchedule(opts: { db?: EngineDb } = {}): Promise<strin
 /**
  * nflverse weekly player stats (§5.6) — the documented audit path, and the
  * last rung of the scoring ladder (§13.4). The release file naming changed
- * over time, so both known names are tried and the first that responds wins.
+ * over time (the 2026 file lives under the `stats_player` release tag), so
+ * every known location is tried and the first that responds wins.
  */
 export const NFLVERSE_STATS_URLS = (season: number): string[] => [
+  `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`,
   `https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_week_${season}.csv`,
   `https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_${season}.csv`,
 ];
@@ -155,7 +157,9 @@ export async function fetchNflverseWeeklyStats(
         retries: 1,
         healthKey: "nflverse.player_stats",
       })) as string;
-      return parseNflverseWeeklyStats(text, season);
+      const parsed = parseNflverseWeeklyStats(text, season);
+      if (parsed.length === 0) throw new Error(`nflverse weekly stats parsed to zero rows: ${url}`);
+      return parsed;
     } catch (err) {
       lastError = err;
     }
