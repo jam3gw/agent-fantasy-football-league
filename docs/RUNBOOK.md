@@ -10,14 +10,14 @@ First-time setup — accounts, secrets, the domain, the pre-draft order of opera
 |---|---|
 | Production site | Vercel project `agent-fantasy-football-league`, team `jake-moses-personal` |
 | Production data | Neon project `small-unit-52703563`, branch `main` (`br-restless-field-av8feznp`) |
-| Local / CI data | Neon branch `dev` (`br-nameless-wildflower-av2oxeoe`) |
+| Local / test data | PGlite in the test suite; for a live check, a temporary Neon branch from `main` that you delete afterwards |
 | Health at a glance | `/admin/health` |
 | Money | `/spend`, alarms on `/admin/health` |
 | Job queue | `/admin/jobs` |
 | Session queue | `/admin/health`, "Session queue" card |
 | Liveness, from outside | `/api/healthz` (public; built for an external uptime monitor) |
 
-Migrations run automatically: `apps/web`'s build script applies them before `next build`, so **every deploy migrates its own database** — preview deploys migrate the branch database, production migrates `main`.
+Migrations run automatically: `apps/web/scripts/db-deploy.sh` applies them and the seed before `next build`, **on production deploys only**. Preview deploys have no database: they skip migrations and the seed, and their pages render empty.
 
 ---
 
@@ -188,20 +188,20 @@ being healthy — which is the point.
 
 ---
 
-## Neon preview branches
+## Neon preview branches (turned off)
 
-The Vercel-Managed Neon integration makes a `preview/<git branch>` database
-branch for every git branch with a preview deploy. It deletes one only when
-Vercel deletes that branch's last deployment (180-day retention, and the last
-20 previews are always kept), so on its own it almost never cleans up.
+Preview deploys do not get a Neon branch. Until 2026-10-04 the Vercel-Managed
+Neon integration made a `preview/<git branch>` branch for every git branch.
+They billed as extra branch-months, and a PR merged while its last preview was
+building deleted the branch under the build. See BUILD_LOG 2026-10-04.
 
-`.github/workflows/neon-preview-cleanup.yml` deletes `preview/<head branch>`
-when a pull request closes, merged or not. It needs two repository secrets:
-`NEON_PROJECT_ID` (`small-unit-52703563`) and `NEON_API_KEY` (Neon Console →
-Account Settings → API Keys). If either is missing the job fails
-and the branch stays; delete it by hand in the Neon Console. A git branch
-pushed without a pull request is never cleaned up by the workflow. After a
-merge, that PR's preview URL no longer has a database.
+The setting lives in Vercel → Storage → the Neon database → Settings: the
+store is connected to **Production only**, and preview branching is off. If a
+`preview/*` branch shows up in Neon, that setting was turned back on: turn it
+off and delete the branch.
+
+To test against real data, make a temporary branch from `main` in the Neon
+Console, set `DATABASE_URL` to it locally, and delete the branch when done.
 
 ---
 
@@ -254,4 +254,4 @@ A production deployment in state `BLOCKED` with the "project collaboration / tea
 
 - There is no league-wide spend stop, by design (§2: "No cap"). `pause_agent_at_usd` is per-agent and off by default.
 - The engine never chooses a starter for an agent (§3.1). An empty starting slot scores 0, and in week 1 there is no previous lineup to carry over from. `/admin/health` warns when any active team has an empty starting slot for the current week; the only fix is to run a session for that team.
-- A mock draft has no control on `/admin/draft`. To run one, make a temporary Neon branch from `main`, point a preview deploy at it, run the draft there, and delete the branch afterwards.
+- A mock draft has no control on `/admin/draft`. To run one, make a temporary Neon branch from `main`, run the app locally (`pnpm --filter @league/web dev`) with `DATABASE_URL` set to it, run the draft there, and delete the branch afterwards.
