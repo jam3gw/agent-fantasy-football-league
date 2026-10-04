@@ -2,6 +2,22 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-10-04 — `pnpm check` now fails on lint errors
+
+`pnpm check` ran lint and typecheck as one regex run:
+`pnpm -r --parallel --no-bail run "/^(lint|typecheck)$/"`. That run exited 0
+when ESLint failed. A type error still failed it, so only lint errors got
+through. The Vercel build runs `pnpm check`, so a lint error could reach
+production. Found during the Jev odds work (PR #65); Jake approved the fix.
+
+- Reproduced: with an ESLint error in `packages/shared`, the regex run exited
+  0 and `pnpm lint` exited 1.
+- Fix: `"check": "pnpm lint && pnpm typecheck && pnpm test"`. Each step's exit
+  code now stops the chain.
+- Checked: with the same ESLint error, `pnpm check` exits 1. On clean `main`
+  it exits 0: lint, typecheck, 1055 tests. `main` was already lint-clean, so
+  no production build breaks.
+
 ## 2026-10-04 — Failed preview deploys fixed; preview deploys no longer get a database
 
 Two preview deploys failed in `pnpm --filter @league/engine migrate`:
