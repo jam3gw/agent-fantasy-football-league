@@ -241,8 +241,8 @@ In this order. `/admin/draft` is numbered to match.
    names its team and writes a draft plan. Give them time — they may each book
    up to three pre-draft check-ins to keep preparing.
 7. *(Optional)* **Mock draft.** There is no button for this. Make a temporary
-   Neon branch from `main`, point a preview deploy at it, run the draft there,
-   read the transcripts, then delete the branch.
+   Neon branch from `main`, run the app locally with `DATABASE_URL` set to it,
+   run the draft there, read the transcripts, then delete the branch.
 8. **`/admin/draft` step 3 — start the draft.** Starting it re-pulls the draft
    rankings first, so the board is today's.
 

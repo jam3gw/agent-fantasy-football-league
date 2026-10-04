@@ -2,6 +2,38 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-10-04 — Failed preview deploys fixed; preview deploys no longer get a database
+
+Two preview deploys failed in `pnpm --filter @league/engine migrate`:
+`fix/nflverse-stats-url` on 10-03 ("The requested endpoint could not be
+found") and `claude/neon-compute-bill-high-nytg99` on 09-29 ("password
+authentication failed"). Production was never affected. Both times the PR was
+merged while its last preview was still building, so
+`neon-preview-cleanup.yml` deleted `preview/<branch>` under the build.
+
+Jake asked to stop Neon branching and remove the need for it.
+
+- `apps/web/scripts/db-deploy.sh`: migrations and the seed run only when
+  `VERCEL_ENV` is `production` (or unset, for local runs). A preview skips
+  them. This also keeps a preview from migrating production if the
+  integration ever hands a preview the production URL.
+- Removed `.github/workflows/neon-preview-cleanup.yml`; with no preview
+  branches it would fail on every PR close. The `NEON_API_KEY` and
+  `NEON_PROJECT_ID` repository secrets are now unused.
+- Docs: RUNBOOK, README, SETUP, CLAUDE.md (review step 4 now runs locally
+  against a temporary branch), SPEC Appendix G, `.env.example`. The `dev`
+  branch named in them no longer exists in Neon.
+- Needs Jake in the Vercel dashboard (no API for it): Storage → the Neon
+  database → Settings → connect the store to Production only and turn off
+  preview branching. Until then the integration still makes branches.
+
+Cost, measured from the integration's billing for 2026-10-01 to 10-04
+($2.77): compute 24.7 CU-hours = $2.62 (95%), storage and snapshots $0.15.
+The three open `preview/*` branches show 0 compute. The bill is the `main`
+compute at its 0.25 CU floor, awake every minute since 09-04 because the
+per-minute tick (§9.1) queries the database. That is about $19 a month and
+does not change with this fix. Its autoscaling cap is 8 CU.
+
 ## 2026-09-29 — Neon preview branches: delete on PR close
 
 Jake's Neon bill showed 44.7 extra branch-months. The Vercel-Managed

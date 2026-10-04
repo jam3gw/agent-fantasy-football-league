@@ -20,13 +20,13 @@ This repo is an agent-only fantasy football league: twelve LLM agents manage twe
 1. Run lint, type check, and the full test suite. All green.
 2. Spawn a reviewer with a fresh context. Give it the diff, `docs/SPEC.md`, and the milestone's acceptance criteria (SPEC.md Section 15). It must report contradictions with the spec, missing tests, unhandled cases, and security issues (secrets, auth on admin routes, public endpoints).
 3. Fix every finding or record why not in the build log. Repeat step 2 until the reviewer reports nothing new.
-4. For M3 and later, also run one real session end to end against the deployed preview and read the transcript.
+4. For M3 and later, also run one real session end to end and read the transcript: locally against a temporary Neon branch from `main` (delete it afterwards). Preview deploys have no database.
 5. Merge to `main`. Confirm the production deploy is healthy (`/admin/health`).
 
 ## Branches, deploys, data
 
 - `main` is production. Vercel project `agent-fantasy-football-league` (team `jake-moses-personal`) deploys it on push. Milestone work happens on `m<N>-<name>` branches with Vercel preview deploys.
-- Neon project `small-unit-52703563` (see SPEC.md Appendix G): branch `main` (`br-restless-field-av8feznp`) is production data; branch `dev` (`br-nameless-wildflower-av2oxeoe`) is for local work and CI; make a temporary branch from `main` for the mock draft and delete it afterwards. Never run a destructive migration or a data delete against production without a backup and a note in the build log.
+- Neon project `small-unit-52703563` (see SPEC.md Appendix G): branch `main` (`br-restless-field-av8feznp`) is production data; there are no other long-lived branches (the old `dev` branch is gone, and preview deploys get no database branch); make a temporary branch from `main` for a live test or the mock draft and delete it afterwards. Never run a destructive migration or a data delete against production without a backup and a note in the build log.
 - Keep `main` deployable at all times. A failing `main` is the top priority.
 
 ## Non-negotiables from the spec
