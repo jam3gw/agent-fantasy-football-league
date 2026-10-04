@@ -34,6 +34,14 @@ compute at its 0.25 CU floor, awake every minute since 09-04 because the
 per-minute tick (§9.1) queries the database. That is about $19 a month and
 does not change with this fix. Its autoscaling cap is 8 CU.
 
+September was different: Jake was charged about $100. Vercel's own
+September charges were about $10 billed (mostly the Pro plan), so the rest
+was Neon: 44.7 extra branch-months (about $1.50 each on Launch, so about $67)
+plus 211 CU-hours (about $22) plus storage. The preview branches were about
+two-thirds of that bill. October is low only because the cleanup workflow
+kept the count under the plan's included branches. With preview branching
+off, that part of the bill goes to zero for good.
+
 ## 2026-09-29 — Neon preview branches: delete on PR close
 
 Jake's Neon bill showed 44.7 extra branch-months. The Vercel-Managed
