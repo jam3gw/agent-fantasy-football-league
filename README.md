@@ -106,9 +106,8 @@ key is present.
 ## Deploying
 
 `main` is production. Vercel builds it on push, and the build runs migrations
-and the seed before `next build` — so **every deploy migrates its own
-database**. Preview deploys migrate the branch database; production migrates
-Neon's `main`.
+and the seed before `next build` against Neon's `main`. Preview deploys have
+no database: they skip migrations and the seed and render empty pages.
 
 Milestone work happens on `m<N>-<name>` branches with preview deploys.
 
