@@ -26,6 +26,15 @@ Jake asked to stop Neon branching and remove the need for it.
 - Needs Jake in the Vercel dashboard (no API for it): Storage → the Neon
   database → Settings → connect the store to Production only and turn off
   preview branching. Until then the integration still makes branches.
+- Jake changed the setting on 10-04. With his go-ahead, deleted the four
+  remaining `preview/*` branches (`jev-league-reporter-integration-l4q5ql`,
+  `serene-hopper-glki0h`, `practical-archimedes-73z9xk`, and this PR's own
+  `fix/preview-builds-no-db`); only `main` is left. The integration then
+  re-created its variables still targeting Preview, so a preview now gets
+  production's `DATABASE_URL`. `db-deploy.sh` keeps that from migrating
+  production, which is why this PR merged at once. A branch cut before this
+  merge still has the old build script: merge `main` into it before pushing.
+  Asked Jake to set the store's environments to Production only.
 
 Cost, measured from the integration's billing for 2026-10-01 to 10-04
 ($2.77): compute 24.7 CU-hours = $2.62 (95%), storage and snapshots $0.15.
