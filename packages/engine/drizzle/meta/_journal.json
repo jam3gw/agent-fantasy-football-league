@@ -57,6 +57,13 @@
       "when": 1788619352129,
       "tag": "0007_power_rankings",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1790108987147,
+      "tag": "0008_matchup_odds",
+      "breakpoints": true
     }
   ]
 }

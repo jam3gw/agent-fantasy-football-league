@@ -35,6 +35,9 @@ import {
 } from "@league/data";
 import { reporterModelId } from "@league/engine";
 
+/** §11.1: how many times `odds.run` re-books itself, 30 minutes apart, while a week has no projections. */
+const ODDS_RETRIES = 6;
+
 /**
  * §4.3 job gating: `waivers.run`, every `sessions.*` job, the `reporter.*`
  * jobs and lineup-check booking run only once the season is under way. Ingest
@@ -186,6 +189,51 @@ export async function runJob(
       await bookReporterSession(db, clock, String(payload.kind), Number(payload.week ?? settings.currentWeek), job);
       return;
     }
+    case "odds.run": {
+      if (!inSeason(settings)) return; // §4.3 job gating, like the reporter
+      const snapshot = payload.snapshot === "sun" ? "sun" : "thu";
+      const { NoProjectionsError, runMatchupOdds } = await import("@league/engine");
+      const { jevClient } = await import("@league/data");
+      const { env } = await import("./env");
+      // Jev runs through the AI Gateway on the key every model call uses.
+      const key = env.aiGatewayApiKey;
+      const week = Number(payload.week ?? settings.currentWeek);
+      const attempt = Number(payload.attempt ?? 0);
+      // A chain of retries is named by when its first attempt ran, so a second
+      // chain for the same snapshot (a hand-booked re-run) never collides with
+      // the first one's keys.
+      const chain = typeof payload.chain === "string" ? payload.chain : clock.now().toISOString();
+      let result;
+      try {
+        result = await runMatchupOdds(db, clock, { season, week, snapshot, jev: key ? jevClient({ apiKey: key }) : null });
+      } catch (err) {
+        // §11.1: no projections yet. Book the same snapshot again in 30
+        // minutes rather than lose it; after ODDS_RETRIES tries (three hours),
+        // or when the next try would land after the snapshot's first kickoff
+        // (odds taken mid-game would not be a pregame call), the job fails
+        // and /admin/health shows why.
+        if (!(err instanceof NoProjectionsError)) throw err;
+        const now = clock.now();
+        const set = { lastError: err.message, lastErrorAt: now };
+        await db.insert(health).values({ key: "odds", ...set }).onConflictDoUpdate({ target: health.key, set });
+        const nextAt = new Date(now.getTime() + 30 * 60_000);
+        const slate = await firstKickoffAfter(db, season, week, new Date(chain));
+        // No slate left (games exist, all kicked off before the chain began): nothing pregame to call.
+        const tooLate = slate.hasGames && (slate.next === null || nextAt.getTime() >= slate.next.getTime());
+        if (attempt >= ODDS_RETRIES || tooLate) throw err;
+        const next = attempt + 1;
+        await bookJob(db, "odds.run", nextAt, { snapshot, week, attempt: next, chain }, `odds.run:${season}:${week}:${snapshot}:${chain}:retry${next}`);
+        return;
+      }
+      if (!result.existed && result.status !== "no_matchups") {
+        const set = { lastSuccessAt: clock.now() };
+        await db.insert(health).values({ key: "odds", ...set }).onConflictDoUpdate({ target: health.key, set });
+      }
+      // A Jev outage is on /admin/health (key `jev`); the job itself succeeds,
+      // because the baseline and rule rows are stored either way (§11.1).
+      if (result.jevError && key) console.warn(`odds.run: Jev left out of this run: ${result.jevError}`);
+      return;
+    }
     case "ingest.rankings": {
       const { ingestRankings } = await import("@league/data");
       // Sleeper's projection feed needs no key and no quota, so the only way
@@ -317,6 +365,9 @@ export async function bookRecurringJobs(db: EngineDb, clock: Clock): Promise<num
   await book("reporter.run", nextEtWeekdayTime(now, 2, 11, 0), { kind: "reporter_recap" });
   await book("digest.weekly", nextEtWeekdayTime(now, 2, 11, 30));
   await book("sessions.book", nextEtWeekdayTime(now, 3, 9, 0), { kind: "post_waivers" });
+  // §11.1: odds before the preview (which cites them), and again before the Sunday slate.
+  await book("odds.run", nextEtWeekdayTime(now, 4, 9, 30), { snapshot: "thu" });
+  await book("odds.run", nextEtWeekdayTime(now, 0, 11, 30), { snapshot: "sun" });
   await book("reporter.run", nextEtWeekdayTime(now, 4, 10, 0), { kind: "reporter_preview" });
   // No scheduled trade window (§2, 2026-09-05): an agent that wants to shop
   // books a check-in for it (§8.10). Offers still trigger `trade_response`.
@@ -382,6 +433,24 @@ async function bookSessionsForKind(
 /** The label on a commissioner-booked `trade_window` row, or null when the row has none (or an empty one). */
 function windowLabel(payload: Record<string, unknown>): string | null {
   return typeof payload.window === "string" && payload.window.trim() ? payload.window.trim() : null;
+}
+
+/**
+ * The first kickoff of the week after `from`: the slate a snapshot taken at
+ * `from` is for. `hasGames` false means the schedule has no games for the week.
+ */
+async function firstKickoffAfter(
+  db: EngineDb,
+  season: number,
+  week: number,
+  from: Date,
+): Promise<{ hasGames: boolean; next: Date | null }> {
+  const games = await db
+    .select({ kickoffAt: nflGames.kickoffAt })
+    .from(nflGames)
+    .where(and(eq(nflGames.season, season), eq(nflGames.week, week)))
+    .orderBy(asc(nflGames.kickoffAt));
+  return { hasGames: games.length > 0, next: games.find((g) => g.kickoffAt.getTime() > from.getTime())?.kickoffAt ?? null };
 }
 
 /** True once the week's first NFL game has kicked off. A week with no games recorded is not under way. */

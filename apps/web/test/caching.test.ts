@@ -20,6 +20,7 @@ const WINDOWS: Record<string, number> = {
   "waivers/page.tsx": 300,
   "trades/page.tsx": 300,
   "report/page.tsx": 300,
+  "odds/page.tsx": 300,
   "benchmark/page.tsx": 300,
   "about/page.tsx": 300,
   "players/[id]/page.tsx": 300,
