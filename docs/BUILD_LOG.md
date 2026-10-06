@@ -44,7 +44,7 @@ Changed:
   its own, like the long-lived reporter branch, still builds on each merge
   of `main`, because that combination is new code. New test
   `apps/web/test/vercelIgnoreBuild.test.ts` (10 cases, real git repos,
-  `sh`); three of them fail against the first version. A second review
+  `sh`); six of them fail against the first version. A second review
   round found the older `HEAD^` fallback could still skip a branch's
   first preview (a merge whose `main` side was docs-only, or a first push
   ending in a docs commit): a preview with no usable previous deployment
@@ -68,7 +68,8 @@ with Jake in the session rather than changed here.
 Review round (fresh-context reviewer; diff, SPEC, CLAUDE.md, Next 16 docs):
 the three ignore-script findings above, fixed; no test for the script,
 added; nothing checks the second parent is `main` beyond the subject,
-recorded in the RUNBOOK. Second round: the first-preview fallback above, fixed; nothing else new. Typecheck change: `next typegen && tsc --noEmit`
+recorded in the RUNBOOK. Second round: the first-preview fallback above,
+fixed; nothing else new. Typecheck change: `next typegen && tsc --noEmit`
 is the documented replacement and a superset of Next's own check; the
 ESLint ignore is needed (flat config lints dot-directories). No spec or
 security finding.
