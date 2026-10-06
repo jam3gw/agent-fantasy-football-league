@@ -8,7 +8,7 @@
     "build": "pnpm --filter @league/agent briefs && sh scripts/db-deploy.sh && next build",
     "start": "next start",
     "lint": "eslint --cache --cache-strategy content --cache-location ../../node_modules/.cache/eslint/web/",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "next typegen && tsc --noEmit",
     "test": "vitest run",
     "seed": "tsx scripts/seed.mts"
   },

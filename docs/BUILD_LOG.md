@@ -2,6 +2,78 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-10-06 — Build CPU minutes: where the 4.05K came from; three build-time cuts
+
+Jake asked why the team used so many build CPU minutes when nothing changes
+day over day. Sources: Vercel's "Weekly Usage Summary" (10-05) and
+"Increased On-Demand Usage" (10-06) emails for the cycle 09-11 to 10-11,
+`list_billing_charges` per day, the deployment list, and build logs.
+
+- **The cycle shows 4.05K build CPU minutes and $13.10**, against 2.03K
+  and $0 at the same point last cycle. The $13.10 is the same in both
+  emails and comes from 09-11 to 09-21, on the Turbo machine (30 cores; a
+  46 s build is about 25–30 CPU minutes). Billed build cost per day:
+  $0.84 on 09-17, $0.00 on 09-27, 10-02 and 10-04 (10-04 had six builds).
+  On Standard (4 cores) a build is about 3 min 10 s, about 13 CPU minutes,
+  inside the plan's included amount.
+- **"Nothing changes day over day" was not true for the repo.** Two
+  scheduled Claude routines (the operational sweep and the discount scan)
+  each committed a build-log entry every day on a branch, then merged it:
+  four full builds a day with no code change, plus a daily "merge main"
+  into the long-lived `claude/jev-league-reporter-integration-l4q5ql`.
+  About 75 builds ran from 09-11 to 09-21. Since 09-22 the docs-only rule
+  cancels those in about 2 s; the daily merges into the long-lived branch
+  still built (five times since 09-26) until this change.
+- **Where a Standard build's 3 min 10 s goes** (production build of #65):
+  install 9 s, lint and typecheck 27 s, `vitest run` 85 s, briefs, migrate
+  and seed 6 s, `next build` 35 s (16 s of it a second TypeScript pass),
+  deploy 9 s, build cache 14 s. The suite has no slow file: 85 files, the
+  slowest 12.6 s; the time is per-file PGlite start (about 3.6 s) and
+  module collection, already cut on 09-08. Not changed.
+
+Changed:
+
+- `scripts/vercel-ignore-build.sh`: a preview commit that merges `main`
+  and whose tree differs from `main`'s tip only in docs is skipped: its
+  code is `main`'s, already checked by `main`'s production build.
+  Production never takes this path. The first version compared only the
+  branch's side since the last preview and trusted the merge message; the
+  review round found it skipped a branch's first preview, a merge whose
+  combined code no build had checked, and a conflict resolved in the
+  editor. The tree rule closes all three, at a cost: a branch with code of
+  its own, like the long-lived reporter branch, still builds on each merge
+  of `main`, because that combination is new code. New test
+  `apps/web/test/vercelIgnoreBuild.test.ts` (10 cases, real git repos,
+  `sh`); six of them fail against the first version. A second review
+  round found the older `HEAD^` fallback could still skip a branch's
+  first preview (a merge whose `main` side was docs-only, or a first push
+  ending in a docs commit): a preview with no usable previous deployment
+  now always builds; production keeps the `HEAD^` fallback.
+- `apps/web`: `typecheck` is now `next typegen && tsc --noEmit` (typegen
+  takes about 2 s and writes the route types and `validator.ts`, the same
+  checks `next build` ran), and `next.config.ts` sets
+  `typescript.ignoreBuildErrors` so `next build` does not repeat them.
+  About 14 s less per build. `eslint.config.mjs` ignores the workflow
+  files typegen now writes while lint runs.
+
+Looked at, not changed — ISR writes (637K this cycle, $2.55, +778%): Vercel
+counts about one write unit per 10 KB written, so large pages cost the most.
+09-29 to 10-05: `/sessions/[id]` 36K units from about 3,000 requests (a
+third from crawlers: meta-externalagent, applebot, bingbot, amazonbot),
+`/teams/[slug]` 20.5K, `/teams/[slug]/week/[week]` 18.5K, `/sessions` 12K,
+`/board` 8.7K, `/draft` 5.2K (still on the 30 s live window after the
+draft). The windows are §12.1's; changing them is a spec question, raised
+with Jake in the session rather than changed here.
+
+Review round (fresh-context reviewer; diff, SPEC, CLAUDE.md, Next 16 docs):
+the three ignore-script findings above, fixed; no test for the script,
+added; nothing checks the second parent is `main` beyond the subject,
+recorded in the RUNBOOK. Second round: the first-preview fallback above,
+fixed; nothing else new. Typecheck change: `next typegen && tsc --noEmit`
+is the documented replacement and a superset of Next's own check; the
+ESLint ignore is needed (flat config lints dot-directories). No spec or
+security finding.
+
 ## 2026-10-04 — Failed preview deploys fixed; preview deploys no longer get a database
 
 Two preview deploys failed in `pnpm --filter @league/engine migrate`:
