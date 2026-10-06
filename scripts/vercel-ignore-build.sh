@@ -12,10 +12,16 @@
 # docs-only still builds if an earlier commit in it touched code, and a docs
 # commit after a failed build retries it. A base that is not in the (shallow)
 # clone — a recreated branch, many skipped commits in a row — falls back to the
-# parent commit; no usable base at all builds.
+# parent commit on production; no usable base at all builds.
 base="${VERCEL_GIT_PREVIOUS_SHA:-HEAD^}"
 git cat-file -e "${base}^{commit}" 2>/dev/null || base="HEAD^"
 git cat-file -e "${base}^{commit}" 2>/dev/null || exit 1
+# A preview with no usable previous deployment (a branch's first push, or a
+# base outside the clone) builds: HEAD^ says nothing about the earlier commits
+# of a first push, and for a merge it is the branch's own side.
+if [ "$VERCEL_ENV" = "preview" ] && [ "$base" = "HEAD^" ]; then
+  exit 1
+fi
 
 docs_only() {
   git diff --quiet "$1" "$2" -- . ':!docs' ':!README.md' ':!CLAUDE.md' ':!AGENTS.md' ':!LICENSE'
@@ -26,22 +32,22 @@ if docs_only "$base" HEAD; then
   exit 0
 fi
 
-# A preview whose newest commit only merges main into the branch: main's side
-# was built and checked by its own production deploy, and the branch's side
-# (its first parent) changed nothing but docs since the last preview. Skipped
-# only when git merged cleanly; a merge with resolved conflicts ("Conflicts:"
-# in the message) builds. The production deploy after the pull request merges
-# still runs every check on the combined code.
+# A preview whose newest commit merges main into the branch and leaves the
+# branch's code identical to main's (it differs from the second parent, main's
+# tip, only in docs): that code was already built and checked by main's own
+# production deploy. The tree comparison, not the commit message, is what makes
+# this safe: a merge that resolved conflicts or brought any code of the
+# branch's own differs from main in code and builds. The subject check only
+# makes sure the second parent is main and not some other branch.
 if [ "$VERCEL_ENV" = "preview" ]; then
   # shellcheck disable=SC2046
   set -- $(git rev-list --parents -n 1 HEAD 2>/dev/null)
   subject=$(git log -1 --format=%s HEAD 2>/dev/null)
   if [ $# -eq 3 ] \
     && printf '%s\n' "$subject" | grep -Eq "^Merge (remote-tracking )?branch '(origin/)?main'|^Merge (origin/)?main( |$)" \
-    && ! git log -1 --format=%B HEAD 2>/dev/null | grep -q '^# Conflicts:' \
-    && git cat-file -e "$2^{commit}" 2>/dev/null \
-    && docs_only "$base" "$2"; then
-    echo "ignore-build: preview commit only merges main into the branch; skipping"
+    && git cat-file -e "$3^{commit}" 2>/dev/null \
+    && docs_only "$3" HEAD; then
+    echo "ignore-build: preview commit merges main and its code equals main's; skipping"
     exit 0
   fi
 fi

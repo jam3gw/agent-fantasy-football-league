@@ -33,14 +33,22 @@ day over day. Sources: Vercel's "Weekly Usage Summary" (10-05) and
 
 Changed:
 
-- `scripts/vercel-ignore-build.sh`: a preview commit that cleanly merges
-  `main` into a branch whose own side changed only docs since the last
-  preview is skipped. Production never takes this path. Tested in a
-  scratch repo: clean merge on a preview skips; the same commit on
-  production builds; a merge after an undeployed code commit builds; a
-  merge after a docs commit skips; a merge of a non-main branch builds; a
-  merge with `# Conflicts:` builds; an unknown base falls back to `HEAD^`;
-  plain code and docs-only commits behave as before.
+- `scripts/vercel-ignore-build.sh`: a preview commit that merges `main`
+  and whose tree differs from `main`'s tip only in docs is skipped: its
+  code is `main`'s, already checked by `main`'s production build.
+  Production never takes this path. The first version compared only the
+  branch's side since the last preview and trusted the merge message; the
+  review round found it skipped a branch's first preview, a merge whose
+  combined code no build had checked, and a conflict resolved in the
+  editor. The tree rule closes all three, at a cost: a branch with code of
+  its own, like the long-lived reporter branch, still builds on each merge
+  of `main`, because that combination is new code. New test
+  `apps/web/test/vercelIgnoreBuild.test.ts` (10 cases, real git repos,
+  `sh`); three of them fail against the first version. A second review
+  round found the older `HEAD^` fallback could still skip a branch's
+  first preview (a merge whose `main` side was docs-only, or a first push
+  ending in a docs commit): a preview with no usable previous deployment
+  now always builds; production keeps the `HEAD^` fallback.
 - `apps/web`: `typecheck` is now `next typegen && tsc --noEmit` (typegen
   takes about 2 s and writes the route types and `validator.ts`, the same
   checks `next build` ran), and `next.config.ts` sets
@@ -56,6 +64,14 @@ third from crawlers: meta-externalagent, applebot, bingbot, amazonbot),
 `/board` 8.7K, `/draft` 5.2K (still on the 30 s live window after the
 draft). The windows are §12.1's; changing them is a spec question, raised
 with Jake in the session rather than changed here.
+
+Review round (fresh-context reviewer; diff, SPEC, CLAUDE.md, Next 16 docs):
+the three ignore-script findings above, fixed; no test for the script,
+added; nothing checks the second parent is `main` beyond the subject,
+recorded in the RUNBOOK. Second round: the first-preview fallback above, fixed; nothing else new. Typecheck change: `next typegen && tsc --noEmit`
+is the documented replacement and a superset of Next's own check; the
+ESLint ignore is needed (flat config lints dot-directories). No spec or
+security finding.
 
 ## 2026-10-04 — Failed preview deploys fixed; preview deploys no longer get a database
 
