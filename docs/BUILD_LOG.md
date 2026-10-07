@@ -7534,3 +7534,8 @@ warnings plus a few queue-visibility notices.
 
 Review round one: stale-season file was accepted, health was written per URL, and only the last error surfaced; all fixed, plus tests for empty/all-fail. SPEC §5.5 note: release URL 404s as of 10-07, nfldata is the fallback.
 Review round two: health write moved out of the fetch try and made non-fatal; health-row tests added. Round three pending.
+
+Production deploy of #84 first failed in `next build` on a Google Fonts fetch
+(`inter_tight` module-not-found); production kept serving the previous build.
+A redeploy of the same commit succeeded and is live. Not a code fault. If it
+recurs, self-host the font instead of fetching at build time.
