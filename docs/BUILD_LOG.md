@@ -7524,10 +7524,12 @@ warnings plus a few queue-visibility notices.
   gone from nflverse-data (the sibling `games.parquet` still exists). The same
   columns, with all 272 2026 regular-season games, are at
   `nflverse/nfldata/master/data/games.csv`. `fetchSchedule` now tries both
-  URLs in order and requires the file to parse to at least one game. Schedule
+  URLs in order and requires the file to have games for the season; health is recorded once, with every URL's error on failure. Schedule
   ingest next runs on its normal cadence; the stored schedule is unaffected.
 - **Two failed `board_reply` sessions, team 12 (glm-5.3), 10-06 13:29/13:53**:
   a gateway stream timeout after 13 minutes with zero tool calls, then a
   deadline timeout. Single provider stall, nothing since; not a code fault.
 - `stats.audit` week 4: 1 of 69 players differs from nflverse by more than
   0.5 — informational.
+
+Review round one: stale-season file was accepted, health was written per URL, and only the last error surfaced; all fixed, plus tests for empty/all-fail. SPEC §5.5 note: release URL 404s as of 10-07, nfldata is the fallback.

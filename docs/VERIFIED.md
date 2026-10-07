@@ -445,3 +445,4 @@ Read from the bundled docs at `node_modules/next/dist/docs/` before writing any 
 ## 2026-10-03 — nflverse weekly stats release tag (§5.6)
 
 `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_2026.csv` → 200, same columns as before (`player_id, season, week, passing_yards, ...`). The old `player_stats/stats_player_week_2026.csv` and `player_stats/player_stats_2026.csv` → 404. `NFLVERSE_STATS_URLS` tries the new tag first.
+- 2026-10-07: `schedules/games.csv` release asset → 404; `raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv` → 206, 272 2026 REG games, same columns.

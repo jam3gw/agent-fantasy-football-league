@@ -2,7 +2,7 @@
 import { zonedTimeToUtc } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import { parseCsv } from "./csv.ts";
-import { fetchWithRetry } from "./http.ts";
+import { fetchWithRetry, recordHealth } from "./http.ts";
 import { nflverseToSleeper } from "./teamAbbrev.ts";
 
 /**
@@ -56,24 +56,26 @@ export function parseGames(csvText: string, season?: number): NflverseGame[] {
   return out;
 }
 
-export async function fetchSchedule(opts: { db?: EngineDb } = {}): Promise<string> {
-  let lastError: unknown;
+export async function fetchSchedule(
+  opts: { db?: EngineDb; season?: number; backoffMs?: number } = {},
+): Promise<string> {
+  const { db, season, backoffMs } = opts;
+  const errors: string[] = [];
   for (const url of SCHEDULE_URLS) {
     try {
-      const text = (await fetchWithRetry(url, {
-        ...opts,
-        parse: "text",
-        timeoutMs: 60_000,
-        retries: 1,
-        healthKey: "nflverse.schedule",
-      })) as string;
-      if (parseGames(text).length === 0) throw new Error(`nflverse schedule parsed to zero rows: ${url}`);
+      const text = (await fetchWithRetry(url, { parse: "text", timeoutMs: 60_000, backoffMs })) as string;
+      if (parseGames(text, season).length === 0) {
+        throw new Error(`nflverse schedule has no games${season ? ` for ${season}` : ""}: ${url}`);
+      }
+      await recordHealth(db, "nflverse.schedule", null);
       return text;
     } catch (err) {
-      lastError = err;
+      errors.push(String(err));
     }
   }
-  throw lastError ?? new Error("nflverse schedule unavailable");
+  const message = errors.join("; ") || "nflverse schedule unavailable";
+  await recordHealth(db, "nflverse.schedule", message);
+  throw new Error(message);
 }
 
 /**

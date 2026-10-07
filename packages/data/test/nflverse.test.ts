@@ -114,6 +114,23 @@ describe("fetchSchedule fallthrough (§5.5)", () => {
     vi.stubGlobal("fetch", async (u: string | URL | Request) =>
       String(u) === SCHEDULE_URLS[0] ? new Response("nf", { status: 404 }) : new Response(csv, { status: 200 }),
     );
-    expect(await fetchSchedule()).toBe(csv);
+    expect(await fetchSchedule({ season: 2026 })).toBe(csv);
+  });
+
+  it("falls through a 200 with no rows for the season", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (u: string | URL | Request) => {
+      calls.push(String(u));
+      return String(u) === SCHEDULE_URLS[0]
+        ? new Response("game_id,season,week,gameday\n", { status: 200 })
+        : new Response(csv, { status: 200 });
+    });
+    expect(await fetchSchedule({ season: 2026 })).toBe(csv);
+    expect(calls).toEqual([...SCHEDULE_URLS]);
+  });
+
+  it("throws with every URL's error when all fail", async () => {
+    vi.stubGlobal("fetch", async () => new Response("nf", { status: 404 }));
+    await expect(fetchSchedule({ season: 2026, backoffMs: 0 })).rejects.toThrow(/games\.csv.*games\.csv/s);
   });
 });
