@@ -61,20 +61,24 @@ export async function fetchSchedule(
 ): Promise<string> {
   const { db, season, backoffMs } = opts;
   const errors: string[] = [];
+  // A health-table blip must neither discard a good file nor mask the fetch error.
+  const record = (error: string | null) => recordHealth(db, "nflverse.schedule", error).catch(() => {});
   for (const url of SCHEDULE_URLS) {
+    let text: string;
     try {
-      const text = (await fetchWithRetry(url, { parse: "text", timeoutMs: 60_000, backoffMs })) as string;
+      text = (await fetchWithRetry(url, { parse: "text", timeoutMs: 60_000, backoffMs })) as string;
       if (parseGames(text, season).length === 0) {
         throw new Error(`nflverse schedule has no games${season ? ` for ${season}` : ""}: ${url}`);
       }
-      await recordHealth(db, "nflverse.schedule", null);
-      return text;
     } catch (err) {
       errors.push(String(err));
+      continue;
     }
+    await record(null);
+    return text;
   }
   const message = errors.join("; ") || "nflverse schedule unavailable";
-  await recordHealth(db, "nflverse.schedule", message);
+  await record(message);
   throw new Error(message);
 }
 

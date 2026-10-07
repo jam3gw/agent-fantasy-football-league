@@ -133,4 +133,40 @@ describe("fetchSchedule fallthrough (§5.5)", () => {
     vi.stubGlobal("fetch", async () => new Response("nf", { status: 404 }));
     await expect(fetchSchedule({ season: 2026, backoffMs: 0 })).rejects.toThrow(/games\.csv.*games\.csv/s);
   });
+
+  const fakeDb = (writes: Array<Record<string, unknown>>, fail = false) =>
+    ({
+      insert: () => ({
+        values: (v: Record<string, unknown>) => ({
+          onConflictDoUpdate: async () => {
+            if (fail) throw new Error("db down");
+            writes.push(v);
+          },
+        }),
+      }),
+    }) as never;
+
+  it("writes one success row after a fallback, with no error row", async () => {
+    vi.stubGlobal("fetch", async (u: string | URL | Request) =>
+      String(u) === SCHEDULE_URLS[0] ? new Response("nf", { status: 404 }) : new Response(csv, { status: 200 }),
+    );
+    const writes: Array<Record<string, unknown>> = [];
+    await fetchSchedule({ db: fakeDb(writes), season: 2026 });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toHaveProperty("lastSuccessAt");
+    expect(writes[0]).not.toHaveProperty("lastError");
+  });
+
+  it("writes one aggregated error row when every URL fails", async () => {
+    vi.stubGlobal("fetch", async () => new Response("nf", { status: 404 }));
+    const writes: Array<Record<string, unknown>> = [];
+    await expect(fetchSchedule({ db: fakeDb(writes), season: 2026, backoffMs: 0 })).rejects.toThrow();
+    expect(writes).toHaveLength(1);
+    expect(String(writes[0]!.lastError)).toMatch(/games\.csv.*games\.csv/s);
+  });
+
+  it("a failing health write does not change the result", async () => {
+    vi.stubGlobal("fetch", async () => new Response(csv, { status: 200 }));
+    expect(await fetchSchedule({ db: fakeDb([], true), season: 2026 })).toBe(csv);
+  });
 });
