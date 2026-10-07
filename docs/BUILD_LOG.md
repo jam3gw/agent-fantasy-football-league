@@ -7510,3 +7510,27 @@ warnings.
   first; the header matches what the parser expects.
 - **Gateway credits $9.19, under the $15 alarm** (`gateway.credits`, daily
   email already sent). Needs a top-up from Jake; at $0 every session fails.
+
+## 2026-10-07 — Operational sweep: nflverse schedule URL fixed
+
+Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
+healthz 200 (tick under a minute old); production deploy READY (#83); no
+running sessions; no queued session more than 15 minutes past its due time
+(71 queued are future plans); runtime errors only the known AI SDK reasoning
+warnings plus a few queue-visibility notices.
+
+- **nflverse schedule 404 since 10-07** (`ingest.schedule` job 9230 failed,
+  `nflverse.schedule` health row). The `schedules/games.csv` release asset is
+  gone from nflverse-data (the sibling `games.parquet` still exists). The same
+  columns, with all 272 2026 regular-season games, are at
+  `nflverse/nfldata/master/data/games.csv`. `fetchSchedule` now tries both
+  URLs in order and requires the file to have games for the season; health is recorded once, with every URL's error on failure. Schedule
+  ingest next runs on its normal cadence; the stored schedule is unaffected.
+- **Two failed `board_reply` sessions, team 12 (glm-5.3), 10-06 13:29/13:53**:
+  a gateway stream timeout after 13 minutes with zero tool calls, then a
+  deadline timeout. Single provider stall, nothing since; not a code fault.
+- `stats.audit` week 4: 1 of 69 players differs from nflverse by more than
+  0.5 — informational.
+
+Review round one: stale-season file was accepted, health was written per URL, and only the last error surfaced; all fixed, plus tests for empty/all-fail. SPEC §5.5 note: release URL 404s as of 10-07, nfldata is the fallback.
+Review round two: health write moved out of the fetch try and made non-fatal; health-row tests added. Round three pending.
