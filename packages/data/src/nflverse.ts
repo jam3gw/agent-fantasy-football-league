@@ -5,7 +5,16 @@ import { parseCsv } from "./csv.ts";
 import { fetchWithRetry } from "./http.ts";
 import { nflverseToSleeper } from "./teamAbbrev.ts";
 
-export const SCHEDULE_URL = "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv";
+/**
+ * The release asset `schedules/games.csv` was removed from nflverse-data in
+ * October 2026 (404); the same columns are published by nfldata. Every known
+ * location is tried and the first that responds wins.
+ */
+export const SCHEDULE_URLS: string[] = [
+  "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv",
+  "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv",
+];
+export const SCHEDULE_URL = SCHEDULE_URLS[0]!;
 
 export interface NflverseGame {
   gameId: string;
@@ -48,12 +57,23 @@ export function parseGames(csvText: string, season?: number): NflverseGame[] {
 }
 
 export async function fetchSchedule(opts: { db?: EngineDb } = {}): Promise<string> {
-  return (await fetchWithRetry(SCHEDULE_URL, {
-    ...opts,
-    parse: "text",
-    timeoutMs: 60_000,
-    healthKey: "nflverse.schedule",
-  })) as string;
+  let lastError: unknown;
+  for (const url of SCHEDULE_URLS) {
+    try {
+      const text = (await fetchWithRetry(url, {
+        ...opts,
+        parse: "text",
+        timeoutMs: 60_000,
+        retries: 1,
+        healthKey: "nflverse.schedule",
+      })) as string;
+      if (parseGames(text).length === 0) throw new Error(`nflverse schedule parsed to zero rows: ${url}`);
+      return text;
+    } catch (err) {
+      lastError = err;
+    }
+  }
+  throw lastError ?? new Error("nflverse schedule unavailable");
 }
 
 /**

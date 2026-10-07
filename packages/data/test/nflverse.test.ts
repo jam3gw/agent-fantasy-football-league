@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NFLVERSE_STATS_URLS, fetchNflverseWeeklyStats, parseGames, parseNflverseWeeklyStats } from "../src/nflverse.ts";
+import { SCHEDULE_URLS, fetchSchedule, NFLVERSE_STATS_URLS, fetchNflverseWeeklyStats, parseGames, parseNflverseWeeklyStats } from "../src/nflverse.ts";
 
 const gamesCsv = readFileSync(
   fileURLToPath(new URL("../../../fixtures/nflverse/games.csv", import.meta.url)),
@@ -101,5 +101,19 @@ describe("fetchNflverseWeeklyStats fallthrough (§5.6)", () => {
   it("throws when every URL fails", async () => {
     respond(() => null);
     await expect(fetchNflverseWeeklyStats(2026)).rejects.toThrow();
+  });
+});
+
+describe("fetchSchedule fallthrough (§5.5)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const csv =
+    "game_id,season,game_type,week,gameday,gametime,away_team,home_team,away_score,home_score,result\n" +
+    "2026_01_NE_SEA,2026,REG,1,2026-09-09,20:20,NE,SEA,,,\n";
+
+  it("falls through a 404 on the release asset to nfldata", async () => {
+    vi.stubGlobal("fetch", async (u: string | URL | Request) =>
+      String(u) === SCHEDULE_URLS[0] ? new Response("nf", { status: 404 }) : new Response(csv, { status: 200 }),
+    );
+    expect(await fetchSchedule()).toBe(csv);
   });
 });
