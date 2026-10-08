@@ -10,11 +10,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetDatabaseBreaker, safeRead } from "../lib/queries";
 
-/** §12.1: 30 s for the live pages, 5 minutes for the rest. */
+/** §12.1: 30 s for the live pages, 5 minutes for the rest (the draft room after the draft). */
 const WINDOWS: Record<string, number> = {
   "page.tsx": 30,
   "matchups/[week]/page.tsx": 30,
-  "draft/page.tsx": 30,
+  "draft/page.tsx": 300,
   "standings/page.tsx": 300,
   "board/page.tsx": 300,
   "waivers/page.tsx": 300,

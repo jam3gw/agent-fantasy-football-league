@@ -12,10 +12,15 @@ import { InlineMarkdown } from "../../components/markdown";
 import { flattenMarkdown } from "../../lib/broadcastLogic";
 import DraftLive from "./live";
 
-/** 30 s while the draft is live (§12.1); the board only changes on a pick. */
-// §12.1: 30s freshness. Rendered ahead and refreshed in the
-// background, so the CDN serves a copy at most 30s stale.
-export const revalidate = 30;
+/**
+ * §12.1: 5 minutes, the window for pages that are not live. The 2026 draft is
+ * over and the board no longer changes; at 30 s the page was rewritten every
+ * half minute for nothing (5.2K ISR write units in the week to 2026-10-05).
+ * Before another live draft, set this back to 30: the live panel's
+ * `router.refresh()` re-reads the cached page, it does not invalidate it, so
+ * the board below the panel can lag by up to this window.
+ */
+export const revalidate = 300;
 
 const STATUS_LABEL: Record<string, string> = {
   not_started: "not started",

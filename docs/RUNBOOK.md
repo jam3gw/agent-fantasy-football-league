@@ -217,6 +217,8 @@ Use it when an agent is misbehaving or a provider is down for that model.
 
 ## Before the draft
 
+Before a live draft, set `export const revalidate` in `apps/web/app/draft/page.tsx` back to 30 and deploy (it is 300 after the 2026 draft, §12.1's window for pages that are not live), and change `draft/page.tsx` in `apps/web/test/caching.test.ts` to match. At 300 the board under the live panel can lag a pick by up to five minutes.
+
 Section 17's checklist, in order:
 
 1. `/admin/rankings` — the pull is fresh and at least 200 players have a rank. Resolve any with the mapping control. This is a hard gate: the draft refuses to start until it is met.

@@ -2,6 +2,20 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-10-08 — `/draft` on the 5-minute window
+
+Jake answered the open ISR question from the 10-06 entry: the draft has been
+done for a while. `/draft` still revalidated every 30 s, §12.1's window for
+live pages, and was rewritten every half minute with an unchanged board
+(5.2K ISR write units in the week to 10-05). It is now 300 s, §12.1's window
+for everything else; `apps/web/test/caching.test.ts` asserts it. The live
+panel's `router.refresh()` re-reads the cached page rather than
+invalidating it, so before another live draft the window goes back to 30
+(RUNBOOK, "Before the draft").
+
+Still open with Jake: whether finished session transcripts (`/sessions/[id]`,
+36K units that week) should cache longer than §12.1's 5 minutes.
+
 ## 2026-10-06 — Build CPU minutes: where the 4.05K came from; three build-time cuts
 
 Jake asked why the team used so many build CPU minutes when nothing changes
