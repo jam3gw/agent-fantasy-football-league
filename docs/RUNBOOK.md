@@ -217,6 +217,8 @@ Use it when an agent is misbehaving or a provider is down for that model.
 
 ## Before the draft
 
+Before a live draft, set `export const revalidate` in `apps/web/app/draft/page.tsx` back to 30 and deploy, and change `draft/page.tsx` in `apps/web/test/caching.test.ts` to match. After the 2026 draft it is `false`: the board is rendered once per deploy and never refreshed, so during a draft it would never show a pick. A production build fails if that one render cannot read the database (`apps/web/lib/buildPhase.ts`), so an empty board never goes live; production stays on the previous deployment, and the fix is a redeploy once the database answers.
+
 Section 17's checklist, in order:
 
 1. `/admin/rankings` — the pull is fresh and at least 200 players have a rank. Resolve any with the mapping control. This is a hard gate: the draft refuses to start until it is met.

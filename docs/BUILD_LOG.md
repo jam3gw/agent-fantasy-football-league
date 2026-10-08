@@ -2,6 +2,33 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-10-08 — `/draft` never revalidates after the draft
+
+Jake answered the open ISR question from the 10-06 entry: the draft has been
+done for a while, and then chose `revalidate = false` over §12.1's 5-minute
+window. `/draft` revalidated every 30 s (§12.1's live window) and was
+rewritten twice a minute with an unchanged board: 5.2K ISR write units in
+the week to 10-05. Nothing on the board changes between deploys: picks and
+reasons are final, team names are set once at onboarding, and a model
+change ships with a deploy, which renders the page again.
+
+- `apps/web/app/draft/page.tsx`: `revalidate = false`.
+- The page caught read errors and rendered an empty board, which ISR used
+  to replace within the window. Rendered once per deploy, that board would
+  stay up until the next deploy, so the page now rethrows during a
+  production build (`apps/web/lib/buildPhase.ts`, `failBuildOnReadError`:
+  `NEXT_PHASE` is `phase-production-build` and `VERCEL_ENV` is
+  `production`). Preview builds have no database and keep the fallback.
+  Tests: `buildPhase.test.ts`; `caching.test.ts` asserts `false`.
+- RUNBOOK "Before the draft": set it back to 30 before a live draft.
+
+Not verified locally: a local `next build` without a database stops at
+`/spend` (`DATABASE_URL is not set`) before `/draft`, as it did before this
+change. The preview and production builds are the check.
+
+Still open with Jake: whether finished session transcripts (`/sessions/[id]`,
+36K units that week) should cache longer than §12.1's 5 minutes.
+
 ## 2026-10-06 — Build CPU minutes: where the 4.05K came from; three build-time cuts
 
 Jake asked why the team used so many build CPU minutes when nothing changes
