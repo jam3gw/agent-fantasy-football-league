@@ -10,11 +10,11 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { resetDatabaseBreaker, safeRead } from "../lib/queries";
 
-/** §12.1: 30 s for the live pages, 5 minutes for the rest (the draft room after the draft). */
-const WINDOWS: Record<string, number> = {
+/** §12.1: 30 s for the live pages, 5 minutes for the rest; the draft room never revalidates after the draft. */
+const WINDOWS: Record<string, number | false> = {
   "page.tsx": 30,
   "matchups/[week]/page.tsx": 30,
-  "draft/page.tsx": 300,
+  "draft/page.tsx": false,
   "standings/page.tsx": 300,
   "board/page.tsx": 300,
   "waivers/page.tsx": 300,
@@ -43,7 +43,7 @@ const READS_QUERY = new Set(["transactions/page.tsx"]);
 const appDir = fileURLToPath(new URL("../app/", import.meta.url));
 
 describe("§12.1 — freshness windows", () => {
-  it.each(Object.entries(WINDOWS))("%s revalidates every %i s", (file, seconds) => {
+  it.each(Object.entries(WINDOWS))("%s revalidate = %s", (file, seconds) => {
     const source = readFileSync(appDir + file, "utf8");
     expect(source).toMatch(new RegExp(`export const revalidate = ${seconds};`));
     // `force-dynamic` would silently replace the window with `no-store`.

@@ -11,16 +11,17 @@ import { Badge, Card, Cell, Empty, PageTitle, Row, Table, TeamLabel } from "../.
 import { InlineMarkdown } from "../../components/markdown";
 import { flattenMarkdown } from "../../lib/broadcastLogic";
 import DraftLive from "./live";
+import { failBuildOnReadError } from "../../lib/buildPhase";
 
 /**
- * §12.1: 5 minutes, the window for pages that are not live. The 2026 draft is
- * over and the board no longer changes; at 30 s the page was rewritten every
- * half minute for nothing (5.2K ISR write units in the week to 2026-10-05).
- * Before another live draft, set this back to 30: the live panel's
- * `router.refresh()` re-reads the cached page, it does not invalidate it, so
- * the board below the panel can lag by up to this window.
+ * Never revalidated: the 2026 draft is over and nothing on the board changes
+ * between deploys (picks and reasons are final, team names are set once at
+ * onboarding, and a model change ships with a deploy, which renders this page
+ * again). At §12.1's 30 s it was rewritten twice a minute for nothing (5.2K
+ * ISR write units in the week to 2026-10-05). Jake chose this on 2026-10-08.
+ * Before another live draft, set it back to 30 (RUNBOOK, "Before the draft").
  */
-export const revalidate = 300;
+export const revalidate = false;
 
 const STATUS_LABEL: Record<string, string> = {
   not_started: "not started",
@@ -184,6 +185,9 @@ export default async function DraftPage() {
   try {
     return await DraftPageInner();
   } catch (error) {
+    // Rendered once per deploy: an empty board would stay up until the next
+    // one, so a production build fails instead (lib/buildPhase.ts).
+    if (failBuildOnReadError()) throw error;
     console.error("[the draft] render failed", error instanceof Error ? error.message : error);
     return (
       <>
