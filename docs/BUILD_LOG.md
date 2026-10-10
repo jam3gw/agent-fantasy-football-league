@@ -7566,3 +7566,13 @@ Production deploy of #84 first failed in `next build` on a Google Fonts fetch
 (`inter_tight` module-not-found); production kept serving the previous build.
 A redeploy of the same commit succeeded and is live. Not a code fault. If it
 recurs, self-host the font instead of fetching at build time.
+
+## 2026-10-10 — Operational sweep: green
+
+healthz 200 (tick 30s old); production deploy READY (#86); no runtime errors
+in 72h; no failed jobs since 10-07 (schedule ingest recovered); no running
+sessions; the two queued sessions are future plans (due 10-11). Sessions failed
+since the last sweep: two `board_reply` stream timeouts (team 12) and one
+gateway 503 (team 2), 10-08 — provider stalls, not code. `gateway.credits`
+still under the $15 alarm ($10.87; daily email already going out) — needs a
+top-up from Jake.
