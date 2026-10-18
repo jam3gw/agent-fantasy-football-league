@@ -2,6 +2,21 @@
 
 Each entry: date, the request made, what came back. Items marked **verify** in SPEC.md land here.
 
+## 2026-10-18 — Jev live calls through the AI Gateway (§11.1 verify)
+
+Read-only query on production Neon (`odds_runs`, `matchup_odds`, `player_play_odds`) after PR #65 merged on 10-04. No call was made by hand: these are the scheduled `odds.run` jobs.
+
+| Run | Status | `jev_error` | Model stored | Jev input tokens | Cost stored | Matchups × methods | Injured-starter calls (Jev answered) |
+|---|---|---|---|---|---|---|---|
+| Week 5 Thu (10-08 13:30Z) | succeeded | none | `typesafe-ai/jev` | 30,909 | $0.001298 | 6 × 4 = 24 | 15 (15) |
+| Week 5 Sun (10-11 15:30Z) | succeeded | none | `typesafe-ai/jev` | 26,830 | $0.001127 | 6 × 4 = 24 | 7 (7) |
+| Week 6 Thu (10-15 13:30Z) | succeeded | none | `typesafe-ai/jev` | 27,727 | $0.001165 | 6 × 4 = 24 | 10 (10) |
+
+- The endpoint, the key, and the request and reply shapes in the 09-22 entry work in production. Every Jev answer passed the 0–1 range check, so both Jev methods were stored for every matchup in every run.
+- Each run cost about one tenth of a cent.
+- The stored cost equals input tokens × $0.042 per million for every run. The stored row does not record whether that number came from the gateway's `provider_metadata.gateway.cost` or from the league's price-table fallback, so this check does not tell the two apart.
+- The model id in the reply is `typesafe-ai/jev`, as expected. This check did not look for a release number (such as `jev-1.13.0`) in the reply or its headers.
+
 ## 2026-09-22 — TypeSafe Jev API and price (§11.1 verify)
 
 Read `https://docs.typesafe.ai/api.md`, `https://docs.typesafe.ai/models.md`, Vercel's `/docs/ai-gateway/sdks-and-apis/typesafe` and `/docs/ai-gateway/modalities/evaluation`, and `GET https://ai-gateway.vercel.sh/v1/models` (no key needed for any of them).
@@ -18,7 +33,7 @@ Read `https://docs.typesafe.ai/api.md`, `https://docs.typesafe.ai/models.md`, Ve
 | Errors | 401 bad key, 422 bad body, 429 rate limit, 529 overloaded (retry with backoff) |
 | Known weak spots (`/model-jaggedness/jev-1.13.md`) | counting and arithmetic, dates read as text, long irrelevant state, P(yes) and 1 − P(no) not complementary. The league does all sums and time differences in code and asks each question one way only |
 
-Not checked: a live call. No call was made from this session. The first live `odds.run` on the preview deploy should be read end to end (answers, `usage`, the gateway cost, the `model` field, and whether anything in the reply or its headers names the Jev release) and recorded here.
+Not checked on 09-22: a live call. That check is now done; see the entry below.
 
 ## 2026-09-08 — Gateway cost field and the ledger, checked on session 2598 (§8.7 verify)
 
