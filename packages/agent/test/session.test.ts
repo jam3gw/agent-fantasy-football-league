@@ -19,7 +19,7 @@ import {
   modelPrices,
 } from "@league/engine";
 import { createTestDb, type TestDb } from "./helpers/db.ts";
-import { runSession, endingToolFor, type ModelStepResult, type RunSessionDeps } from "../src/session.ts";
+import { runSession, endingToolFor, describeError, type ModelStepResult, type RunSessionDeps } from "../src/session.ts";
 import { defineTool, type LeagueTool, type ToolContext } from "../src/tools/types.ts";
 import { publishPowerRankingsTool } from "../src/tools/reporter.ts";
 
@@ -777,5 +777,16 @@ describe("§9.2 — the tick's reclaim is authoritative", () => {
     const row = (await db.select().from(sessions).where(eq(sessions.id, sessionId)))[0]!;
     expect(row.status).toBe("failed");
     expect(row.error).toBe("abandoned: no progress");
+  });
+});
+
+describe("describeError", () => {
+  it("keeps the reason of a plain-object error instead of [object Object]", () => {
+    const err = { error: { message: "The server had an error", code: "service_unavailable" } };
+    expect(describeError(err)).toContain("service_unavailable");
+  });
+  it("leaves Error instances and primitives as String() renders them", () => {
+    expect(describeError(new Error("boom"))).toBe("Error: boom");
+    expect(describeError("x")).toBe("x");
   });
 });

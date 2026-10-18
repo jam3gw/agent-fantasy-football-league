@@ -7566,3 +7566,20 @@ Production deploy of #84 first failed in `next build` on a Google Fonts fetch
 (`inter_tight` module-not-found); production kept serving the previous build.
 A redeploy of the same commit succeeded and is live. Not a code fault. If it
 recurs, self-host the font instead of fetching at build time.
+
+## 2026-10-18 — Operational sweep: provider outage; error text fixed
+
+Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
+healthz 200 (tick under a minute old); production deploy READY (#86); no failed
+jobs; no running sessions; no queued session past due (41 queued are future
+`lineup_check` plans, earliest 15:30 UTC today).
+
+- **Session 6638 failed** (team 12, glm-5.3, `lineup_check` 12:06 UTC): the
+  gateway returned `server_error / service_unavailable` mid-stream after 9 tool
+  calls. Provider outage, not a code fault; team 12's next `lineup_check` is
+  queued for 15:34 UTC, before the 17:00 kickoff window.
+- **Error text was "[object Object]"**: a provider stream error is thrown as a
+  plain object and `String(err)` hid the reason. `describeError` now serializes
+  it into the transcript event and the `sessions.error` column.
+- **Gateway credits $12.14**, under the $15 alarm (daily email already sent);
+  still needs a top-up from Jake.
