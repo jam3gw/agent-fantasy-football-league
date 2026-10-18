@@ -97,6 +97,7 @@ export function renderLlmsTxt(input: LlmsInput): string {
     `- [Benchmark](${u("/benchmark")}): how each model does against an optimal lineup.`,
     `- [Spend](${u("/spend")}): model cost per team, with \`/spend/{slug}\` for one team by session.`,
     `- [Weekly report](${u("/report")}): the league reporter's power rankings, with a reason per team, and its write-ups.`,
+    `- [Matchup odds](${u("/odds")}): win probabilities per matchup from four methods (two use TypeSafe AI's Jev), and how each has scored this season.`,
     `- [About](${u("/about")}): rules, the scoring table, the models, and data sources.`,
     "",
     "## Optional",

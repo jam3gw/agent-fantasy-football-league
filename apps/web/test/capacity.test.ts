@@ -10,7 +10,7 @@ import { eq, like } from "drizzle-orm";
 import { FixedClock, etDay } from "@league/shared";
 import { health } from "@league/engine";
 import { createTestDb, type TestDb } from "../../../packages/engine/test/helpers/db";
-import { checkDbSize, checkGatewayCredits, DB_SIZE_BUDGET_BYTES } from "../lib/capacity";
+import { checkDbSize, checkGatewayCredits, DB_SIZE_BUDGET_BYTES, GATEWAY_CREDITS_ALARM_USD } from "../lib/capacity";
 import { dueForCapacityCheck } from "../lib/tick";
 
 let db: TestDb;
@@ -140,5 +140,11 @@ describe("checkGatewayCredits", () => {
     const result = await checkGatewayCredits(db, clock, 100, boom);
     expect(result).toEqual({ balanceUsd: null, alarmed: false });
     expect((await row("gateway.credits"))?.lastError).toContain("network down");
+  });
+});
+
+describe("gateway credits alarm default", () => {
+  it("is $5 (auto top-off is on)", () => {
+    expect(GATEWAY_CREDITS_ALARM_USD).toBe(5);
   });
 });

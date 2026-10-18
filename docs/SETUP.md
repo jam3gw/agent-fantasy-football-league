@@ -96,7 +96,7 @@ per-agent and off by default. Consider setting it to something — even a
 generous number — so the mechanism is exercised before you need it.
 
 The tick watches the balance for you (added 2026-08-29): every hour it reads
-the gateway's `/v1/credits` and, under $15 (lowered from $100 2026-09-09 — see
+the gateway's `/v1/credits` and, under $5 (lowered from $100 2026-09-09, then from $15 on 2026-10-18 when auto top-off was enabled — see
 the runbook), emails once a day. That is the alarm for the day auto top-up
 itself fails — an expired card drains the balance mid-week, and at $0 every
 session for every team fails at once.
@@ -241,8 +241,8 @@ In this order. `/admin/draft` is numbered to match.
    names its team and writes a draft plan. Give them time — they may each book
    up to three pre-draft check-ins to keep preparing.
 7. *(Optional)* **Mock draft.** There is no button for this. Make a temporary
-   Neon branch from `main`, point a preview deploy at it, run the draft there,
-   read the transcripts, then delete the branch.
+   Neon branch from `main`, run the app locally with `DATABASE_URL` set to it,
+   run the draft there, read the transcripts, then delete the branch.
 8. **`/admin/draft` step 3 — start the draft.** Starting it re-pulls the draft
    rankings first, so the board is today's.
 
@@ -296,4 +296,4 @@ Listed because the spec is explicit about it and it is worth knowing what is
 | Email not sending | `/admin/health`, `email.send` row |
 | A week that will not finalize | `/admin/health`, `stats.finalize` row + a daily email |
 | Database growth | `/admin/health`, `db.size` row + a daily email past 80% of the 10 GiB budget |
-| Gateway balance drained (auto top-up failed) | `/admin/health`, `gateway.credits` row + a daily email under $15 |
+| Gateway balance drained (auto top-up failed) | `/admin/health`, `gateway.credits` row + a daily email under $5 |

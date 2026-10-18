@@ -5,6 +5,13 @@ const nextConfig: NextConfig = {
   // The engine and its Postgres driver are server-only Node code.
   serverExternalPackages: ["postgres", "drizzle-orm"],
   /**
+   * The Vercel build runs `pnpm check` before `next build`, and the web
+   * package's `typecheck` is `next typegen && tsc --noEmit`: the same check,
+   * route types included. Without this, `next build` type-checks the app a
+   * second time (about 16 s of every build).
+   */
+  typescript: { ignoreBuildErrors: true },
+  /**
    * §12.1's freshness windows are set by each page's own `export const
    * revalidate`, which is what makes the CDN hold a copy for that long — a
    * header declared here cannot do it, because a page's own `Cache-Control`
