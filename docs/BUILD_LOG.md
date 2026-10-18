@@ -7609,6 +7609,23 @@ Production deploy of #84 first failed in `next build` on a Google Fonts fetch
 A redeploy of the same commit succeeded and is live. Not a code fault. If it
 recurs, self-host the font instead of fetching at build time.
 
+## 2026-10-11 — Operational sweep: gateway credits still low; team 12 board replies stalling
+
+Sweep of healthz, health table, scheduled_jobs, sessions, Vercel.
+healthz 200 (tick under a minute old); production deploy READY (#86); no
+running sessions; none of the 40 queued sessions past due; runtime errors only
+the known AI SDK reasoning warnings. `nflverse.schedule` recovered (success
+10-11 09:00 via the nfldata fallback); job 9230 (10-07) is the only failed job
+and is already fixed. The `tick.*` last_error rows date from 08-29 and are stale.
+
+- **Gateway credits $10.50**, under the $15 alarm (`gateway.credits`, error
+  stamped 10-11 12:13). Still needs a top-up from Jake; at $0 every session fails.
+- **Team 12 (glm-5.3) `board_reply` stalls**: failed 10-08 (#6183, #6198, gateway
+  stream exceeded max duration after ~19-24 min), plus 10-06 failures noted
+  earlier; no success since 10-06 13:12 (6 later ones skipped). Provider-side
+  stall on a hard task, not a code fault; flagged, not fixed.
+- Also 10-08: `board_reply` #6255 (team 2) gateway 5xx after 3 retries;
+  `reporter_preview` #6155 `no_report`. Single events, nothing since.
 ## 2026-10-10 — Operational sweep: green
 
 healthz 200 (tick 30s old); production deploy READY (#86); no runtime errors
