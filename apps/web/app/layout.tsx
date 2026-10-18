@@ -69,6 +69,7 @@ const MORE = [
   ["/waivers", "Waivers"],
   ["/draft", "Draft"],
   ["/report", "Reporter"],
+  ["/odds", "Odds"],
   ["/about", "About"],
 ] as const;
 

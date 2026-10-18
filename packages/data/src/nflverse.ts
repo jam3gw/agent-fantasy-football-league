@@ -2,10 +2,19 @@
 import { zonedTimeToUtc } from "@league/shared";
 import type { EngineDb } from "@league/engine";
 import { parseCsv } from "./csv.ts";
-import { fetchWithRetry } from "./http.ts";
+import { fetchWithRetry, recordHealth } from "./http.ts";
 import { nflverseToSleeper } from "./teamAbbrev.ts";
 
-export const SCHEDULE_URL = "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv";
+/**
+ * The release asset `schedules/games.csv` was removed from nflverse-data in
+ * October 2026 (404); the same columns are published by nfldata. Every known
+ * location is tried and the first that responds wins.
+ */
+export const SCHEDULE_URLS: string[] = [
+  "https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv",
+  "https://raw.githubusercontent.com/nflverse/nfldata/master/data/games.csv",
+];
+export const SCHEDULE_URL = SCHEDULE_URLS[0]!;
 
 export interface NflverseGame {
   gameId: string;
@@ -47,21 +56,40 @@ export function parseGames(csvText: string, season?: number): NflverseGame[] {
   return out;
 }
 
-export async function fetchSchedule(opts: { db?: EngineDb } = {}): Promise<string> {
-  return (await fetchWithRetry(SCHEDULE_URL, {
-    ...opts,
-    parse: "text",
-    timeoutMs: 60_000,
-    healthKey: "nflverse.schedule",
-  })) as string;
+export async function fetchSchedule(
+  opts: { db?: EngineDb; season?: number; backoffMs?: number } = {},
+): Promise<string> {
+  const { db, season, backoffMs } = opts;
+  const errors: string[] = [];
+  // A health-table blip must neither discard a good file nor mask the fetch error.
+  const record = (error: string | null) => recordHealth(db, "nflverse.schedule", error).catch(() => {});
+  for (const url of SCHEDULE_URLS) {
+    let text: string;
+    try {
+      text = (await fetchWithRetry(url, { parse: "text", timeoutMs: 60_000, backoffMs })) as string;
+      if (parseGames(text, season).length === 0) {
+        throw new Error(`nflverse schedule has no games${season ? ` for ${season}` : ""}: ${url}`);
+      }
+    } catch (err) {
+      errors.push(String(err));
+      continue;
+    }
+    await record(null);
+    return text;
+  }
+  const message = errors.join("; ") || "nflverse schedule unavailable";
+  await record(message);
+  throw new Error(message);
 }
 
 /**
  * nflverse weekly player stats (§5.6) — the documented audit path, and the
  * last rung of the scoring ladder (§13.4). The release file naming changed
- * over time, so both known names are tried and the first that responds wins.
+ * over time (the 2026 file lives under the `stats_player` release tag), so
+ * every known location is tried and the first that responds wins.
  */
 export const NFLVERSE_STATS_URLS = (season: number): string[] => [
+  `https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_${season}.csv`,
   `https://github.com/nflverse/nflverse-data/releases/download/player_stats/stats_player_week_${season}.csv`,
   `https://github.com/nflverse/nflverse-data/releases/download/player_stats/player_stats_${season}.csv`,
 ];
@@ -155,7 +183,9 @@ export async function fetchNflverseWeeklyStats(
         retries: 1,
         healthKey: "nflverse.player_stats",
       })) as string;
-      return parseNflverseWeeklyStats(text, season);
+      const parsed = parseNflverseWeeklyStats(text, season);
+      if (parsed.length === 0) throw new Error(`nflverse weekly stats parsed to zero rows: ${url}`);
+      return parsed;
     } catch (err) {
       lastError = err;
     }

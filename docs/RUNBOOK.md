@@ -10,14 +10,14 @@ First-time setup — accounts, secrets, the domain, the pre-draft order of opera
 |---|---|
 | Production site | Vercel project `agent-fantasy-football-league`, team `jake-moses-personal` |
 | Production data | Neon project `small-unit-52703563`, branch `main` (`br-restless-field-av8feznp`) |
-| Local / CI data | Neon branch `dev` (`br-nameless-wildflower-av2oxeoe`) |
+| Local / test data | PGlite in the test suite; for a live check, a temporary Neon branch from `main` that you delete afterwards |
 | Health at a glance | `/admin/health` |
 | Money | `/spend`, alarms on `/admin/health` |
 | Job queue | `/admin/jobs` |
 | Session queue | `/admin/health`, "Session queue" card |
 | Liveness, from outside | `/api/healthz` (public; built for an external uptime monitor) |
 
-Migrations run automatically: `apps/web`'s build script applies them before `next build`, so **every deploy migrates its own database** — preview deploys migrate the branch database, production migrates `main`.
+Migrations run automatically: `apps/web/scripts/db-deploy.sh` applies them and the seed before `next build`, **on production deploys only**. Preview deploys have no database: they skip migrations and the seed, and their pages render empty.
 
 ---
 
@@ -78,6 +78,8 @@ You cannot start a `self_check_in` by hand — it is not in the "Run a session n
 - A failed job keeps its error on the row and appears in the **Failed jobs** card on `/admin/health` for a week. Nothing re-runs it by itself. Fix the cause, then book it again.
 - **A trade window for every active team at once**: book `sessions.book` with kind `trade_window` and a window label (the label keys the sessions, so the same label booked twice books once); an optional note is appended to every team's brief. The league schedules no trade windows (§2); a `sessions.book` row for one without a label books nothing. The last league-wide window ran 2026-09-08 with a note that agents book a check-in to shop from then on.
 - **A fresh power-rankings edition on demand**: book `reporter.run` with kind `reporter_power_rankings`. The reporter ranks all twelve teams with a reason each; the home page and `/report` switch to the new edition on the next revalidation, with movement measured against the edition before. A session that publishes nothing fails with `no_report` and the old edition stays up.
+
+- **Matchup odds** (§11.1): `odds.run` runs Thursday 9:30 AM and Sunday 11:30 AM ET. One run per week and snapshot; booking it again for a snapshot that already ran does nothing. A hand-booked row runs the Thursday snapshot for the current week. Jev runs through the AI Gateway on `AI_GATEWAY_API_KEY`, so there is nothing extra to set. A Jev failure shows on `/admin/health` under `jev`, `/odds` says Jev was unavailable for that snapshot, and the run still stores the baseline and the injury rule. Jev's cost comes off the gateway balance and shows as its own line on `/spend`. If a week has no projections yet, the job re-books itself every 30 minutes for three hours (`health` key `odds` says why); after that it shows as failed. To run a lost Sunday snapshot by hand, run `ingest.projections` first, then book `odds.run` — a hand-booked row runs the Thursday snapshot, so a missed Sunday one is only recoverable while its re-booked row is still open.
 
 Jobs are idempotent by design; running one twice is safe.
 
@@ -160,7 +162,7 @@ Alarms notify; they never stop a session. An alarm email means "look", not "some
 
 The only setting that can stop an agent is `pause_agent_at_usd`, which is **off by default**. Turning it on pauses an agent that crosses it for the season.
 
-The tick also reads the **AI Gateway credit balance** hourly (`gateway.credits` on `/admin/health`). Under $15 (lowered from $100 at the commissioner's request 2026-09-09 — the higher line spent over a week under threshold without auto top-up actually failing) it emails once per day: that is the dead-auto-top-up alarm, because at $0 every session for every team fails at once and the outage detector reports twelve "providers" down. Top up in the Vercel team's AI Gateway tab and check auto top-up. $15 leaves under a day of runway at a typical week's pace before that outage, against roughly half a week at the old line — watch this figure rather than assuming the alarm will give you time to react.
+The tick also reads the **AI Gateway credit balance** hourly (`gateway.credits` on `/admin/health`). Under $5 (lowered from $15 on 2026-10-18 when auto top-off was enabled; was $100 at the commissioner's request 2026-09-09 — the higher line spent over a week under threshold without auto top-up actually failing) it emails once per day: that is the dead-auto-top-up alarm, because at $0 every session for every team fails at once and the outage detector reports twelve "providers" down. Top up in the Vercel team's AI Gateway tab and check auto top-up. $5 leaves well under a day of runway at a typical week's pace before that outage, so with auto top-off on, treat this alarm as "the top-up failed" and act on it at once.
 
 **Email is the only channel the league itself pushes to you** (the external monitor below is the exception, and deliberately outside the league), so check that it works before week 1. Every send — the digest, every alarm, every outage notice — records its outcome under the `email.send` key on `/admin/health`, with the provider's own reason on a failure. The most likely failure is an unverified sending domain at Resend: `from` is `league@$SITE_DOMAIN`, so that domain has to be verified in the Resend dashboard. Use "Send digest now" on `/admin/health` and then look at the `email.send` row.
 
@@ -186,20 +188,20 @@ being healthy — which is the point.
 
 ---
 
-## Neon preview branches
+## Neon preview branches (turned off)
 
-The Vercel-Managed Neon integration makes a `preview/<git branch>` database
-branch for every git branch with a preview deploy. It deletes one only when
-Vercel deletes that branch's last deployment (180-day retention, and the last
-20 previews are always kept), so on its own it almost never cleans up.
+Preview deploys do not get a Neon branch. Until 2026-10-04 the Vercel-Managed
+Neon integration made a `preview/<git branch>` branch for every git branch.
+They billed as extra branch-months, and a PR merged while its last preview was
+building deleted the branch under the build. See BUILD_LOG 2026-10-04.
 
-`.github/workflows/neon-preview-cleanup.yml` deletes `preview/<head branch>`
-when a pull request closes, merged or not. It needs two repository secrets:
-`NEON_PROJECT_ID` (`small-unit-52703563`) and `NEON_API_KEY` (Neon Console →
-Account Settings → API Keys). If either is missing the job fails
-and the branch stays; delete it by hand in the Neon Console. A git branch
-pushed without a pull request is never cleaned up by the workflow. After a
-merge, that PR's preview URL no longer has a database.
+The setting lives in Vercel → Storage → the Neon database → Settings: the
+store is connected to **Production only**, and preview branching is off. If a
+`preview/*` branch shows up in Neon, that setting was turned back on: turn it
+off and delete the branch.
+
+To test against real data, make a temporary branch from `main` in the Neon
+Console, set `DATABASE_URL` to it locally, and delete the branch when done.
 
 ---
 
@@ -214,6 +216,8 @@ Use it when an agent is misbehaving or a provider is down for that model.
 ---
 
 ## Before the draft
+
+Before a live draft, set `export const revalidate` in `apps/web/app/draft/page.tsx` back to 30 and deploy, and change `draft/page.tsx` in `apps/web/test/caching.test.ts` to match. After the 2026 draft it is `false`: the board is rendered once per deploy and never refreshed, so during a draft it would never show a pick. A production build fails if that one render cannot read the database (`apps/web/lib/buildPhase.ts`), so an empty board never goes live; production stays on the previous deployment, and the fix is a redeploy once the database answers.
 
 Section 17's checklist, in order:
 
@@ -234,11 +238,13 @@ During the draft: `/draft` shows the live room. `/admin/draft` can pause (the re
 
 A failing `main` is the top priority. There is no GitHub Actions workflow: the Vercel build is the only check. It runs `pnpm check` (lint, typecheck, tests) and then the web build, which applies migrations before `next build`. A failing check or a bad migration fails the deploy rather than reaching production. Roll back in Vercel, fix forward on a branch, and confirm `/admin/health` is green after the next deploy.
 
-Not every push builds. `vercel.json`'s `ignoreCommand` runs `scripts/vercel-ignore-build.sh`, which skips the build when a push touches only `docs/`, the root `README.md`, `CLAUDE.md`, `AGENTS.md`, or `LICENSE` (compared against the branch's last successful deployment, `VERCEL_GIT_PREVIOUS_SHA`, or the commit's first parent when there is none, so a push whose last commit is docs-only still builds if an earlier commit in it touched code, and a commit after a failed build is retried). The script exits only 0 (skip) or 1 (build): Vercel treats any other exit code as a failed deployment, which is what happened on 2026-09-21 when a recreated branch's base commit was missing from the clone. Nothing under `apps/` or `packages/` is ever skipped: the agent briefs in `packages/agent/briefs/*.md` are build inputs. A skipped production push leaves `main` on the previous deployment, which is correct because none of those files reach the site. A build-log-only commit costs nothing; before 2026-09-21 it cost a full build.
+Not every push builds. `vercel.json`'s `ignoreCommand` runs `scripts/vercel-ignore-build.sh`, which skips the build when a push touches only `docs/`, the root `README.md`, `CLAUDE.md`, `AGENTS.md`, or `LICENSE` (compared against the branch's last successful deployment, `VERCEL_GIT_PREVIOUS_SHA`, or, on production, the commit's first parent when there is none, so a push whose last commit is docs-only still builds if an earlier commit in it touched code, and a commit after a failed build is retried). The script exits only 0 (skip) or 1 (build): Vercel treats any other exit code as a failed deployment, which is what happened on 2026-09-21 when a recreated branch's base commit was missing from the clone. Nothing under `apps/` or `packages/` is skipped for its own sake: the agent briefs in `packages/agent/briefs/*.md` are build inputs. One more case skips, on previews only: a commit that merges `main` into a branch (subject `Merge branch 'main'`, `Merge remote-tracking branch 'origin/main'` or `Merge origin/main`) whose tree differs from `main`'s tip, its second parent, only in docs. That code is exactly `main`'s, which `main`'s own production build checks (if that build failed, `main` is already the top priority). The only proof that the second parent is `main` is the subject line, so a merge from another branch with a forged subject could skip a preview; the production build after the pull request merges still checks it. A preview with no usable previous deployment (a branch's first push, or a base missing from the clone) always builds. A branch with any code of its own, a merge that resolved conflicts, or a hand-edited merge differs from `main` in code and builds. Production pushes never take this path. `apps/web/test/vercelIgnoreBuild.test.ts` covers every case. A skipped production push leaves `main` on the previous deployment, which is correct because none of those files reach the site. A build-log-only commit costs nothing; before 2026-09-21 it cost a full build.
 
 The same rule cancels an API or CLI redeploy of a commit that is already the branch's last successful deployment (its base equals `HEAD`). To rebuild an unchanged commit, use the dashboard's Redeploy, or push a commit that touches code.
 
 The build machine is a project setting that only a team owner can change (Settings, then Build and Deployment, then Build Machine). Keep it on **Standard** (4 cores) with a fixed selection. Turbo (30 cores) builds in about 40 s instead of about 150 s, but Vercel bills it at about $0.21 per build against roughly $0.03 for Standard, and Standard's minutes fall inside the plan's included allowance. Measured 2026-09-21: Turbo was 80–90% of the team's daily Vercel spend.
+
+`next build` does not type-check (`typescript.ignoreBuildErrors` in `apps/web/next.config.ts`): the web package's `typecheck` script, `next typegen && tsc --noEmit`, runs the same check with the route types inside `pnpm check`, before `next build`. A local `next build` on its own therefore does not catch type errors; run `pnpm check` (the Vercel build command always does).
 
 The check keeps three caches under `node_modules/.cache`, which the Vercel build cache carries from one deploy to the next: ESLint results (`eslint/`, keyed on file content), `tsc` build info (`tsc/`), and a PGlite data directory with the migrations applied (`pglite/`, named after a hash of `packages/engine/drizzle`). Each is a speed-up only; delete the directory, or redeploy without the build cache, and the next run rebuilds all three.
 
@@ -252,4 +258,4 @@ A production deployment in state `BLOCKED` with the "project collaboration / tea
 
 - There is no league-wide spend stop, by design (§2: "No cap"). `pause_agent_at_usd` is per-agent and off by default.
 - The engine never chooses a starter for an agent (§3.1). An empty starting slot scores 0, and in week 1 there is no previous lineup to carry over from. `/admin/health` warns when any active team has an empty starting slot for the current week; the only fix is to run a session for that team.
-- A mock draft has no control on `/admin/draft`. To run one, make a temporary Neon branch from `main`, point a preview deploy at it, run the draft there, and delete the branch afterwards.
+- A mock draft has no control on `/admin/draft`. To run one, make a temporary Neon branch from `main`, run the app locally (`pnpm --filter @league/web dev`) with `DATABASE_URL` set to it, run the draft there, and delete the branch afterwards.
