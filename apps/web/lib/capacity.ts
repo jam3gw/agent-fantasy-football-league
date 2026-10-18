@@ -35,11 +35,11 @@ export const DB_SIZE_WARN_AT = 0.8;
  *
  * Lowered to $15 at the commissioner's request 2026-09-09: the balance sat
  * under $100 for over a week without auto top-up actually failing, and the
- * daily email got noisy. $15 gives much less runway before the true
- * zero-balance outage (every session for every team fails at once) — at the
- * $150/week pace that is under a day, against roughly half a week before.
+ * daily email got noisy.
  * Lowered again to $5 on 2026-10-18: the gateway now auto-tops-off, so a
- * balance under $15 is routine and only a failed top-up should page anyone.
+ * balance under $15 is routine and only a failed top-up should page anyone. $5 is well under a day of
+ * runway at the $150/week pace before the true zero-balance outage (every
+ * session for every team fails at once).
  * Still an alarm, not a cap: nothing stops until $0 either way (§8.7).
  */
 export const GATEWAY_CREDITS_ALARM_USD = 5;

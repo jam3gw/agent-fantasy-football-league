@@ -835,11 +835,20 @@ function errorDetail(err: unknown): Record<string, unknown> {
 export function describeError(err: unknown): string {
   if (err instanceof Error) return String(err);
   if (err && typeof err === "object") {
-    try {
-      return JSON.stringify(err).slice(0, 500);
-    } catch {
-      return Object.prototype.toString.call(err);
-    }
+    // Only the fields that name the failure: a provider error object can carry
+    // request headers or bodies, and the transcript is public.
+    const pick = (o: unknown): Record<string, unknown> => {
+      const r = (o && typeof o === "object" ? o : {}) as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const k of ["message", "type", "code", "status"]) {
+        if (typeof r[k] === "string" || typeof r[k] === "number") out[k] = r[k];
+      }
+      return out;
+    };
+    const o = err as Record<string, unknown>;
+    const picked = { ...pick(o), ...pick(o.error) };
+    if (Object.keys(picked).length > 0) return JSON.stringify(picked).slice(0, 500);
+    return "non-Error object thrown (no message, type or code)";
   }
   return String(err);
 }

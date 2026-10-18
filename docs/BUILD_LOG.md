@@ -7590,3 +7590,9 @@ Commissioner request: the gateway auto-tops-off now, so the $15 line is noise.
 `GATEWAY_CREDITS_ALARM_USD` 15 → 5 in `apps/web/lib/capacity.ts`; SETUP and
 RUNBOOK updated. The earlier note that the balance "needs a top-up from Jake"
 no longer applies.
+
+Review of #92 (one round): `describeError` now keeps only message/type/code/status
+(provider error objects can carry headers or bodies, and the transcript is
+public) and never throws on circular/BigInt/empty input; tests added for both and
+for the $5 default; RUNBOOK runway sentence and capacity.ts comment corrected.
+The fixes were checked by tests, lint and type check, not by a second reviewer pass.

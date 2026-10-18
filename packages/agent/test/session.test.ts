@@ -785,6 +785,19 @@ describe("describeError", () => {
     const err = { error: { message: "The server had an error", code: "service_unavailable" } };
     expect(describeError(err)).toContain("service_unavailable");
   });
+  it("drops everything but message/type/code/status (no headers or bodies)", () => {
+    const out = describeError({ code: "x", headers: { authorization: "Bearer SECRET" }, requestBody: "SECRET" });
+    expect(out).toBe('{"code":"x"}');
+  });
+  it("never throws on circular, BigInt, empty or null input", () => {
+    const c: Record<string, unknown> = {};
+    c.self = c;
+    expect(describeError(c)).toMatch(/non-Error/);
+    expect(describeError({ n: 1n })).toMatch(/non-Error/);
+    expect(describeError({})).toMatch(/non-Error/);
+    expect(describeError(null)).toBe("null");
+    expect(describeError(undefined)).toBe("undefined");
+  });
   it("leaves Error instances and primitives as String() renders them", () => {
     expect(describeError(new Error("boom"))).toBe("Error: boom");
     expect(describeError("x")).toBe("x");
