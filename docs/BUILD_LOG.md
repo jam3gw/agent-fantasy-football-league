@@ -17,6 +17,104 @@ production. Found during the Jev odds work (PR #65); Jake approved the fix.
 - Checked: with the same ESLint error, `pnpm check` exits 1. On clean `main`
   it exits 0: lint, typecheck, 1055 tests. `main` was already lint-clean, so
   no production build breaks.
+## 2026-10-08 — `/draft` never revalidates after the draft
+
+Jake answered the open ISR question from the 10-06 entry: the draft has been
+done for a while, and then chose `revalidate = false` over §12.1's 5-minute
+window. `/draft` revalidated every 30 s (§12.1's live window) and was
+rewritten twice a minute with an unchanged board: 5.2K ISR write units in
+the week to 10-05. Nothing on the board changes between deploys: picks and
+reasons are final, team names are set once at onboarding, and a model
+change ships with a deploy, which renders the page again.
+
+- `apps/web/app/draft/page.tsx`: `revalidate = false`.
+- The page caught read errors and rendered an empty board, which ISR used
+  to replace within the window. Rendered once per deploy, that board would
+  stay up until the next deploy, so the page now rethrows during a
+  production build (`apps/web/lib/buildPhase.ts`, `failBuildOnReadError`:
+  `NEXT_PHASE` is `phase-production-build` and `VERCEL_ENV` is
+  `production`). Preview builds have no database and keep the fallback.
+  Tests: `buildPhase.test.ts`; `caching.test.ts` asserts `false`.
+- RUNBOOK "Before the draft": set it back to 30 before a live draft.
+
+Not verified locally: a local `next build` without a database stops at
+`/spend` (`DATABASE_URL is not set`) before `/draft`, as it did before this
+change. The preview and production builds are the check.
+
+Still open with Jake: whether finished session transcripts (`/sessions/[id]`,
+36K units that week) should cache longer than §12.1's 5 minutes.
+
+## 2026-10-06 — Build CPU minutes: where the 4.05K came from; three build-time cuts
+
+Jake asked why the team used so many build CPU minutes when nothing changes
+day over day. Sources: Vercel's "Weekly Usage Summary" (10-05) and
+"Increased On-Demand Usage" (10-06) emails for the cycle 09-11 to 10-11,
+`list_billing_charges` per day, the deployment list, and build logs.
+
+- **The cycle shows 4.05K build CPU minutes and $13.10**, against 2.03K
+  and $0 at the same point last cycle. The $13.10 is the same in both
+  emails and comes from 09-11 to 09-21, on the Turbo machine (30 cores; a
+  46 s build is about 25–30 CPU minutes). Billed build cost per day:
+  $0.84 on 09-17, $0.00 on 09-27, 10-02 and 10-04 (10-04 had six builds).
+  On Standard (4 cores) a build is about 3 min 10 s, about 13 CPU minutes,
+  inside the plan's included amount.
+- **"Nothing changes day over day" was not true for the repo.** Two
+  scheduled Claude routines (the operational sweep and the discount scan)
+  each committed a build-log entry every day on a branch, then merged it:
+  four full builds a day with no code change, plus a daily "merge main"
+  into the long-lived `claude/jev-league-reporter-integration-l4q5ql`.
+  About 75 builds ran from 09-11 to 09-21. Since 09-22 the docs-only rule
+  cancels those in about 2 s; the daily merges into the long-lived branch
+  still built (five times since 09-26) until this change.
+- **Where a Standard build's 3 min 10 s goes** (production build of #65):
+  install 9 s, lint and typecheck 27 s, `vitest run` 85 s, briefs, migrate
+  and seed 6 s, `next build` 35 s (16 s of it a second TypeScript pass),
+  deploy 9 s, build cache 14 s. The suite has no slow file: 85 files, the
+  slowest 12.6 s; the time is per-file PGlite start (about 3.6 s) and
+  module collection, already cut on 09-08. Not changed.
+
+Changed:
+
+- `scripts/vercel-ignore-build.sh`: a preview commit that merges `main`
+  and whose tree differs from `main`'s tip only in docs is skipped: its
+  code is `main`'s, already checked by `main`'s production build.
+  Production never takes this path. The first version compared only the
+  branch's side since the last preview and trusted the merge message; the
+  review round found it skipped a branch's first preview, a merge whose
+  combined code no build had checked, and a conflict resolved in the
+  editor. The tree rule closes all three, at a cost: a branch with code of
+  its own, like the long-lived reporter branch, still builds on each merge
+  of `main`, because that combination is new code. New test
+  `apps/web/test/vercelIgnoreBuild.test.ts` (10 cases, real git repos,
+  `sh`); six of them fail against the first version. A second review
+  round found the older `HEAD^` fallback could still skip a branch's
+  first preview (a merge whose `main` side was docs-only, or a first push
+  ending in a docs commit): a preview with no usable previous deployment
+  now always builds; production keeps the `HEAD^` fallback.
+- `apps/web`: `typecheck` is now `next typegen && tsc --noEmit` (typegen
+  takes about 2 s and writes the route types and `validator.ts`, the same
+  checks `next build` ran), and `next.config.ts` sets
+  `typescript.ignoreBuildErrors` so `next build` does not repeat them.
+  About 14 s less per build. `eslint.config.mjs` ignores the workflow
+  files typegen now writes while lint runs.
+
+Looked at, not changed — ISR writes (637K this cycle, $2.55, +778%): Vercel
+counts about one write unit per 10 KB written, so large pages cost the most.
+09-29 to 10-05: `/sessions/[id]` 36K units from about 3,000 requests (a
+third from crawlers: meta-externalagent, applebot, bingbot, amazonbot),
+`/teams/[slug]` 20.5K, `/teams/[slug]/week/[week]` 18.5K, `/sessions` 12K,
+`/board` 8.7K, `/draft` 5.2K (still on the 30 s live window after the
+draft). The windows are §12.1's; changing them is a spec question, raised
+with Jake in the session rather than changed here.
+
+Review round (fresh-context reviewer; diff, SPEC, CLAUDE.md, Next 16 docs):
+the three ignore-script findings above, fixed; no test for the script,
+added; nothing checks the second parent is `main` beyond the subject,
+recorded in the RUNBOOK. Second round: the first-preview fallback above,
+fixed; nothing else new. Typecheck change: `next typegen && tsc --noEmit`
+is the documented replacement and a superset of Next's own check; the
+ESLint ignore is needed (flat config lints dot-directories). No spec or
+security finding.
 
 ## 2026-10-04 — Failed preview deploys fixed; preview deploys no longer get a database
 
@@ -7437,6 +7535,33 @@ two: nothing new.
 
 Checks: web lint, typecheck, and 513 web tests green.
 
+## 2026-10-02 — Price check against the live catalog
+
+Pulled `GET https://ai-gateway.vercel.sh/v1/models` and compared all 12 seats
+plus the reporter with production `model_prices` (Neon `main`, last
+`prices.sync` 2026-09-28). Every row matches the catalog; nothing in the
+table needed updating. Kimi K3 is still 3/15 (a page-scrape reading of
+0.66/9 earlier today was wrong, the catalog is authoritative). No seated id
+is discounted: `openai/gpt-5.6-sol` is still 4/20 (the promotional rate
+noted in earlier scans).
+
+One repo fix: `MODEL_PRICE_SEED` still carried the 2026-08-28 Sol price
+(2/10/0.2). It only fills a fresh database, so production was never wrong,
+but a re-seed would have under-priced Sol until the next Monday sync. Now
+4/20/0.4. Typecheck and tests were not run in this session (dependencies
+not installed; Node 22 here, repo wants 24).
+## 2026-10-01 — Production health sweep
+
+healthz 200 (last tick 13:07Z), production deploy READY, no failed or
+timed-out sessions in 24h, no queued session overdue (59 queued, earliest
+due 15:00Z), no running sessions, no failed jobs since the last sweep.
+Known and unchanged: `nflverse.player_stats` / `stats.audit` 404 on
+`player_stats_2026.csv`.
+
+Needs attention: `gateway.credits` reads $14.89, under the $15 alarm line
+(the alarm email already went out 04:14Z). Jake: the balance auto-tops-up
+to $25 once it falls under $8, so no manual top-up is needed; the $15 alarm
+is expected to keep firing until the balance crosses that threshold.
 ## 2026-10-03 — Operational sweep: nflverse stats URL fixed; gateway credits low
 
 Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
@@ -7454,3 +7579,62 @@ warnings.
   first; the header matches what the parser expects.
 - **Gateway credits $9.19, under the $15 alarm** (`gateway.credits`, daily
   email already sent). Needs a top-up from Jake; at $0 every session fails.
+
+## 2026-10-07 — Operational sweep: nflverse schedule URL fixed
+
+Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
+healthz 200 (tick under a minute old); production deploy READY (#83); no
+running sessions; no queued session more than 15 minutes past its due time
+(71 queued are future plans); runtime errors only the known AI SDK reasoning
+warnings plus a few queue-visibility notices.
+
+- **nflverse schedule 404 since 10-07** (`ingest.schedule` job 9230 failed,
+  `nflverse.schedule` health row). The `schedules/games.csv` release asset is
+  gone from nflverse-data (the sibling `games.parquet` still exists). The same
+  columns, with all 272 2026 regular-season games, are at
+  `nflverse/nfldata/master/data/games.csv`. `fetchSchedule` now tries both
+  URLs in order and requires the file to have games for the season; health is recorded once, with every URL's error on failure. Schedule
+  ingest next runs on its normal cadence; the stored schedule is unaffected.
+- **Two failed `board_reply` sessions, team 12 (glm-5.3), 10-06 13:29/13:53**:
+  a gateway stream timeout after 13 minutes with zero tool calls, then a
+  deadline timeout. Single provider stall, nothing since; not a code fault.
+- `stats.audit` week 4: 1 of 69 players differs from nflverse by more than
+  0.5 — informational.
+
+Review round one: stale-season file was accepted, health was written per URL, and only the last error surfaced; all fixed, plus tests for empty/all-fail. SPEC §5.5 note: release URL 404s as of 10-07, nfldata is the fallback.
+Review round two: health write moved out of the fetch try and made non-fatal; health-row tests added. Round three pending.
+
+Production deploy of #84 first failed in `next build` on a Google Fonts fetch
+(`inter_tight` module-not-found); production kept serving the previous build.
+A redeploy of the same commit succeeded and is live. Not a code fault. If it
+recurs, self-host the font instead of fetching at build time.
+
+## 2026-10-18 — Operational sweep: provider outage; error text fixed
+
+Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
+healthz 200 (tick under a minute old); production deploy READY (#86); no failed
+jobs; no running sessions; no queued session past due (41 queued are future
+`lineup_check` plans, earliest 15:30 UTC today).
+
+- **Session 6638 failed** (team 12, glm-5.3, `lineup_check` 12:06 UTC): the
+  gateway returned `server_error / service_unavailable` mid-stream after 9 tool
+  calls. Provider outage, not a code fault; team 12's next `lineup_check` is
+  queued for 15:34 UTC, before the 17:00 kickoff window.
+- **Error text was "[object Object]"**: a provider stream error is thrown as a
+  plain object and `String(err)` hid the reason. `describeError` now serializes
+  it into the transcript event and the `sessions.error` column.
+- **Gateway credits $12.14**, under the $15 alarm (daily email already sent);
+  still needs a top-up from Jake.
+
+## 2026-10-18 — Gateway credits alarm line lowered to $5
+
+Commissioner request: the gateway auto-tops-off now, so the $15 line is noise.
+`GATEWAY_CREDITS_ALARM_USD` 15 → 5 in `apps/web/lib/capacity.ts`; SETUP and
+RUNBOOK updated. The earlier note that the balance "needs a top-up from Jake"
+no longer applies.
+
+Review of #92 (one round): `describeError` now keeps only message/type/code/status
+(provider error objects can carry headers or bodies, and the transcript is
+public) and never throws on circular/BigInt/empty input; tests added for both and
+for the $5 default; RUNBOOK runway sentence and capacity.ts comment corrected.
+The fixes were checked by tests, lint and type check, not by a second reviewer pass.

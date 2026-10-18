@@ -33,7 +33,7 @@ export class HttpError extends Error {
   }
 }
 
-async function recordHealth(db: EngineDb | undefined, key: string | undefined, error: string | null): Promise<void> {
+export async function recordHealth(db: EngineDb | undefined, key: string | undefined, error: string | null): Promise<void> {
   if (!db || !key) return;
   const now = new Date();
   if (error === null) {

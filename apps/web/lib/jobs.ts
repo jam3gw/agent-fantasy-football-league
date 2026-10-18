@@ -92,7 +92,7 @@ export async function runJob(
       return;
     }
     case "ingest.schedule": {
-      const csv = await fetchSchedule({ db });
+      const csv = await fetchSchedule({ db, season });
       await upsertGames(db, parseGames(csv, season));
       return;
     }
@@ -504,7 +504,7 @@ export async function planWeek(db: EngineDb, clock: Clock, week: number): Promis
 
   // (1) schedule refresh
   try {
-    const csv = await fetchSchedule({ db });
+    const csv = await fetchSchedule({ db, season: settings.season });
     await upsertGames(db, parseGames(csv, settings.season));
   } catch {
     // A stale schedule must not stop the week from being planned; the health

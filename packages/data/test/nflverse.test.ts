@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NFLVERSE_STATS_URLS, fetchNflverseWeeklyStats, parseGames, parseNflverseWeeklyStats } from "../src/nflverse.ts";
+import { SCHEDULE_URLS, fetchSchedule, NFLVERSE_STATS_URLS, fetchNflverseWeeklyStats, parseGames, parseNflverseWeeklyStats } from "../src/nflverse.ts";
 
 const gamesCsv = readFileSync(
   fileURLToPath(new URL("../../../fixtures/nflverse/games.csv", import.meta.url)),
@@ -101,5 +101,72 @@ describe("fetchNflverseWeeklyStats fallthrough (§5.6)", () => {
   it("throws when every URL fails", async () => {
     respond(() => null);
     await expect(fetchNflverseWeeklyStats(2026)).rejects.toThrow();
+  });
+});
+
+describe("fetchSchedule fallthrough (§5.5)", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const csv =
+    "game_id,season,game_type,week,gameday,gametime,away_team,home_team,away_score,home_score,result\n" +
+    "2026_01_NE_SEA,2026,REG,1,2026-09-09,20:20,NE,SEA,,,\n";
+
+  it("falls through a 404 on the release asset to nfldata", async () => {
+    vi.stubGlobal("fetch", async (u: string | URL | Request) =>
+      String(u) === SCHEDULE_URLS[0] ? new Response("nf", { status: 404 }) : new Response(csv, { status: 200 }),
+    );
+    expect(await fetchSchedule({ season: 2026 })).toBe(csv);
+  });
+
+  it("falls through a 200 with no rows for the season", async () => {
+    const calls: string[] = [];
+    vi.stubGlobal("fetch", async (u: string | URL | Request) => {
+      calls.push(String(u));
+      return String(u) === SCHEDULE_URLS[0]
+        ? new Response("game_id,season,week,gameday\n", { status: 200 })
+        : new Response(csv, { status: 200 });
+    });
+    expect(await fetchSchedule({ season: 2026 })).toBe(csv);
+    expect(calls).toEqual([...SCHEDULE_URLS]);
+  });
+
+  it("throws with every URL's error when all fail", async () => {
+    vi.stubGlobal("fetch", async () => new Response("nf", { status: 404 }));
+    await expect(fetchSchedule({ season: 2026, backoffMs: 0 })).rejects.toThrow(/games\.csv.*games\.csv/s);
+  });
+
+  const fakeDb = (writes: Array<Record<string, unknown>>, fail = false) =>
+    ({
+      insert: () => ({
+        values: (v: Record<string, unknown>) => ({
+          onConflictDoUpdate: async () => {
+            if (fail) throw new Error("db down");
+            writes.push(v);
+          },
+        }),
+      }),
+    }) as never;
+
+  it("writes one success row after a fallback, with no error row", async () => {
+    vi.stubGlobal("fetch", async (u: string | URL | Request) =>
+      String(u) === SCHEDULE_URLS[0] ? new Response("nf", { status: 404 }) : new Response(csv, { status: 200 }),
+    );
+    const writes: Array<Record<string, unknown>> = [];
+    await fetchSchedule({ db: fakeDb(writes), season: 2026 });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toHaveProperty("lastSuccessAt");
+    expect(writes[0]).not.toHaveProperty("lastError");
+  });
+
+  it("writes one aggregated error row when every URL fails", async () => {
+    vi.stubGlobal("fetch", async () => new Response("nf", { status: 404 }));
+    const writes: Array<Record<string, unknown>> = [];
+    await expect(fetchSchedule({ db: fakeDb(writes), season: 2026, backoffMs: 0 })).rejects.toThrow();
+    expect(writes).toHaveLength(1);
+    expect(String(writes[0]!.lastError)).toMatch(/games\.csv.*games\.csv/s);
+  });
+
+  it("a failing health write does not change the result", async () => {
+    vi.stubGlobal("fetch", async () => new Response(csv, { status: 200 }));
+    expect(await fetchSchedule({ db: fakeDb([], true), season: 2026 })).toBe(csv);
   });
 });
