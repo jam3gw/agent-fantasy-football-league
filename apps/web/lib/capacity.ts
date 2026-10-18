@@ -38,9 +38,11 @@ export const DB_SIZE_WARN_AT = 0.8;
  * daily email got noisy. $15 gives much less runway before the true
  * zero-balance outage (every session for every team fails at once) — at the
  * $150/week pace that is under a day, against roughly half a week before.
+ * Lowered again to $5 on 2026-10-18: the gateway now auto-tops-off, so a
+ * balance under $15 is routine and only a failed top-up should page anyone.
  * Still an alarm, not a cap: nothing stops until $0 either way (§8.7).
  */
-export const GATEWAY_CREDITS_ALARM_USD = 15;
+export const GATEWAY_CREDITS_ALARM_USD = 5;
 
 const GATEWAY_CREDITS_URL = "https://ai-gateway.vercel.sh/v1/credits";
 

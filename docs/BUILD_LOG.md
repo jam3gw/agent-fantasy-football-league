@@ -7583,3 +7583,10 @@ jobs; no running sessions; no queued session past due (41 queued are future
   it into the transcript event and the `sessions.error` column.
 - **Gateway credits $12.14**, under the $15 alarm (daily email already sent);
   still needs a top-up from Jake.
+
+## 2026-10-18 — Gateway credits alarm line lowered to $5
+
+Commissioner request: the gateway auto-tops-off now, so the $15 line is noise.
+`GATEWAY_CREDITS_ALARM_USD` 15 → 5 in `apps/web/lib/capacity.ts`; SETUP and
+RUNBOOK updated. The earlier note that the balance "needs a top-up from Jake"
+no longer applies.
