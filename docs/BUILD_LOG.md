@@ -2,6 +2,21 @@
 
 Newest entries at the top. Measured numbers, choices made, skipped items, and questions for Jake.
 
+## 2026-10-04 — `pnpm check` now fails on lint errors
+
+`pnpm check` ran lint and typecheck as one regex run:
+`pnpm -r --parallel --no-bail run "/^(lint|typecheck)$/"`. That run exited 0
+when ESLint failed. A type error still failed it, so only lint errors got
+through. The Vercel build runs `pnpm check`, so a lint error could reach
+production. Found during the Jev odds work (PR #65); Jake approved the fix.
+
+- Reproduced: with an ESLint error in `packages/shared`, the regex run exited
+  0 and `pnpm lint` exited 1.
+- Fix: `"check": "pnpm lint && pnpm typecheck && pnpm test"`. Each step's exit
+  code now stops the chain.
+- Checked: with the same ESLint error, `pnpm check` exits 1. On clean `main`
+  it exits 0: lint, typecheck, 1055 tests. `main` was already lint-clean, so
+  no production build breaks.
 ## 2026-10-08 — `/draft` never revalidates after the draft
 
 Jake answered the open ISR question from the 10-06 entry: the draft has been
@@ -7520,6 +7535,33 @@ two: nothing new.
 
 Checks: web lint, typecheck, and 513 web tests green.
 
+## 2026-10-02 — Price check against the live catalog
+
+Pulled `GET https://ai-gateway.vercel.sh/v1/models` and compared all 12 seats
+plus the reporter with production `model_prices` (Neon `main`, last
+`prices.sync` 2026-09-28). Every row matches the catalog; nothing in the
+table needed updating. Kimi K3 is still 3/15 (a page-scrape reading of
+0.66/9 earlier today was wrong, the catalog is authoritative). No seated id
+is discounted: `openai/gpt-5.6-sol` is still 4/20 (the promotional rate
+noted in earlier scans).
+
+One repo fix: `MODEL_PRICE_SEED` still carried the 2026-08-28 Sol price
+(2/10/0.2). It only fills a fresh database, so production was never wrong,
+but a re-seed would have under-priced Sol until the next Monday sync. Now
+4/20/0.4. Typecheck and tests were not run in this session (dependencies
+not installed; Node 22 here, repo wants 24).
+## 2026-10-01 — Production health sweep
+
+healthz 200 (last tick 13:07Z), production deploy READY, no failed or
+timed-out sessions in 24h, no queued session overdue (59 queued, earliest
+due 15:00Z), no running sessions, no failed jobs since the last sweep.
+Known and unchanged: `nflverse.player_stats` / `stats.audit` 404 on
+`player_stats_2026.csv`.
+
+Needs attention: `gateway.credits` reads $14.89, under the $15 alarm line
+(the alarm email already went out 04:14Z). Jake: the balance auto-tops-up
+to $25 once it falls under $8, so no manual top-up is needed; the $15 alarm
+is expected to keep firing until the balance crosses that threshold.
 ## 2026-10-03 — Operational sweep: nflverse stats URL fixed; gateway credits low
 
 Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
@@ -7589,3 +7631,32 @@ the benchmark entrant):**
   0.10 vs Sonnet 5's 0.20 (Anthropic release notes, 2026-10-07).
 Other non-actionable: Gemini 3.1 Pro `flex` tier is 50% off but async;
 `muse-spark-1.3-contributor` is the same 0.10/0.20.
+## 2026-10-18 — Operational sweep: provider outage; error text fixed
+
+Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
+healthz 200 (tick under a minute old); production deploy READY (#86); no failed
+jobs; no running sessions; no queued session past due (41 queued are future
+`lineup_check` plans, earliest 15:30 UTC today).
+
+- **Session 6638 failed** (team 12, glm-5.3, `lineup_check` 12:06 UTC): the
+  gateway returned `server_error / service_unavailable` mid-stream after 9 tool
+  calls. Provider outage, not a code fault; team 12's next `lineup_check` is
+  queued for 15:34 UTC, before the 17:00 kickoff window.
+- **Error text was "[object Object]"**: a provider stream error is thrown as a
+  plain object and `String(err)` hid the reason. `describeError` now serializes
+  it into the transcript event and the `sessions.error` column.
+- **Gateway credits $12.14**, under the $15 alarm (daily email already sent);
+  still needs a top-up from Jake.
+
+## 2026-10-18 — Gateway credits alarm line lowered to $5
+
+Commissioner request: the gateway auto-tops-off now, so the $15 line is noise.
+`GATEWAY_CREDITS_ALARM_USD` 15 → 5 in `apps/web/lib/capacity.ts`; SETUP and
+RUNBOOK updated. The earlier note that the balance "needs a top-up from Jake"
+no longer applies.
+
+Review of #92 (one round): `describeError` now keeps only message/type/code/status
+(provider error objects can carry headers or bodies, and the transcript is
+public) and never throws on circular/BigInt/empty input; tests added for both and
+for the $5 default; RUNBOOK runway sentence and capacity.ts comment corrected.
+The fixes were checked by tests, lint and type check, not by a second reviewer pass.
