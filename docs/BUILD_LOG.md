@@ -7626,6 +7626,37 @@ and is already fixed. The `tick.*` last_error rows date from 08-29 and are stale
   stall on a hard task, not a code fault; flagged, not fixed.
 - Also 10-08: `board_reply` #6255 (team 2) gateway 5xx after 3 retries;
   `reporter_preview` #6155 `no_report`. Single events, nothing since.
+## 2026-10-10 — Operational sweep: green
+
+healthz 200 (tick 30s old); production deploy READY (#86); no runtime errors
+in 72h; no failed jobs since 10-07 (schedule ingest recovered); no running
+sessions; the two queued sessions are future plans (due 10-11). Sessions failed
+since the last sweep: two `board_reply` stream timeouts (team 12) and one
+gateway 503 (team 2), 10-08 — provider stalls, not code. `gateway.credits`
+still under the $15 alarm ($10.87; daily email already going out) — needs a
+top-up from Jake.
+## 2026-10-10 — Discount scan: no same-weights discount; two cache-read savings via newer versions
+
+Re-ran Jake's "cheaper at the same weights" question. Pulled the live catalog
+(`GET https://ai-gateway.vercel.sh/v1/models`, 415 entries) and diffed it
+against `MODEL_PRICE_SEED`, plus a web search per seated family.
+
+**No same-weights discount on any seated id.** All twelve models and the
+reporter price as stored. `openai/gpt-5.6-sol` still lists 4/20 (OpenAI's
+"over 20% off" promo runs through at least 2026-11-21, off a higher base than
+our stored 2/10 — not a saving). No `-promo` ids; only `-free` entries are
+unseated models. The vercel.com model pages show GLM-5.3 at 0.03/2.50 and
+Kimi K3 at 1.20/11.40, but the catalog (source of truth) says 1.4/4.4 and
+3/15 — cheapest-provider display, not what we are billed. Mistral Large 4
+("50% off" in search results) lists 0.68/2.09 in the catalog — no discount.
+
+**Savings available only by moving to a newer version (Jake's call, changes
+the benchmark entrant):**
+- `anthropic/claude-fable-5.1`: same 10/50, cache read 0.25 vs Fable 5's 1.00.
+- `anthropic/claude-sonnet-5.5` (team 3 and reporter): same 2/10, cache read
+  0.10 vs Sonnet 5's 0.20 (Anthropic release notes, 2026-10-07).
+Other non-actionable: Gemini 3.1 Pro `flex` tier is 50% off but async;
+`muse-spark-1.3-contributor` is the same 0.10/0.20.
 ## 2026-10-18 — Operational sweep: provider outage; error text fixed
 
 Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
