@@ -782,7 +782,8 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       ...(closing.error ? { error: closing.error } : {}),
     };
   } catch (err) {
-    await recordEvent(db, clock, sessionId, seq++, "error", { error: String(err), ...errorDetail(err) });
+    const errorText = describeError(err);
+    await recordEvent(db, clock, sessionId, seq++, "error", { error: errorText, ...errorDetail(err) });
     // A failed session must not leave a stale "thinking" preview.
     await clearPartial(db, sessionId);
     await db
@@ -792,11 +793,11 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
         endedAt: clock.now(),
         toolCalls,
         invalidToolCalls,
-        error: String(err),
+        error: errorText,
         updatedAt: clock.now(),
       })
       .where(and(eq(sessions.id, sessionId), eq(sessions.status, "running")));
-    return { status: "failed", endedBy, toolCalls, invalidToolCalls, steps, error: String(err) };
+    return { status: "failed", endedBy, toolCalls, invalidToolCalls, steps, error: errorText };
   }
 }
 
@@ -823,7 +824,33 @@ function errorDetail(err: unknown): Record<string, unknown> {
   if (Array.isArray(issues)) {
     return { cause_issues: flattenIssues(issues).slice(0, 20) };
   }
-  return { cause: String(cause).slice(0, 500) };
+  return { cause: describeError(cause).slice(0, 500) };
+}
+
+/**
+ * `String(err)` on a plain object reads "[object Object]". A provider stream
+ * error part is thrown as one (session 6638, 2026-10-18), and the real reason,
+ * "service_unavailable", never reached the transcript or the sessions row.
+ */
+export function describeError(err: unknown): string {
+  if (err instanceof Error) return String(err);
+  if (err && typeof err === "object") {
+    // Only the fields that name the failure: a provider error object can carry
+    // request headers or bodies, and the transcript is public.
+    const pick = (o: unknown): Record<string, unknown> => {
+      const r = (o && typeof o === "object" ? o : {}) as Record<string, unknown>;
+      const out: Record<string, unknown> = {};
+      for (const k of ["message", "type", "code", "status"]) {
+        if (typeof r[k] === "string" || typeof r[k] === "number") out[k] = r[k];
+      }
+      return out;
+    };
+    const o = err as Record<string, unknown>;
+    const picked = { ...pick(o), ...pick(o.error) };
+    if (Object.keys(picked).length > 0) return JSON.stringify(picked).slice(0, 500);
+    return "non-Error object thrown (no message, type or code)";
+  }
+  return String(err);
 }
 
 /**
