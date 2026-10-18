@@ -7609,6 +7609,21 @@ Production deploy of #84 first failed in `next build` on a Google Fonts fetch
 A redeploy of the same commit succeeded and is live. Not a code fault. If it
 recurs, self-host the font instead of fetching at build time.
 
+## 2026-10-17 — Operational sweep: green; gateway credits still under alarm
+
+Sweep of health table, scheduled_jobs, sessions, Vercel. `cron.tick` 55 s
+old; production deploy READY (#86, `bbc1d62`); no Vercel runtime errors in 24 h;
+no running sessions; no `due` job and no queued session overdue (224 jobs and
+52 sessions are future plans, next due 13:15 UTC / 10-18).
+
+- Failed since the 10-07 sweep: one `ingest.players` job (10-15, Neon
+  `CONNECTION_CLOSED`, next run succeeded); three `board_reply` sessions
+  (10-08, gateway stream timeouts / 503) and one `post_waivers` session
+  (10-14, gateway 503 after 3 retries). Provider-side, not code faults.
+- **Gateway credits $13.29**, under the $15 alarm (`gateway.credits`). Needs a
+  top-up from Jake.
+- Stale error stamps only: `nflverse.player_stats` / `nflverse.schedule`
+  (successful since the URL fixes), `tick.*` (08-29).
 ## 2026-10-18 — Operational sweep: provider outage; error text fixed
 
 Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
