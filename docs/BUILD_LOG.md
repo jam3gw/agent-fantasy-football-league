@@ -7609,6 +7609,9 @@ Production deploy of #84 first failed in `next build` on a Google Fonts fetch
 A redeploy of the same commit succeeded and is live. Not a code fault. If it
 recurs, self-host the font instead of fetching at build time.
 
+## 2026-10-16 — Operational sweep: green
+
+healthz 200 (tick 13:11Z); production deploy READY (#86); no runtime errors; no running sessions; no queued session past due. Since 10-07: one `ingest.players` job failed 10-15 on a transient Neon `CONNECTION_CLOSED` (hourly job has recovered); one `post_waivers` session (team 11) failed 10-14 on a gateway 5xx after 3 retries — provider blip. Gateway credits $14.61, just under the $15 alarm (topped up from $9.19; daily email is the alarm). `stats.audit` week 5: 1 of 60 players differ — informational.
 ## 2026-10-18 — Operational sweep: provider outage; error text fixed
 
 Sweep of healthz, health table, scheduled_jobs, sessions, session logs, Vercel.
