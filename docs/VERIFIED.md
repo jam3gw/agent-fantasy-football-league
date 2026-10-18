@@ -33,7 +33,7 @@ Read `https://docs.typesafe.ai/api.md`, `https://docs.typesafe.ai/models.md`, Ve
 | Errors | 401 bad key, 422 bad body, 429 rate limit, 529 overloaded (retry with backoff) |
 | Known weak spots (`/model-jaggedness/jev-1.13.md`) | counting and arithmetic, dates read as text, long irrelevant state, P(yes) and 1 − P(no) not complementary. The league does all sums and time differences in code and asks each question one way only |
 
-Not checked on 09-22: a live call. That check is now done; see the entry below.
+Not checked on 09-22: a live call. That check is now done; see the 2026-10-18 entry above.
 
 ## 2026-09-08 — Gateway cost field and the ledger, checked on session 2598 (§8.7 verify)
 
