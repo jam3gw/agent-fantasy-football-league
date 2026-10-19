@@ -7686,3 +7686,11 @@ Review of #92 (one round): `describeError` now keeps only message/type/code/stat
 public) and never throws on circular/BigInt/empty input; tests added for both and
 for the $5 default; RUNBOOK runway sentence and capacity.ts comment corrected.
 The fixes were checked by tests, lint and type check, not by a second reviewer pass.
+
+## 2026-10-19 — Operational sweep: all green
+
+healthz 200 (tick 13:16 UTC, under a minute old); production deploy READY (#92);
+Vercel runtime errors limited to known AI SDK warnings; no new `last_error` rows
+or stale stamps; no failed jobs since 10-15; no running sessions; 8 queued
+`lineup_check` sessions all due 22:45–22:50 UTC today (none past due); no
+failed/timed-out sessions since the 10-18 sweep (6638 only).
