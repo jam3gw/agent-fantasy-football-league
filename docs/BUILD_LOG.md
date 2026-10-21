@@ -7686,3 +7686,18 @@ Review of #92 (one round): `describeError` now keeps only message/type/code/stat
 public) and never throws on circular/BigInt/empty input; tests added for both and
 for the $5 default; RUNBOOK runway sentence and capacity.ts comment corrected.
 The fixes were checked by tests, lint and type check, not by a second reviewer pass.
+
+## 2026-10-21 — Operational sweep: green, one provider-side session failure
+
+healthz 200 (tick 53s old); `cron.tick`/`sessions.sweep` fresh; no failed
+scheduled_jobs; no running sessions; no queued session 15+ minutes past due;
+no Vercel runtime errors in 72h; the latest READY production deploy is still
+the docs-only #88 build (later docs commits' builds were canceled, as before).
+Old `last_error` stamps on `tick.*` (08-29) and `nflverse.*` (404s, since
+recovered) are stale, not new.
+
+- **Session 7828 failed** (team 9, kimi-k3, `post_waivers`): the gateway
+  returned `HTTP 400: Tool calls cutoff by max_tokens` ~7 minutes after the last
+  tool result. Provider-side cutoff (we set no token limits, per spec), not a
+  code fault. The sweep already requeued it as session 7831 (attempt 1).
+  Flagged only; kimi-k3 has 5 succeeded / 8 queued otherwise in the last 7 days.
