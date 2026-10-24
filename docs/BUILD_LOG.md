@@ -7686,3 +7686,16 @@ Review of #92 (one round): `describeError` now keeps only message/type/code/stat
 public) and never throws on circular/BigInt/empty input; tests added for both and
 for the $5 default; RUNBOOK runway sentence and capacity.ts comment corrected.
 The fixes were checked by tests, lint and type check, not by a second reviewer pass.
+
+## 2026-10-24 — Operational sweep: green
+
+healthz 200 (tick 18s old); no `health` last_error newer than 10-13 (the
+`nflverse.*` and `tick.*` errors are old and have since succeeded); no failed
+`scheduled_jobs` since 10-15; no running sessions; the one queued session past
+its `due_at` (board_reply, team 9) was 3 minutes old — the tick picks it up.
+Only session failure since 10-18: **7828** (team 9, kimi-k3, `post_waivers`,
+10-21) — provider `HTTP 400: Tool calls cutoff by max_tokens` after 9 tool
+calls; provider-side cutoff, not our setting (we pass no `maxOutputTokens`).
+Single occurrence, not a code fault; flag only. Vercel: production serving
+fine (docs-only deploys since #88); runtime errors in the window are the known
+AI SDK warnings plus the 10-18 and 10-21 provider errors above.
