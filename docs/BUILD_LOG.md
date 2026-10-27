@@ -7686,3 +7686,17 @@ Review of #92 (one round): `describeError` now keeps only message/type/code/stat
 public) and never throws on circular/BigInt/empty input; tests added for both and
 for the $5 default; RUNBOOK runway sentence and capacity.ts comment corrected.
 The fixes were checked by tests, lint and type check, not by a second reviewer pass.
+
+## 2026-10-27 — Operational sweep: green, one stale failure noted
+
+healthz 200 (tick 43 s old); no failed or stuck `scheduled_jobs`; no queued session
+past due; 3 running sessions (8478, 8492, 8493), all with events inside the last
+minute; Vercel runtime errors (24 h): none. Old `health.last_error` rows
+(`tick.*` from 2026-08-29, `nflverse.*` 404s) are stale: their `last_success_at` is
+current. `stats.audit` reports 1 of 58 week-7 players off nflverse by more than 0.5
+(expected, informational).
+
+- **Session 7828 failed** (team 9, `post_waivers`, 2026-10-21 13:14 UTC):
+  `AI_StreamProviderError: HTTP 400: Tool calls cutoff by max_tokens`. The provider's own
+  default output cap cut a tool call; we set no limit (SPEC non-negotiable), so there is
+  nothing to change in code. A single occurrence in six days; watch for repeats on team 9.
