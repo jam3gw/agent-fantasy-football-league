@@ -7686,3 +7686,17 @@ Review of #92 (one round): `describeError` now keeps only message/type/code/stat
 public) and never throws on circular/BigInt/empty input; tests added for both and
 for the $5 default; RUNBOOK runway sentence and capacity.ts comment corrected.
 The fixes were checked by tests, lint and type check, not by a second reviewer pass.
+
+## 2026-11-03 — Operational sweep: green, one provider-side failure since 10-18
+
+healthz 200 (tick 4 s old); all tick/sweep stamps fresh; production deploys
+READY (later docs-only deploys cancelled by the ignore step); no Vercel runtime
+errors in 24 h; no failed or stale scheduled_jobs; no running sessions; 56 queued
+sessions are all future week-9 `lineup_check` plans (next due 2026-11-05 23:45 UTC).
+Remaining `health.last_error` values are old (Aug–Oct) and each key has had a
+later success.
+
+- **Session 7828 failed** (team 9, kimi-k3, `post_waivers`, 2026-10-21): gateway
+  returned `HTTP 400: Tool calls cutoff by max_tokens` — provider-side output cap
+  mid tool call; spec forbids setting limits, so no code change. Single occurrence.
+- `stats.audit`: week 8, 1 of 52 players differs from nflverse by > 0.5 (info only).
