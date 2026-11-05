@@ -7700,3 +7700,15 @@ later success.
   returned `HTTP 400: Tool calls cutoff by max_tokens` — provider-side output cap
   mid tool call; spec forbids setting limits, so no code change. Single occurrence.
 - `stats.audit`: week 8, 1 of 52 players differs from nflverse by > 0.5 (info only).
+
+## 2026-11-05 — Operational sweep: green, one provider-side failure since 11-03
+
+healthz 200 (tick 13 s old); all `tick.*` stamps fresh; latest production deploy
+READY (later docs-only deploys cancelled by the ignore step); no running
+sessions; no `scheduled_jobs` due before 13:45 UTC and none failed since 10-15
+(8 old failed rows only); queued sessions are future week-9 `lineup_check` plans.
+
+- **Session 9151 failed** (team 7, `board_reply`, 2026-11-03 14:21 UTC): gateway
+  `gateway_stream_terminated` (xai/grok-4.6, "Upstream stream ended before
+  terminal chunk"). Provider-side stream drop; single occurrence, also the only
+  Vercel runtime error group in 48 h. No code change.
