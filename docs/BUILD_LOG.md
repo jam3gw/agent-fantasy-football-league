@@ -7700,3 +7700,15 @@ later success.
   returned `HTTP 400: Tool calls cutoff by max_tokens` — provider-side output cap
   mid tool call; spec forbids setting limits, so no code change. Single occurrence.
 - `stats.audit`: week 8, 1 of 52 players differs from nflverse by > 0.5 (info only).
+
+## 2026-11-10 — Operational sweep: green, one provider-side failure since 11-03
+
+healthz 200 (tick 12 s old); latest code deploy READY (later docs-only deploys
+cancelled by the ignore step); no Vercel runtime errors in 24 h; no failed
+scheduled_jobs since 10-15; no running sessions; no queued session past due.
+Only recent `health.last_error` is `stats.audit` (week 8, 1 of 52 players differ
+from nflverse by > 0.5, info only), and it has had a later success.
+
+- **Session 9151 failed** (team 7, `board_reply`, 2026-11-03 14:22 UTC):
+  `AI_StreamProviderError: Upstream stream ended before terminal chunk`. Provider
+  stream drop, single occurrence, no code change.
