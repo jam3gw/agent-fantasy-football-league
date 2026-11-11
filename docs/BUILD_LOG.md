@@ -7700,3 +7700,20 @@ later success.
   returned `HTTP 400: Tool calls cutoff by max_tokens` — provider-side output cap
   mid tool call; spec forbids setting limits, so no code change. Single occurrence.
 - `stats.audit`: week 8, 1 of 52 players differs from nflverse by > 0.5 (info only).
+
+## 2026-11-11 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-03. No failed or overdue scheduled_jobs.
+No running sessions; 57 queued are future week-10 `lineup_check` plans (next
+due 2026-11-11 18:00 UTC). No session over budget or looping since 11-03 (most
+tool calls 43, team 7 `weekly_review`; longest 899 s, team 8 `weekly_review`,
+succeeded). Production deploy READY (later docs-only deploys cancelled by the
+ignore step).
+
+- **Session 9151 failed** (team 7, grok-4.6, `board_reply`, 2026-11-03):
+  `Upstream stream ended before terminal chunk`. Provider stream drop, single
+  occurrence, no code change.
+- Vercel runtime errors (7 d): two single `MessageNotAvailableError` workflow
+  queue redeliveries (11-05, 11-06), no failed session alongside them. This is
+  the known self-healing noise.
