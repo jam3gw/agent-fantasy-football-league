@@ -175,6 +175,152 @@ describe("runSession (§8.2)", () => {
     expect(logs[0]!.summary).toBe("late");
   });
 
+  it("records the closing step's spend and tool call, and sets ended_by (§8.7)", async () => {
+    const id = await makeSession("weekly_review");
+    const result = await runSession(
+      id,
+      deps([
+        step({ text: "thinking" }),
+        step({ toolCalls: [{ toolCallId: "c", toolName: "write_decision_log", args: { summary: "late" } }] }),
+      ]),
+    );
+    expect(result.endedBy).toBe("ending_tool");
+    const s = (await db.select().from(sessions).where(eq(sessions.id, id)))[0]!;
+    expect(s.endedBy).toBe("ending_tool");
+    const ledger = await db.select().from(spendLedger).where(eq(spendLedger.sessionId, id));
+    expect(ledger).toHaveLength(2); // the main step and the closing step
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
+    expect(events.some((e) => e.type === "tool_call" && (e.content as Record<string, unknown>).closing_step === true)).toBe(true);
+  });
+
+  it("keeps ended_by=ceiling when the closing step writes the log (§8.3)", async () => {
+    const id = await makeSession("weekly_review", { tool_call_ceiling: 2 });
+    const ping = step({ toolCalls: [{ toolCallId: "x", toolName: "get_league_state", args: {} }] });
+    const result = await runSession(
+      id,
+      deps([
+        ping,
+        ping,
+        ping,
+        step({ toolCalls: [{ toolCallId: "c", toolName: "write_decision_log", args: { summary: "closed" } }] }),
+      ]),
+    );
+    expect(result.endedBy).toBe("ceiling");
+    const logs = await db.select().from(decisionLogs);
+    expect(logs.map((l) => l.summary)).toEqual(["closed"]);
+  });
+
+  it("runs the ending tool alongside a non-ending call in the closing step, and the ledger row has the next step number", async () => {
+    const id = await makeSession("weekly_review");
+    const result = await runSession(
+      id,
+      deps([
+        step({ text: "thinking" }),
+        step({
+          toolCalls: [
+            { toolCallId: "a", toolName: "get_league_state", args: {} },
+            { toolCallId: "b", toolName: "write_decision_log", args: { summary: "both" } },
+            { toolCallId: "c", toolName: "write_decision_log", args: { summary: "again" } },
+          ],
+        }),
+      ]),
+    );
+    expect(result.endedBy).toBe("ending_tool");
+    expect(toolRuns).toEqual(["write_decision_log"]);
+    const ledger = await db.select().from(spendLedger).where(eq(spendLedger.sessionId, id));
+    expect(ledger.map((r) => r.stepNo).sort()).toEqual([1, 2]);
+    const results = (await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id)))
+      .filter((e) => e.type === "tool_result")
+      .map((e) => (e.content as { result: { ok?: boolean; error?: string } }).result);
+    expect(results.map((r) => r.error ?? "ok")).toEqual(["not_run", "ok", "not_run"]);
+  });
+
+  it("closes a deadline session as timed_out even when the closing step writes the log", async () => {
+    const id = await makeSession("weekly_review");
+    let n = 0;
+    const result = await runSession(id, {
+      ...deps([]),
+      modelStep: async () => {
+        n++;
+        if (n === 1) {
+          clock.advance(2 * 60 * 60_000); // past the one-hour deadline
+          return step({ toolCalls: [{ toolCallId: "x", toolName: "get_league_state", args: {} }] });
+        }
+        return step({ toolCalls: [{ toolCallId: "c", toolName: "write_decision_log", args: { summary: "late" } }] });
+      },
+    });
+    expect(result.endedBy).toBe("deadline");
+    expect(result.status).toBe("timed_out");
+  });
+
+  it("does not replay the closing step on resume, and keeps a log written there", async () => {
+    const id = await makeSession("weekly_review");
+    await runSession(
+      id,
+      deps([
+        step({ text: "thinking" }),
+        step({ toolCalls: [{ toolCallId: "c", toolName: "write_decision_log", args: { summary: "late" } }] }),
+      ]),
+    );
+    // Pretend the invocation died before the sessions row was finalized.
+    await db.update(sessions).set({ status: "running", endedAt: null }).where(eq(sessions.id, id));
+    let calls = 0;
+    const again = await runSession(id, {
+      ...deps([]),
+      modelStep: async () => {
+        calls++;
+        return step({});
+      },
+    });
+    expect(calls).toBe(0); // the ending tool already succeeded
+    expect(again.toolCalls).toBe(0); // closing-step results are not counted on replay
+    expect((await db.select().from(decisionLogs)).map((l) => l.summary)).toEqual(["late"]);
+  });
+
+  it("does not hand the closing prompt or its not_run results back to the model on resume", async () => {
+    const id = await makeSession("weekly_review");
+    await runSession(
+      id,
+      deps([
+        step({ text: "thinking" }),
+        step({ toolCalls: [{ toolCallId: "c", toolName: "get_league_state", args: {} }] }),
+      ]),
+    );
+    await db.update(sessions).set({ status: "running", endedAt: null }).where(eq(sessions.id, id));
+    let seen = "";
+    await runSession(id, {
+      ...deps([]),
+      modelStep: async (req) => {
+        seen ||= JSON.stringify(req.messages);
+        return step({ toolCalls: [{ toolCallId: "d", toolName: "write_decision_log", args: { summary: "x" } }] });
+      },
+    });
+    expect(seen).not.toContain("short summary of this session");
+    expect(seen).not.toContain("not_run");
+  });
+
+  it("runs only the ending tool in the closing step (§8.2 step 5)", async () => {
+    const id = await makeSession("weekly_review");
+    const result = await runSession(
+      id,
+      deps([
+        step({ text: "thinking" }),
+        step({ toolCalls: [{ toolCallId: "c", toolName: "get_league_state", args: {} }] }),
+      ]),
+    );
+    expect(result.status).toBe("succeeded");
+    expect(toolRuns).toEqual([]); // the non-ending call was recorded, not run
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
+    const res = events.find((e) => e.type === "tool_result" && (e.content as Record<string, unknown>).closing_step === true);
+    expect((res!.content as { result: { error: string } }).result.error).toBe("not_run");
+    const logs = await db.select().from(decisionLogs);
+    expect(logs.map((l) => l.summary)).toEqual(["(no summary written)"]);
+    const row = (await db.select().from(sessions).where(eq(sessions.id, id)))[0]!;
+    expect(row.toolCalls).toBe(0);
+    // The closing instruction is in the transcript as the user message it is.
+    expect(events.some((e) => e.type === "user" && (e.content as Record<string, unknown>).closing_step === true)).toBe(true);
+  });
+
   it("enforces the tool-call ceiling with one final nudge (§8.3)", async () => {
     const id = await makeSession("weekly_review", { tool_call_ceiling: 2 });
     const result = await runSession(
