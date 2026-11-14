@@ -367,6 +367,7 @@ export async function restoreSession(
         break;
       case "user": {
         flushToolResults();
+        if (content.closing_step) break; // the closing step is never resumed
         const text =
           typeof content.text === "string"
             ? content.text
@@ -752,7 +753,8 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       stepNo: steps + 1,
     });
     seq = closing.seq;
-    if (closing.endedBy) endedBy = closing.endedBy;
+    // A ceiling or deadline flag (§8.3) outranks how the log got written.
+    if (closing.endedBy && endedBy === null) endedBy = closing.endedBy;
 
     const status: RunSessionResult["status"] = closing.failed
       ? "failed"
@@ -915,7 +917,9 @@ async function closeSession(
   }
 
   // One extra model step with the instruction.
-  messages.push({ role: "user", content: `Call ${endingTool} now with a short summary of this session.` });
+  const closingText = `Call ${endingTool} now with a short summary of this session.`;
+  messages.push({ role: "user", content: closingText });
+  await recordEvent(db, clock, args.sessionId, seq++, "user", { text: closingText, closing_step: true });
   try {
     // The same tool list as every other step, so the prompt cache still hits;
     // only the ending tool is run (below).
@@ -971,7 +975,10 @@ async function closeSession(
         const parsed = tool.schema.safeParse(call.args);
         out = parsed.success
           ? await tool.execute(parsed.data, args.ctx)
-          : toolFailure("invalid_args", `${call.toolName}: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
+          : toolFailure(
+              "invalid_args",
+              `${call.toolName}: ${parsed.error.issues.map((i) => describeIssue(i, call.args)).join("; ")}`,
+            );
       }
       await recordEvent(db, clock, args.sessionId, seq++, "tool_result", {
         name: call.toolName,
@@ -984,7 +991,7 @@ async function closeSession(
       }
     }
   } catch (err) {
-    await recordEvent(db, clock, args.sessionId, seq++, "error", { closing_step: String(err) });
+    await recordEvent(db, clock, args.sessionId, seq++, "error", { closing_step: describeError(err) });
   }
 
   // Still nothing: insert the placeholder so every session has a public summary.

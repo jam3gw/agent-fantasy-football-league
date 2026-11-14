@@ -7751,3 +7751,21 @@ deploy READY (#88 build; later docs-only deploys cancelled by the ignore step).
   assistant event, and `ended_by = ending_tool` when the log is written there.
   On resume, closing-step results are not replayed. 19 earlier sessions ended
   through the old path (`ended_by` NULL); I left them unchanged.
+
+  Review round 1 for this fix. Fixed:
+  - A closing-step success no longer overwrites a `ceiling` or `deadline` flag. Test added.
+  - The closing instruction is now recorded as a `user` event. It is skipped on resume.
+  - Closing-step `invalid_args` now uses `describeIssue`.
+  - The closing-step error event now uses `describeError`, because the transcript is public.
+
+  Not fixed, with reasons:
+  - Resume during or after the closing step can re-enter the main loop. That
+    means an extra model step and ledger row, and possibly a second placeholder
+    row. This predates the change: the old closing step had the same resume
+    gap, only without its ledger row. The window is the seconds between the
+    closing model call and the sessions-row update. Fixing it properly needs a
+    durable "closing started" marker and an idempotent decision log per session.
+    That is a separate change.
+  - Closing-step tool calls are not counted in `tool_calls` or
+    `invalid_tool_calls`. That matches the replay. §8.8 counts invalid calls to
+    drive the nudge, and no step follows the closing step.

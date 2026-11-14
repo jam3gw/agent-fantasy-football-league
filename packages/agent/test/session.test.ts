@@ -193,6 +193,23 @@ describe("runSession (§8.2)", () => {
     expect(events.some((e) => e.type === "tool_call" && (e.content as Record<string, unknown>).closing_step === true)).toBe(true);
   });
 
+  it("keeps ended_by=ceiling when the closing step writes the log (§8.3)", async () => {
+    const id = await makeSession("weekly_review", { tool_call_ceiling: 2 });
+    const ping = step({ toolCalls: [{ toolCallId: "x", toolName: "get_league_state", args: {} }] });
+    const result = await runSession(
+      id,
+      deps([
+        ping,
+        ping,
+        ping,
+        step({ toolCalls: [{ toolCallId: "c", toolName: "write_decision_log", args: { summary: "closed" } }] }),
+      ]),
+    );
+    expect(result.endedBy).toBe("ceiling");
+    const logs = await db.select().from(decisionLogs);
+    expect(logs.map((l) => l.summary)).toEqual(["closed"]);
+  });
+
   it("runs only the ending tool in the closing step (§8.2 step 5)", async () => {
     const id = await makeSession("weekly_review");
     const result = await runSession(
@@ -209,6 +226,10 @@ describe("runSession (§8.2)", () => {
     expect((res!.content as { result: { error: string } }).result.error).toBe("not_run");
     const logs = await db.select().from(decisionLogs);
     expect(logs.map((l) => l.summary)).toEqual(["(no summary written)"]);
+    const row = (await db.select().from(sessions).where(eq(sessions.id, id)))[0]!;
+    expect(row.toolCalls).toBe(0);
+    // The closing instruction is in the transcript as the user message it is.
+    expect(events.some((e) => e.type === "user" && (e.content as Record<string, unknown>).closing_step === true)).toBe(true);
   });
 
   it("enforces the tool-call ceiling with one final nudge (§8.3)", async () => {
