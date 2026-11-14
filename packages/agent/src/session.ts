@@ -393,6 +393,12 @@ export async function restoreSession(
       case "tool_result": {
         const result = content.result as { ok?: boolean; error?: string } | undefined;
         const name = String(content.name ?? "");
+        // The closing step is never resumed: its results are not replayed and
+        // only an ending tool that succeeded there carries over.
+        if (content.closing_step) {
+          if (name === endingTool && result?.ok !== false) restored.endingToolSucceeded = true;
+          break;
+        }
         if (content.invalid === true) restored.invalidToolCalls++;
         else restored.toolCalls++;
         if (name === endingTool && result?.ok !== false) restored.endingToolSucceeded = true;
@@ -743,8 +749,10 @@ export async function runSession(sessionId: number, deps: RunSessionDeps): Promi
       ctx,
       messages,
       seq,
+      stepNo: steps + 1,
     });
     seq = closing.seq;
+    if (closing.endedBy) endedBy = closing.endedBy;
 
     const status: RunSessionResult["status"] = closing.failed
       ? "failed"
@@ -890,8 +898,9 @@ async function closeSession(
     ctx: ToolContext;
     messages: ModelMessage[];
     seq: number;
+    stepNo: number;
   },
-): Promise<{ seq: number; failed: boolean; error?: string }> {
+): Promise<{ seq: number; failed: boolean; error?: string; endedBy?: "ending_tool" }> {
   const { session, endingToolSucceeded, endingTool, deps, messages } = args;
   let seq = args.seq;
   if (endingToolSucceeded) return { seq, failed: false };
@@ -908,13 +917,33 @@ async function closeSession(
   // One extra model step with the instruction.
   messages.push({ role: "user", content: `Call ${endingTool} now with a short summary of this session.` });
   try {
+    // The same tool list as every other step, so the prompt cache still hits;
+    // only the ending tool is run (below).
     const extra = await deps.modelStep(
       { modelId: session.modelId, messages, tools: deps.tools },
       -1,
     );
+    // §8.7: every model step has a ledger row, the closing one included.
+    const { costUsd, source } = await computeStepCost(db, session.modelId, extra.usage, extra.gatewayCostUsd);
+    await recordSpend(db, clock, {
+      sessionId: args.sessionId,
+      teamId: session.teamId,
+      kind: session.kind,
+      modelId: session.modelId,
+      stepNo: args.stepNo,
+      usage: extra.usage,
+      costUsd,
+      source,
+      billedTo: extra.billedTo,
+    });
+    await updateRollups(db, clock);
     await recordEvent(db, clock, args.sessionId, seq++, "assistant", {
       text: extra.text,
       ...(extra.reasoning ? { reasoning: extra.reasoning } : {}),
+      tool_calls: extra.toolCalls.map((c) => ({ name: c.toolName, args: c.args, id: c.toolCallId })),
+      usage: extra.usage,
+      cost_usd: costUsd,
+      billed_to: extra.billedTo,
       closing_step: true,
     });
     if (extra.visibilityOptionDropped) {
@@ -923,17 +952,36 @@ async function closeSession(
         model_id: session.modelId,
       });
     }
+    // §8.2 step 5 grants this step for the decision log only. Any other call
+    // is recorded and not run: a league move made here would have no
+    // follow-up step to finish it (session 10344 added a player in this step
+    // and never got to set the lineup the add was for).
     for (const call of extra.toolCalls) {
+      await recordEvent(db, clock, args.sessionId, seq++, "tool_call", {
+        name: call.toolName,
+        args: call.args,
+        tool_call_id: call.toolCallId,
+        closing_step: true,
+      });
       const tool = deps.tools.find((t) => t.name === call.toolName);
-      if (!tool) continue;
-      const parsed = tool.schema.safeParse(call.args);
-      if (!parsed.success) continue;
-      const out = await tool.execute(parsed.data, args.ctx);
+      let out: ToolResult;
+      if (!tool || call.toolName !== endingTool) {
+        out = toolFailure("not_run", `Only ${endingTool} runs in the closing step; ${call.toolName} was not run.`);
+      } else {
+        const parsed = tool.schema.safeParse(call.args);
+        out = parsed.success
+          ? await tool.execute(parsed.data, args.ctx)
+          : toolFailure("invalid_args", `${call.toolName}: ${parsed.error.issues.map((i) => i.message).join("; ")}`);
+      }
       await recordEvent(db, clock, args.sessionId, seq++, "tool_result", {
         name: call.toolName,
         result: out,
+        tool_call_id: call.toolCallId,
+        closing_step: true,
       });
-      if (tool.ending && out.ok !== false) return { seq, failed: false };
+      if (tool?.ending && call.toolName === endingTool && out.ok !== false) {
+        return { seq, failed: false, endedBy: "ending_tool" };
+      }
     }
   } catch (err) {
     await recordEvent(db, clock, args.sessionId, seq++, "error", { closing_step: String(err) });

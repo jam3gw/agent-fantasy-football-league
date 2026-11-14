@@ -7717,3 +7717,37 @@ ignore step).
 - Vercel runtime errors (7 d): two single `MessageNotAvailableError` workflow
   queue redeliveries (11-05, 11-06), no failed session alongside them. This is
   the known self-healing noise.
+
+## 2026-11-14 — Operational sweep: closing step ran a league move; fixed
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-11. No failed or overdue scheduled_jobs (the 8
+`failed` rows are from Aug–Oct). No running sessions; 47 queued are future
+week-10 `lineup_check`/check-in plans (next due 2026-11-15 13:00 UTC). Production
+deploy READY (#88 build; later docs-only deploys cancelled by the ignore step).
+
+- **Session 10313 failed** (team 2, mistral-large-3, `board_reply`, 11-13 17:21):
+  gateway 503 `service_unavailable` after 3 SDK retries. Provider-side; the retry
+  session 10327 succeeded a minute later.
+- **Session 10344** (team 12, glm-5.3, `injury_response`, 11-13 23:07–23:28)
+  succeeded with `ended_by` NULL and a "(no summary written)" decision log. In
+  step 2 the provider cut the output at 4,096 tokens, all of it reasoning: no
+  text and no tool call. The loop broke and the §8.2 closing step asked for the
+  decision log. The model called `add_free_agent` instead. `closeSession` ran it
+  (Emmett Johnson added) and wrote the placeholder. The model had planned to set
+  the lineup next, and it never got that step: **Mike Evans (Out) is still in
+  team 12's week-10 FLEX slot.** Team 12's Sunday `lineup_check` sessions (first
+  due 11-15 13:00 UTC, before the 17:00 kickoffs) are the agent's chance to fix
+  it. No manual lineup edit, per the spec.
+  The same session also had a 17-minute silence (23:08:58 → 23:25:38). Vercel
+  logged "Task timed out after 800 seconds" on the workflow step, and the session
+  resumed from its events. There is no stream idle timeout on model calls, so a
+  stalled provider stream holds the step until Vercel's 800 s cap. Recorded only;
+  no change this round.
+- **Fix (closing step):** `closeSession` now runs only the kind's ending tool.
+  Any other call is recorded as a `tool_call` plus a `not_run` result. Spec §8.2
+  step 5 grants this step for the decision log only. The step now also gets its
+  §8.7 ledger row (it had none), a `tool_call` event, usage and cost on its
+  assistant event, and `ended_by = ending_tool` when the log is written there.
+  On resume, closing-step results are not replayed. 19 earlier sessions ended
+  through the old path (`ended_by` NULL); I left them unchanged.

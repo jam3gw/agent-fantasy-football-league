@@ -175,6 +175,42 @@ describe("runSession (§8.2)", () => {
     expect(logs[0]!.summary).toBe("late");
   });
 
+  it("records the closing step's spend and tool call, and sets ended_by (§8.7)", async () => {
+    const id = await makeSession("weekly_review");
+    const result = await runSession(
+      id,
+      deps([
+        step({ text: "thinking" }),
+        step({ toolCalls: [{ toolCallId: "c", toolName: "write_decision_log", args: { summary: "late" } }] }),
+      ]),
+    );
+    expect(result.endedBy).toBe("ending_tool");
+    const s = (await db.select().from(sessions).where(eq(sessions.id, id)))[0]!;
+    expect(s.endedBy).toBe("ending_tool");
+    const ledger = await db.select().from(spendLedger).where(eq(spendLedger.sessionId, id));
+    expect(ledger).toHaveLength(2); // the main step and the closing step
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
+    expect(events.some((e) => e.type === "tool_call" && (e.content as Record<string, unknown>).closing_step === true)).toBe(true);
+  });
+
+  it("runs only the ending tool in the closing step (§8.2 step 5)", async () => {
+    const id = await makeSession("weekly_review");
+    const result = await runSession(
+      id,
+      deps([
+        step({ text: "thinking" }),
+        step({ toolCalls: [{ toolCallId: "c", toolName: "get_league_state", args: {} }] }),
+      ]),
+    );
+    expect(result.status).toBe("succeeded");
+    expect(toolRuns).toEqual([]); // the non-ending call was recorded, not run
+    const events = await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id));
+    const res = events.find((e) => e.type === "tool_result" && (e.content as Record<string, unknown>).closing_step === true);
+    expect((res!.content as { result: { error: string } }).result.error).toBe("not_run");
+    const logs = await db.select().from(decisionLogs);
+    expect(logs.map((l) => l.summary)).toEqual(["(no summary written)"]);
+  });
+
   it("enforces the tool-call ceiling with one final nudge (§8.3)", async () => {
     const id = await makeSession("weekly_review", { tool_call_ceiling: 2 });
     const result = await runSession(
