@@ -7780,5 +7780,4 @@ deploy READY (#88 build; later docs-only deploys cancelled by the ignore step).
   - a mixed non-ending and ending call;
   - the closing ledger row's step number.
 
-  Round 3 was not run. The round-2 findings were test gaps and two small parity
-  fixes, and the whole suite passes with them.
+  Round 3: the reviewer reported nothing new.
