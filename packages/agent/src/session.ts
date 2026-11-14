@@ -941,6 +941,11 @@ async function closeSession(
       billedTo: extra.billedTo,
     });
     await updateRollups(db, clock);
+    // Alarms notify, as on every other step (§8.7); the optional season limit
+    // takes effect from the next session.
+    const alarms = await evaluateAlarms(db, clock, { sessionId: args.sessionId, teamId: session.teamId });
+    if (alarms.length > 0 && deps.onAlarms) await deps.onAlarms(alarms);
+    if (session.teamId !== null) await applyOptionalPause(db, clock, session.teamId);
     await recordEvent(db, clock, args.sessionId, seq++, "assistant", {
       text: extra.text,
       ...(extra.reasoning ? { reasoning: extra.reasoning } : {}),
@@ -960,6 +965,7 @@ async function closeSession(
     // is recorded and not run: a league move made here would have no
     // follow-up step to finish it (session 10344 added a player in this step
     // and never got to set the lineup the add was for).
+    let logged = false;
     for (const call of extra.toolCalls) {
       await recordEvent(db, clock, args.sessionId, seq++, "tool_call", {
         name: call.toolName,
@@ -969,7 +975,9 @@ async function closeSession(
       });
       const tool = deps.tools.find((t) => t.name === call.toolName);
       let out: ToolResult;
-      if (!tool || call.toolName !== endingTool) {
+      if (logged) {
+        out = toolFailure("not_run", `${endingTool} already succeeded; ${call.toolName} was not run.`);
+      } else if (!tool || call.toolName !== endingTool) {
         out = toolFailure("not_run", `Only ${endingTool} runs in the closing step; ${call.toolName} was not run.`);
       } else {
         const parsed = tool.schema.safeParse(call.args);
@@ -986,10 +994,9 @@ async function closeSession(
         tool_call_id: call.toolCallId,
         closing_step: true,
       });
-      if (tool?.ending && call.toolName === endingTool && out.ok !== false) {
-        return { seq, failed: false, endedBy: "ending_tool" };
-      }
+      if (!logged && tool?.ending && call.toolName === endingTool && out.ok !== false) logged = true;
     }
+    if (logged) return { seq, failed: false, endedBy: "ending_tool" };
   } catch (err) {
     await recordEvent(db, clock, args.sessionId, seq++, "error", { closing_step: describeError(err) });
   }

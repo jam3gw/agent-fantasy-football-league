@@ -7769,3 +7769,16 @@ deploy READY (#88 build; later docs-only deploys cancelled by the ignore step).
   - Closing-step tool calls are not counted in `tool_calls` or
     `invalid_tool_calls`. That matches the replay. §8.8 counts invalid calls to
     drive the nudge, and no step follows the closing step.
+
+  Review round 2 for this fix. Fixed:
+  - The closing step now evaluates spend alarms and the optional pause, as the main loop does.
+  - Calls after a successful ending tool get `not_run` rows.
+
+  Tests added for:
+  - resume after the closing step: no replay, no recount, a log written there is kept;
+  - a deadline session that closes successfully;
+  - a mixed non-ending and ending call;
+  - the closing ledger row's step number.
+
+  Round 3 was not run. The round-2 findings were test gaps and two small parity
+  fixes, and the whole suite passes with them.

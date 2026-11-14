@@ -210,6 +210,95 @@ describe("runSession (§8.2)", () => {
     expect(logs.map((l) => l.summary)).toEqual(["closed"]);
   });
 
+  it("runs the ending tool alongside a non-ending call in the closing step, and the ledger row has the next step number", async () => {
+    const id = await makeSession("weekly_review");
+    const result = await runSession(
+      id,
+      deps([
+        step({ text: "thinking" }),
+        step({
+          toolCalls: [
+            { toolCallId: "a", toolName: "get_league_state", args: {} },
+            { toolCallId: "b", toolName: "write_decision_log", args: { summary: "both" } },
+            { toolCallId: "c", toolName: "write_decision_log", args: { summary: "again" } },
+          ],
+        }),
+      ]),
+    );
+    expect(result.endedBy).toBe("ending_tool");
+    expect(toolRuns).toEqual(["write_decision_log"]);
+    const ledger = await db.select().from(spendLedger).where(eq(spendLedger.sessionId, id));
+    expect(ledger.map((r) => r.stepNo).sort()).toEqual([1, 2]);
+    const results = (await db.select().from(sessionEvents).where(eq(sessionEvents.sessionId, id)))
+      .filter((e) => e.type === "tool_result")
+      .map((e) => (e.content as { result: { ok?: boolean; error?: string } }).result);
+    expect(results.map((r) => r.error ?? "ok")).toEqual(["not_run", "ok", "not_run"]);
+  });
+
+  it("closes a deadline session as timed_out even when the closing step writes the log", async () => {
+    const id = await makeSession("weekly_review");
+    let n = 0;
+    const result = await runSession(id, {
+      ...deps([]),
+      modelStep: async () => {
+        n++;
+        if (n === 1) {
+          clock.advance(2 * 60 * 60_000); // past the one-hour deadline
+          return step({ toolCalls: [{ toolCallId: "x", toolName: "get_league_state", args: {} }] });
+        }
+        return step({ toolCalls: [{ toolCallId: "c", toolName: "write_decision_log", args: { summary: "late" } }] });
+      },
+    });
+    expect(result.endedBy).toBe("deadline");
+    expect(result.status).toBe("timed_out");
+  });
+
+  it("does not replay the closing step on resume, and keeps a log written there", async () => {
+    const id = await makeSession("weekly_review");
+    await runSession(
+      id,
+      deps([
+        step({ text: "thinking" }),
+        step({ toolCalls: [{ toolCallId: "c", toolName: "write_decision_log", args: { summary: "late" } }] }),
+      ]),
+    );
+    // Pretend the invocation died before the sessions row was finalized.
+    await db.update(sessions).set({ status: "running", endedAt: null }).where(eq(sessions.id, id));
+    let calls = 0;
+    const again = await runSession(id, {
+      ...deps([]),
+      modelStep: async () => {
+        calls++;
+        return step({});
+      },
+    });
+    expect(calls).toBe(0); // the ending tool already succeeded
+    expect(again.toolCalls).toBe(0); // closing-step results are not counted on replay
+    expect((await db.select().from(decisionLogs)).map((l) => l.summary)).toEqual(["late"]);
+  });
+
+  it("does not hand the closing prompt or its not_run results back to the model on resume", async () => {
+    const id = await makeSession("weekly_review");
+    await runSession(
+      id,
+      deps([
+        step({ text: "thinking" }),
+        step({ toolCalls: [{ toolCallId: "c", toolName: "get_league_state", args: {} }] }),
+      ]),
+    );
+    await db.update(sessions).set({ status: "running", endedAt: null }).where(eq(sessions.id, id));
+    let seen = "";
+    await runSession(id, {
+      ...deps([]),
+      modelStep: async (req) => {
+        seen ||= JSON.stringify(req.messages);
+        return step({ toolCalls: [{ toolCallId: "d", toolName: "write_decision_log", args: { summary: "x" } }] });
+      },
+    });
+    expect(seen).not.toContain("short summary of this session");
+    expect(seen).not.toContain("not_run");
+  });
+
   it("runs only the ending tool in the closing step (§8.2 step 5)", async () => {
     const id = await makeSession("weekly_review");
     const result = await runSession(
