@@ -7781,3 +7781,19 @@ deploy READY (#88 build; later docs-only deploys cancelled by the ignore step).
   - the closing ledger row's step number.
 
   Round 3: the reviewer reported nothing new.
+
+## 2026-11-15 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-14. No failed or overdue scheduled_jobs. No
+failed, timed-out or running sessions; 39 queued are week-10 `lineup_check`
+plans, none overdue (next due 16:30 UTC). The 13:00 Sunday lineup checks for
+eight teams all succeeded. The longest took 349 s (team 10) and the most tool
+calls was 17 (team 2). Team 2's four invalid calls were `write_decision_log`
+summaries over the 800-character limit; it shortened the summary each time and
+the fifth call succeeded. Production deploy READY (#103 build). No Vercel
+runtime errors since 11-14 12:00 UTC.
+
+- Resolved: team 12 swapped Mike Evans (Out) out of FLEX on its own. It called
+  `set_lineup` in injury_response session 10435 on 11-14, and its 13:00
+  lineup_check confirmed the lineup.
