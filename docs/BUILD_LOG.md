@@ -7797,3 +7797,16 @@ runtime errors since 11-14 12:00 UTC.
 - Resolved: team 12 swapped Mike Evans (Out) out of FLEX on its own. It called
   `set_lineup` in injury_response session 10435 on 11-14, and its 13:00
   lineup_check confirmed the lineup.
+
+## 2026-11-16 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-15. No failed or overdue scheduled_jobs (107
+`due` are future). No failed, timed-out or running sessions since 11-15; 7
+queued are Monday-night week-10 `lineup_check` plans and one team-2
+`self_check_in`, none overdue (next due 23:00 UTC). No session looped or ran
+over budget. The longest took 471 s (team 10 `lineup_check`), and the most
+tool calls was 24. The highest invalid-call count was 3 (teams 2 and 10), and
+both sessions ended with their ending tool. Production deploy READY (#103
+build; the #104 docs deploy was cancelled by the ignore step). No Vercel
+runtime errors since 11-15 13:00 UTC.
