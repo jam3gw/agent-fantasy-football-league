@@ -7810,3 +7810,16 @@ tool calls was 24. The highest invalid-call count was 3 (teams 2 and 10), and
 both sessions ended with their ending tool. Production deploy READY (#103
 build; the #104 docs deploy was cancelled by the ignore step). No Vercel
 runtime errors since 11-15 13:00 UTC.
+
+## 2026-11-17 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-16. No failed or overdue scheduled_jobs. No
+failed, timed-out or running sessions since 11-16; 45 queued are week-11
+`lineup_check` plans, none overdue (next due 11-19 23:45 UTC). The 17
+sessions since the last sweep all ended with their ending tool: Monday-night
+lineup checks, one team-2 `self_check_in` (512 s, 30 tool calls, the longest),
+one team-1 `trade_response`, and a run of `board_reply` sessions among teams
+1, 2 and 7 (23:10–23:35 UTC, each under 90 s). The highest invalid-call count
+was 3. Production deploy READY (#103 build; the #105 docs deploy was cancelled
+by the ignore step). No Vercel runtime errors since 11-16 13:00 UTC.
