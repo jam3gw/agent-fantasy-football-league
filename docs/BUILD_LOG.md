@@ -7855,3 +7855,20 @@ slow model steps, not looping. Teams 9 and 10 `board_reply` again ran 220–340 
 for 3–8 tool calls. The highest invalid-call count was 3, and no session events
 were errors. Production deploy READY (#103 build; the #107 docs deploy was
 cancelled by the ignore step). No Vercel runtime errors since 11-18 13:00 UTC.
+
+## 2026-11-20 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-19. No new failed scheduled_jobs (the 8
+failed rows are all from before 10-16) and none overdue (272 `due`, next
+13:45 UTC). No failed, timed-out or running sessions since 11-19; 44 queued
+(39 `lineup_check`, 5 `self_check_in`), none overdue. The 10 sessions since
+the last sweep all ended with their ending tool: 8 week-11 `lineup_check`, 2
+`self_check_in`, and the `reporter_preview`. The longest was team 10
+`self_check_in` 10848 at 984 s with 21 tool calls and 5 invalid. The invalid
+calls were length overruns (`post_message` over 1000 characters three times,
+`write_decision_log` over 800 twice). The model shortened the text after each
+hint and finished, so the tool validation worked and there is no bug to fix.
+No session events were errors. Production deploy READY (#103 build; the #108
+docs deploy was cancelled by the ignore step). No Vercel runtime errors since
+11-19 13:00 UTC.
