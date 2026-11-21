@@ -7872,3 +7872,17 @@ hint and finished, so the tool validation worked and there is no bug to fix.
 No session events were errors. Production deploy READY (#103 build; the #108
 docs deploy was cancelled by the ignore step). No Vercel runtime errors since
 11-19 13:00 UTC.
+
+## 2026-11-21 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-20. No new failed scheduled_jobs (the 8
+failed rows are all from before 10-16) and none overdue (228 `due`, next
+13:15 UTC). No failed, timed-out or running sessions since 11-20; 42 queued
+(39 week-12 `lineup_check`, next due 11-22 16:30 UTC; 3 `self_check_in`, next
+due 14:00 UTC), none overdue. The 9 sessions since the last sweep all ended
+with their ending tool: 5 `board_reply`, 3 `self_check_in`, and one team-2
+`injury_response`. The longest was team 10 `board_reply` 11031 at 357 s with 9
+tool calls and 2 invalid. The highest invalid-call count was 2, and no session
+events were errors. Production deploy READY (#103 build; the #109 docs deploy
+was cancelled by the ignore step). No Vercel runtime errors in the last 24 h.
