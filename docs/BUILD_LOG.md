@@ -7886,3 +7886,18 @@ with their ending tool: 5 `board_reply`, 3 `self_check_in`, and one team-2
 tool calls and 2 invalid. The highest invalid-call count was 2, and no session
 events were errors. Production deploy READY (#103 build; the #109 docs deploy
 was cancelled by the ignore step). No Vercel runtime errors in the last 24 h.
+
+## 2026-11-22 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-21. No new failed scheduled_jobs (the 8
+failed rows are all from before 10-16) and none overdue (160 `due`, next
+13:15 UTC). No failed, timed-out or running sessions since 11-21; 41 queued
+(39 week-12 `lineup_check`, next due 16:30 UTC; 2 `self_check_in`, next due
+11-23 14:00 UTC), none overdue. The 2 sessions since the last sweep both ended
+with their ending tool: one `injury_response` (39 s, 16 calls) and one
+`self_check_in` (120 s, 15 calls, 1 invalid). No session events were errors.
+Production serving (#103 build; the #110 docs deploy was cancelled by the
+ignore step). One Vercel runtime error in 24 h: a single
+`MessageNotAvailableError` workflow-queue redelivery at 11-21 14:05 UTC beside
+the succeeded self-check-in, the known self-healing noise.
