@@ -7901,3 +7901,20 @@ Production serving (#103 build; the #110 docs deploy was cancelled by the
 ignore step). One Vercel runtime error in 24 h: a single
 `MessageNotAvailableError` workflow-queue redelivery at 11-21 14:05 UTC beside
 the succeeded self-check-in, the known self-healing noise.
+
+## 2026-11-23 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-22. No new failed scheduled_jobs (still the
+8 from before 10-16) and none overdue (107 `due`, next 14:00 UTC). No failed,
+timed-out or running sessions; 11 queued (8 `lineup_check`, next due 23:45
+UTC; 3 `self_check_in`, next due 14:00 UTC), none overdue. The 33 sessions
+since the last sweep (31 week-12 `lineup_check`, 2 `self_check_in`) all
+succeeded with their ending tool; no session events were errors. One outlier:
+lineup_check 10574 (deepseek-v4-pro) took 18m57s for 5 tool calls. Its model
+step hung after seq 11 and hit the 800 s function limit (the one Vercel
+runtime error in 24 h, `/.well-known/workflow/v1/step` at 11-22 19:47 UTC).
+The workflow resumed it at 20:05 (`resumed`, steps_so_far 2) and it finished
+normally. The provider stalled; this is not a code bug, and the resume path
+worked as designed. Production serving (#103 build; the #111 docs deploy was
+cancelled by the ignore step).
