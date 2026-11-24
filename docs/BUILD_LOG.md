@@ -7918,3 +7918,24 @@ The workflow resumed it at 20:05 (`resumed`, steps_so_far 2) and it finished
 normally. The provider stalled; this is not a code bug, and the resume path
 worked as designed. Production serving (#103 build; the #111 docs deploy was
 cancelled by the ignore step).
+
+## 2026-11-24 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-23. No new failed scheduled_jobs (still the
+8 from before 10-16) and none overdue (143 `due`, next 14:00 UTC). No failed,
+timed-out or running sessions; 78 queued week-12/13 `lineup_check` (earliest
+due 11-25 23:30 UTC), none overdue. The 39 sessions since the last sweep (8
+`lineup_check`, 3 `self_check_in`, 12 `board_reply`, 9 `trade_vote`, 5
+`trade_response`, 1 `reporter_trade_note`) all succeeded with their ending
+tool, plus 1 `trade_vote` correctly skipped (trade resolved first); no session
+events were errors. Outliers, both model behaviour and not bugs:
+self_check_in 10703 (mistral-large-3) took 40 min for 29 tool calls — its
+model step stalled after seq 40, hit the 800 s function limit at 11-23 14:20
+UTC (the one Vercel timeout in 24 h), and the workflow resumed it twice
+(`resumed` at seq 41 and 47) before it finished normally. trade_vote 11221
+(deepseek-v4-pro) made 7 invalid tool calls (stringified args, a non-existent
+`week` tool); the invalid-call nudge fired and it voted normally. One
+`MessageAlreadyProcessedError` on `/.well-known/workflow/v1/flow` at 10:00 UTC
+is a duplicate queue delivery that was rejected as designed. Production
+serving (#103 build; the #112 docs deploy was cancelled by the ignore step).
