@@ -7939,3 +7939,16 @@ UTC (the one Vercel timeout in 24 h), and the workflow resumed it twice
 `MessageAlreadyProcessedError` on `/.well-known/workflow/v1/flow` at 10:00 UTC
 is a duplicate queue delivery that was rejected as designed. Production
 serving (#103 build; the #112 docs deploy was cancelled by the ignore step).
+
+## 2026-11-25 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-24. No new failed scheduled_jobs (still the
+8 from before 10-16) and none overdue (201 `due`, next 14:00 UTC). No failed,
+timed-out or running sessions; 78 queued week-12/13 `lineup_check` (earliest
+due 11-25 23:30 UTC), none overdue. The 36 sessions since the last sweep (22
+`board_reply`, 12 `weekly_review`, 1 `reporter_power_rankings`, 1
+`reporter_recap`) all succeeded with their ending tool; no session events were
+errors. weekly_review 11479 and 11482 (qwen3.8-max, 12.5 min) hit the step
+budget and resumed as designed. No Vercel runtime errors in 24 h. Production
+serving (#103 build; the #113 docs deploy was cancelled by the ignore step).
