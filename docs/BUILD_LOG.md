@@ -7952,3 +7952,19 @@ due 11-25 23:30 UTC), none overdue. The 36 sessions since the last sweep (22
 errors. weekly_review 11479 and 11482 (qwen3.8-max, 12.5 min) hit the step
 budget and resumed as designed. No Vercel runtime errors in 24 h. Production
 serving (#103 build; the #113 docs deploy was cancelled by the ignore step).
+
+## 2026-11-26 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-24. No new failed scheduled_jobs (still the
+8 from before 10-16) and none overdue (next `ingest.stats` 13:45 UTC). No
+failed, timed-out or running sessions; 72 queued `lineup_check` (earliest due
+11-26 16:30 UTC) and 2 queued `self_check_in` (due 14:00 UTC), none overdue.
+The 26 sessions since the last sweep (12 `post_waivers`, 7 `board_reply`, 7
+`lineup_check`) all succeeded with their ending tool, plus 1 `self_check_in`
+skipped; no session events were errors. One Vercel "Task timed out after 800
+seconds" on `/.well-known/workflow/v1/step`, logged at 11-25 14:17:32 UTC: it
+is board_reply 11676 (mistral-large-3), whose model step stalled for 17.7 min
+and then resumed and ended with its ending tool at 14:36. This is the known
+stalled-provider-stream pattern (see 11-23), so it is recorded only. Production
+serving (#103 build; the #114 docs deploy was cancelled by the ignore step).
