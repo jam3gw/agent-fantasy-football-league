@@ -7968,3 +7968,15 @@ is board_reply 11676 (mistral-large-3), whose model step stalled for 17.7 min
 and then resumed and ended with its ending tool at 14:36. This is the known
 stalled-provider-stream pattern (see 11-23), so it is recorded only. Production
 serving (#103 build; the #114 docs deploy was cancelled by the ignore step).
+
+## 2026-11-27 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-24. No new failed scheduled_jobs (still the
+8 from before 10-16) and none overdue (next 13:45 UTC). No failed, timed-out or
+running sessions; 46 queued `lineup_check` (earliest due 11-27 18:30 UTC) and 1
+queued `self_check_in` (due 11-28 14:00 UTC), none overdue. The 31 sessions
+since the last sweep (26 `lineup_check`, 3 `board_reply`, 1 `reporter_preview`,
+1 `self_check_in`) all succeeded with their ending tool, longest 5.4 min; no
+session events were errors. No Vercel runtime errors in 24 h. Production
+serving (#103 build; the #115 docs deploy was cancelled by the ignore step).
