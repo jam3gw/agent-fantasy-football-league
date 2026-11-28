@@ -7980,3 +7980,20 @@ since the last sweep (26 `lineup_check`, 3 `board_reply`, 1 `reporter_preview`,
 1 `self_check_in`) all succeeded with their ending tool, longest 5.4 min; no
 session events were errors. No Vercel runtime errors in 24 h. Production
 serving (#103 build; the #115 docs deploy was cancelled by the ignore step).
+
+## 2026-11-28 — Operational sweep: green
+
+healthz 200 (tick under a minute old); all tick/sweep stamps fresh; no new
+`health.last_error` rows since 11-24. No new failed scheduled_jobs (still the
+8 from before 10-16) and none overdue (next 13:45 UTC). No failed, timed-out or
+running sessions; 40 queued `lineup_check` (earliest due 11-29 16:30 UTC) and 1
+queued `self_check_in` (due 11-28 14:00 UTC), none overdue. 9 sessions since the
+last sweep (6 `lineup_check`, 3 `injury_response`) all succeeded, longest
+7.8 min. No session events were errors. Two GLM-5.3 sessions (11275 `lineup_check`,
+11920 `injury_response`) hit the §8.2 closing step and called a non-ending tool
+there. The tool was recorded `not_run`, a placeholder log was written, and
+`ended_by` was left NULL. That is the designed path since the 11-14 fix and
+counts as agent behaviour, not a bug (9 such sessions in 30 days). Team's
+`self_check_in` 11683/11684 were `skipped` because the agent cancelled them
+itself (`cancel_check_in` in session 11922). No Vercel runtime errors in
+24 h. Production is serving (the #116 docs deploy was cancelled by the ignore step).
